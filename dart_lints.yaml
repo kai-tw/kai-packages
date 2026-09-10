@@ -53,6 +53,31 @@ areas:
       - "packages/image_codec/lib/src/engine_image_boundary.dart"
     disable:
       - avoid_catching_base_exception
+  # Declared before `test` below, for the same first-match reason.
+  #
+  # ONE file, and it must stay one file. This test proves that a headless
+  # render produces real glyphs rather than the filled rectangles `flutter
+  # test` substitutes when no font is loaded, and it proves it by counting dark
+  # pixels against a light ground. The two colours are therefore the
+  # MEASUREMENT INSTRUMENT, not presentation: a `colorScheme` pairing is chosen
+  # for comfortable reading, which narrows exactly the gap being measured and
+  # turns a categorical check ("~100% ink means boxes") into a threshold to be
+  # re-tuned per theme. The rule's premise — that a colour here is a design
+  # decision a token should own — is false for this file and only for this one.
+  #
+  # First-match-wins also means this area REPLACES `test` for this file rather
+  # than adding to it, so `test`'s own disables are repeated below. Without
+  # them the one file with an exemption would silently be held to a *stricter*
+  # bar than every other test in the repo — the opposite of what the entry is
+  # for. Keep the two lists in step.
+  design_mockups_ink_measurement:
+    paths:
+      - "packages/design_mockups/test/no_tofu_test.dart"
+    disable:
+      - avoid_hardcoded_color
+      - avoid_record_types
+      - avoid_empty_catch
+      - avoid_catching_base_exception
   production:
     paths:
       - "packages/*/lib/**"

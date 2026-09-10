@@ -1,0 +1,44 @@
+name: design_mockups
+description: >-
+  A headless design-mockup renderer for Flutter apps: mounts the real widgets
+  and photographs them across breakpoint x state x theme x locale, with no
+  simulator and no golden files.
+version: 0.1.0
+repository: https://github.com/kai-tw/kai-packages/tree/main/packages/design_mockups
+issue_tracker: https://github.com/kai-tw/kai-packages/issues
+# Consumed by git tag, not from pub.dev — which is what lets the annotation
+# half stay a sibling path dependency instead of needing its own release.
+publish_to: none
+
+environment:
+  sdk: ^3.8.0
+
+resolution: workspace
+
+dependencies:
+  # The preview scanner reads the consuming app's source to build the spec
+  # registry, so the analyzer is a real dependency of the `scan` entry point,
+  # not a dev-time convenience.
+  analyzer: ">=9.0.0 <11.0.0"
+  # The annotation half, in its own zero-dependency package so an app's `lib/`
+  # can declare previews without importing this harness. Re-exported from the
+  # barrel, so a fixture still needs only one import.
+  design_mockups_annotations:
+    path: ../design_mockups_annotations
+  flutter:
+    sdk: flutter
+  # `flutter_test` is a RUNTIME dependency here, not a dev one: this package's
+  # whole surface is a `flutter test` harness, so `WidgetTester` is in its
+  # public API. A consuming app still lists `design_mockups` under
+  # `dev_dependencies` — that is where the constraint belongs, and it is what
+  # keeps the harness out of the app's release compilation root.
+  flutter_test:
+    sdk: flutter
+  path: ^1.9.0
+  # The scanner reads the consuming project's own `pubspec.yaml` for its
+  # package name, so previews under `lib/` are imported by `package:` URI
+  # rather than by a path that only resolves from one directory.
+  yaml: ^3.1.2
+
+dev_dependencies:
+  flutter_lints: ^6.0.0

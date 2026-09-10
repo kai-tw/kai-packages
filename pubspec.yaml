@@ -12,6 +12,8 @@ workspace:
   - packages/connectivity_status
   - packages/dart_lints
   - packages/dart_mutants
+  - packages/design_mockups
+  - packages/design_mockups_annotations
   - packages/hybrid_logical_clock
   - packages/image_codec
   - packages/log_system
