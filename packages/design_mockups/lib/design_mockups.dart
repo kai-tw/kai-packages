@@ -23,10 +23,9 @@
 /// and `test/`. A widget that wants to declare its own previews imports
 /// `package:design_mockups_annotations/design_mockups_annotations.dart`
 /// instead — that package exists precisely so `lib/` never has to reach for
-/// this one.
+/// this one, and the two are declared independently rather than one
+/// re-exporting the other (see `src/model/mockup_sizes.dart`).
 library;
-
-export 'package:design_mockups_annotations/design_mockups_annotations.dart';
 
 export 'src/config/mockup_harness_config.dart';
 export 'src/fonts/host_font_candidates.dart';
@@ -35,6 +34,7 @@ export 'src/fonts/mockup_font_family.dart';
 export 'src/fonts/mockup_font_report.dart';
 export 'src/fonts/mockup_fonts.dart';
 export 'src/model/mockup_screen.dart';
+export 'src/model/mockup_sizes.dart';
 export 'src/model/mockup_spec.dart';
 export 'src/model/mockup_state.dart';
 export 'src/model/mockup_variant.dart';

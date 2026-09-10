@@ -1,6 +1,6 @@
 import 'dart:ui';
 
-import 'package:design_mockups_annotations/design_mockups_annotations.dart';
+import 'mockup_sizes.dart';
 
 /// A render viewport for one Material 3 `WindowSize` band.
 ///
