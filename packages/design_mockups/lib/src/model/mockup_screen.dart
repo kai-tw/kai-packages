@@ -1,6 +1,6 @@
-import 'package:design_mockups_annotations/design_mockups_annotations.dart';
 import 'package:flutter/widgets.dart';
 
+import 'mockup_sizes.dart';
 import 'mockup_state.dart';
 
 /// One screen of a spec, across the states and bands it declares.

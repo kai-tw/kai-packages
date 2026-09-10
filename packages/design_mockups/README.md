@@ -57,6 +57,16 @@ dependency, so a file in `lib/` can import it. `design_mockups` itself depends
 on `flutter_test` and must stay a dev dependency, imported only from `tool/`
 and `test/`.
 
+**Declare both, independently.** The two packages do not depend on each other,
+so an app lists `design_mockups_annotations` under `dependencies` and
+`design_mockups` under `dev_dependencies`, each pinned on its own. That is
+forced rather than chosen: pub identifies a dependency by its source
+description, so if this package reached its sibling by path, that path — seen
+through a git checkout — would never unify with the app's own tag pin, and
+version solving would fail with `design_mockups from git is forbidden`. Both
+packages therefore spell the `MockupSizes` band ids for their own users; the
+API is `Set<String>`, so the two spellings are the same values and mix freely.
+
 **Or write a spec.** For a screen the annotation cannot express — a real page
 wired through a service locator, whose mock registration cannot live in `lib/`,
 or one frame composed from several widgets at once.
