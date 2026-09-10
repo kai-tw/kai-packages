@@ -1,0 +1,17 @@
+name: design_mockups_annotations
+description: >-
+  The annotation a widget carries so the design_mockups renderer can find it —
+  a pure-Dart, zero-dependency package so an app's lib/ can import it without
+  taking on the harness.
+version: 0.1.0
+repository: https://github.com/kai-tw/kai-packages/tree/main/packages/design_mockups_annotations
+issue_tracker: https://github.com/kai-tw/kai-packages/issues
+
+environment:
+  sdk: ^3.8.0
+
+resolution: workspace
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ">=1.25.0 <2.0.0"

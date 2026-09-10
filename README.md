@@ -7,6 +7,8 @@ never disagree about a dependency version.
 | Package | |
 |---|---|
 | [`hybrid_logical_clock`](packages/hybrid_logical_clock) | Timestamps two devices order the same way without agreeing on a wall clock. |
+| [`design_mockups`](packages/design_mockups) | Photographs an app's real widgets across breakpoint × state × theme × locale, headless. |
+| [`design_mockups_annotations`](packages/design_mockups_annotations) | The `@MockupPreview` annotation, so a widget in `lib/` can declare its own renders. |
 | [`ui_kit`](packages/ui_kit) | A UI kit that shares Flutter components through my projects. |
 
 ## Working on it

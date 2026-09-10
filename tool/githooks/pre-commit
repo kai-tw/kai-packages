@@ -17,6 +17,20 @@ cd "$(git rev-parse --show-toplevel)" || exit 0
 staged_dart=$(git diff --cached --name-only --diff-filter=d -- '*.dart')
 [ -n "$staged_dart" ] || exit 0
 
+# Read the index BEFORE this, and drop it after: git exports GIT_DIR (and
+# friends) to every hook, and Flutter's `dart` wrapper runs `git` internally to
+# locate its OWN SDK checkout. An inherited GIT_DIR sends those calls at THIS
+# repository instead, so Flutter mis-detects itself and hands off to plain
+# `dart pub`, which cannot resolve a Flutter-SDK dependency. The failure reads
+# as "version solving failed / Flutter users should use `flutter pub`", which
+# names nothing about hooks and sends you looking at pubspec.yaml.
+#
+# It bites in a WORKTREE, where GIT_DIR is an absolute path somewhere else
+# entirely. In the main tree the value is a relative `.git`, which happens to
+# resolve to Flutter's own once the wrapper cds into FLUTTER_ROOT — which is
+# why this went unnoticed until a worktree tried to commit.
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE GIT_PREFIX
+
 # shellcheck disable=SC2086  # intentional word-splitting on newline-separated paths
 if ! fmt_out=$(dart format --output=none --set-exit-if-changed $staged_dart 2>&1); then
   echo "BLOCKED by pre-commit: dart format would change staged files." >&2
