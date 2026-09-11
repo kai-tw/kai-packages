@@ -106,6 +106,41 @@ void main() {
     );
   });
 
+  group('selectedByCoverage', () {
+    test(
+      '[partition] a completed run always says whether tests were selected, '
+      'false included',
+      () {
+        expect(
+          const MutationRunReport.completed(
+            <FileMutationReport>[],
+          ).toJson()['selectedByCoverage'],
+          isFalse,
+        );
+        expect(
+          const MutationRunReport.completed(
+            <FileMutationReport>[],
+            selectedByCoverage: true,
+          ).toJson()['selectedByCoverage'],
+          isTrue,
+        );
+      },
+    );
+
+    test(
+      '[boundary] an aborted run omits it — nothing was selected or run',
+      () {
+        expect(
+          const MutationRunReport.aborted(
+            AbortKind.baselineFailed,
+            'red',
+          ).toJson().containsKey('selectedByCoverage'),
+          isFalse,
+        );
+      },
+    );
+  });
+
   group('the baseline and the budget', () {
     test(
       '[partition] toJson reports both in seconds, to the millisecond',

@@ -11,11 +11,14 @@ import '../operators.dart';
 import 'compile_safety_gate.dart';
 import 'file_mutation_report.dart';
 import 'mutant_result.dart';
+import 'mutant_scope.dart';
 import 'mutant_verdict.dart';
 import 'mutated_file_registry.dart';
 import 'mutation_run_report.dart';
 import 'process_command.dart';
 import 'test_compilation_cache.dart';
+import 'test_invocation.dart';
+import 'test_selection.dart';
 
 /// Runs every operator's mutants against [testCommand], one at a time, and
 /// scores the result.
@@ -35,6 +38,8 @@ class MutationTestRunner {
     this.mutantTimeout = const Duration(seconds: 30),
     this.baselineFactor = defaultBaselineFactor,
     Duration? baselineTimeout,
+    this.selectByCoverage = false,
+    this.onSelectionFallback,
   }) : operators = operators ?? defaultOperators(),
        baselineTimeout = baselineTimeout ?? mutantTimeout * 10 {
     if (baselineFactor.isNaN ||
@@ -64,6 +69,32 @@ class MutationTestRunner {
   /// [fallbackCompileSafetyGate] will judge instead — a decision the run
   /// makes on its own, which a person should hear about.
   final void Function(String filePath)? onGateFallback;
+
+  /// Run each mutant against only the test files that enter the function it
+  /// sits in, and score a mutant in a function no test enters as undetected
+  /// without running anything — see [TestSelection] and [executableScope].
+  ///
+  /// Selecting fewer tests can lose a detection, never invent one: a test
+  /// that fails when selected runs, and fails, in the full command too. A
+  /// selected exit that is neither a pass nor a failed test — 79 when the
+  /// chosen files ran no test at all, or a tool error — is re-asked of the
+  /// full command. So a selected score can only err low, and the known ways
+  /// it does are: a mutant that changes a declaration's inferred type can
+  /// break the compilation of a test file that never enters its function (in
+  /// full, that reads as `detected`); code reached only from a subprocess or
+  /// `Isolate.spawnUri`, whose coverage the test runner does not collect; and
+  /// code whose execution depends on timing or randomness, which one coverage
+  /// pass can miss.
+  ///
+  /// Needs a `dart test …` or `flutter test …` [testCommand] whose test
+  /// files this package can list the same way the runner does. Anything
+  /// else — see `collectCoverage` for every refusal — or a coverage pass that
+  /// fails, runs every mutant against the full command and says so through
+  /// [onSelectionFallback].
+  final bool selectByCoverage;
+
+  /// Called with the reason coverage selection was asked for and not used.
+  final void Function(String reason)? onSelectionFallback;
 
   final List<MutationOperator> operators;
 
@@ -199,14 +230,19 @@ class MutationTestRunner {
         gates[filePath] = gate;
       }
 
+      final TestSelection? selection = await _selection();
+
       final List<FileMutationReport> fileReports = <FileMutationReport>[];
       for (final String filePath in targets) {
-        fileReports.add(await _runFile(filePath, gates[filePath]!, budget));
+        fileReports.add(
+          await _runFile(filePath, gates[filePath]!, budget, selection),
+        );
       }
       return MutationRunReport.completed(
         fileReports,
         baselineDuration: baseline,
         mutantTimeout: budget,
+        selectedByCoverage: selection != null,
       );
     } finally {
       // A safety net, not the primary mechanism — _runOne already restores
@@ -232,13 +268,43 @@ class MutationTestRunner {
     return fallback;
   }
 
+  /// The coverage pass, run once after the baseline when [selectByCoverage]
+  /// asks for it. `null` when it does not, and — with the reason reported —
+  /// when the test command cannot be taken apart or the pass fails; every
+  /// mutant then runs the full command.
+  Future<TestSelection?> _selection() async {
+    if (!selectByCoverage) {
+      return null;
+    }
+    final TestInvocation? invocation = TestInvocation.parse(testCommand);
+    if (invocation == null) {
+      onSelectionFallback?.call(
+        'the test command is not `dart test …` or `flutter test …`',
+      );
+      return null;
+    }
+    _testCache.clear();
+    return collectCoverage(
+      invocation,
+      timeout: baselineTimeout,
+      onFailure: (String reason) => onSelectionFallback?.call(reason),
+    );
+  }
+
   Future<FileMutationReport> _runFile(
     String filePath,
     CompileSafetyGate gate,
     Duration budget,
+    TestSelection? selection,
   ) async {
     final String originalSource = await File(filePath).readAsString();
     final List<Mutant> mutants = _collectMutants(filePath, originalSource);
+    // No parse, and so no scope, where the selection cannot speak for this
+    // file — every mutant in it then runs the full command.
+    final ParseStringResult? parsed =
+        selection == null || !selection.speaksFor(originalSource)
+        ? null
+        : parseString(content: originalSource, throwIfDiagnostics: false);
 
     int detected = 0;
     int undetected = 0;
@@ -249,20 +315,21 @@ class MutationTestRunner {
     final List<MutantResult> timedOutResults = <MutantResult>[];
 
     for (final Mutant mutant in mutants) {
-      final MutantVerdict verdict = await _runOne(
+      final MutantResult result = await _runOne(
         mutant,
         originalSource,
         gate,
         budget,
+        _commandFor(mutant, selection, parsed),
       );
-      switch (verdict) {
+      switch (result.verdict) {
         case MutantVerdict.invalid:
           invalid++;
           // Kept, not just counted — same reasoning as timedOutResults
           // below: a bare count cannot tell a caller which lines the
           // compile-safety gate rejected, or whether 27 of them share one
           // cause.
-          invalidResults.add(MutantResult(mutant: mutant, verdict: verdict));
+          invalidResults.add(result);
         case MutantVerdict.timeout:
           timedOut++;
           // Kept, not just counted. A timed-out mutant is real code that went
@@ -271,14 +338,12 @@ class MutationTestRunner {
           // at it. Measured: a mutant that timed out on every round of a file
           // was therefore never scored at all — permanently invisible behind a
           // count nobody reads per-mutant.
-          timedOutResults.add(MutantResult(mutant: mutant, verdict: verdict));
+          timedOutResults.add(result);
         case MutantVerdict.detected:
           detected++;
         case MutantVerdict.undetected:
           undetected++;
-          undetectedResults.add(
-            MutantResult(mutant: mutant, verdict: verdict),
-          );
+          undetectedResults.add(result);
       }
     }
 
@@ -312,24 +377,70 @@ class MutationTestRunner {
     return mutants;
   }
 
-  /// Applies [mutant] to disk, checks compile-safety, runs [testCommand] for
-  /// at most [budget] if it passed that gate, then restores the file before
+  /// What [mutant] runs: [testCommand] without a selection or a parse to
+  /// scope it by, otherwise whatever the selection says — `null` for "no
+  /// test enters it".
+  ProcessCommand? _commandFor(
+    Mutant mutant,
+    TestSelection? selection,
+    ParseStringResult? parsed,
+  ) {
+    if (selection == null || parsed == null) {
+      return testCommand;
+    }
+    return selection.commandFor(
+      mutant,
+      executableScope(parsed.unit, parsed.lineInfo, mutant.offset),
+      testCommand,
+    );
+  }
+
+  /// Whether a finished run's exit code is a verdict: 0, the tests passed,
+  /// or 1, a test failed. Anything else from a selected run — 79 when it ran
+  /// no test at all, or a usage or tool error — is not.
+  static bool _isVerdict(int? exitCode) =>
+      exitCode == null || exitCode == 0 || exitCode == 1;
+
+  /// Applies [mutant] to disk, checks compile-safety, runs [command] for at
+  /// most [budget] if it passed that gate, then restores the file before
   /// returning — regardless of which branch was taken, so a thrown exception
-  /// here still leaves the file clean.
-  Future<MutantVerdict> _runOne(
+  /// here still leaves the file clean. A `null` [command] means no test
+  /// reaches the mutant: it is scored undetected, and marked so, unrun.
+  ///
+  /// The gate comes before that on purpose: a mutant that does not compile
+  /// is `invalid` whether or not anything covers it.
+  Future<MutantResult> _runOne(
     Mutant mutant,
     String originalSource,
     CompileSafetyGate gate,
     Duration budget,
+    ProcessCommand? command,
   ) async {
     _registry.track(mutant.filePath, originalSource);
     await File(mutant.filePath).writeAsString(mutant.applyTo(originalSource));
     try {
       if (!await gate.compiles(mutant.filePath)) {
-        return MutantVerdict.invalid;
+        return MutantResult(mutant: mutant, verdict: MutantVerdict.invalid);
+      }
+      if (command == null) {
+        return MutantResult(
+          mutant: mutant,
+          verdict: MutantVerdict.undetected,
+          uncovered: true,
+        );
       }
       _testCache.clear();
-      final int? exitCode = await testCommand.run(timeout: budget);
+      int? exitCode = await command.run(timeout: budget);
+      if (!identical(command, testCommand) && !_isVerdict(exitCode)) {
+        // Neither a pass nor a failed test: 79 when the selected files ran
+        // no test at all — a file that reaches the function while declaring
+        // its tests, whose tests a filter skips, or that declares none — and
+        // the usage and tool errors besides. None is a failed assertion, and
+        // reading one as `detected` would invent a detection the full command
+        // does not make. Ask the full command.
+        _testCache.clear();
+        exitCode = await testCommand.run(timeout: budget);
+      }
       if (exitCode == null) {
         // A mutant that hangs the suite is not neutral evidence — it often
         // means the mutation introduced a genuine infinite loop, which is
@@ -340,9 +451,14 @@ class MutationTestRunner {
         // test that never actually ran to a real assertion. Kept as its own
         // bucket, excluded from the score like `invalid`, rather than
         // guessed into either side.
-        return MutantVerdict.timeout;
+        return MutantResult(mutant: mutant, verdict: MutantVerdict.timeout);
       }
-      return exitCode == 0 ? MutantVerdict.undetected : MutantVerdict.detected;
+      return MutantResult(
+        mutant: mutant,
+        verdict: exitCode == 0
+            ? MutantVerdict.undetected
+            : MutantVerdict.detected,
+      );
     } finally {
       _registry.restore(mutant.filePath);
     }

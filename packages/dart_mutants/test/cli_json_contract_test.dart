@@ -84,6 +84,10 @@ void main() {
       final Map<String, Object?> fileReport =
           files.values.single as Map<String, Object?>;
       expect(fileReport['undetected'], 1);
+      // Without --select-by-coverage: the run says it did not select, and
+      // no survivor is called uncovered.
+      expect(json['selectedByCoverage'], isFalse);
+      expect(fileReport['uncovered'], 0);
       // The budget each mutant actually got, next to what it was derived
       // from — neither is necessarily the --mutant-timeout that was passed.
       final num baseline = json['baselineSeconds']! as num;
@@ -92,6 +96,57 @@ void main() {
       expect(budget, greaterThanOrEqualTo(30));
       expect(budget, greaterThanOrEqualTo(baseline * 4 - 0.001));
     },
+  );
+
+  test(
+    '[partition] --select-by-coverage marks a mutant no test executes as '
+    'uncovered, per mutant and per file, and says the run was selected',
+    () async {
+      final Directory dir = await _fixtureWithOneUndetectedMutant();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      // Loaded by a test, but only `covered` is ever called: `neglected`'s
+      // line is reported by coverage, at zero hits.
+      File(p.join(dir.path, 'lib', 'partly.dart')).writeAsStringSync(
+        "String covered(bool b) => b ? 'yes' : 'no';\n"
+        "String neglected(bool b) => b ? 'yes' : 'no';\n",
+      );
+      File(p.join(dir.path, 'test', 'partly_test.dart')).writeAsStringSync(
+        "import 'package:fixture/partly.dart';\n"
+        "import 'package:test/test.dart';\n\n"
+        'void main() {\n'
+        "  test('covered', () {\n"
+        "    expect(covered(true), 'yes');\n"
+        "    expect(covered(false), 'no');\n"
+        '  });\n'
+        '}\n',
+      );
+
+      final ProcessResult result = await Process.run('dart', <String>[
+        'run',
+        _binPath,
+        '--test-command',
+        'dart test',
+        '--select-by-coverage',
+        '--json',
+        'lib/partly.dart',
+      ], workingDirectory: dir.path);
+
+      final Map<String, Object?> json =
+          jsonDecode(result.stdout as String) as Map<String, Object?>;
+      expect(json['selectedByCoverage'], isTrue, reason: '${result.stderr}');
+      final Map<String, Object?> file =
+          (json['files']! as Map<String, Object?>)['lib/partly.dart']!
+              as Map<String, Object?>;
+      expect(file['detected'], 1);
+      expect(file['undetected'], 1);
+      expect(file['uncovered'], 1);
+      final Map<String, Object?> survivor =
+          (file['undetectedMutants']! as List<Object?>).single!
+              as Map<String, Object?>;
+      expect(survivor['line'], 2);
+      expect(survivor['uncovered'], isTrue);
+    },
+    timeout: const Timeout(Duration(seconds: 90)),
   );
 
   for (final (String flag, String value) in <(String, String)>[

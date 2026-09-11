@@ -1,4 +1,65 @@
-## Unreleased
+## 0.2.7
+
+**`--select-by-coverage` runs each mutant against only the tests that
+reach it.** Measured on a consuming app's real mutation scope, 44 test files
+and 314 tests, one `flutter test` took 23–24s, of which 22.3–22.7s was
+loading and compiling the 44 test files. The tests themselves barely
+registered, and every mutant paid for every file whether or not any of them
+could reach it.
+
+With the flag, each test file runs once with coverage on after the baseline
+(`dart test` in one run; `flutter test` once per file, since it writes one
+combined report per run), recording which test files entered which
+functions. Each mutant then runs only the test files that entered the
+function it sits in. A mutant in a function no test entered is scored
+`undetected` without a run, and marked `uncovered`. A mutant coverage
+cannot speak for — outside any function, in a `const` constructor, or in a
+file no report mentions — runs the full command.
+
+**Functions, not lines, because the VM's line coverage undercounts.**
+Measured: `final s = b ? 'x' : g();` run with `b` true is reported at zero
+hits, since its only instrumented point is the call it skipped. An early
+line-level version of this change called the ternary swap on such a line
+uncovered while a test catches it; a function's entry is always
+instrumented. A regression test pins this, and fails against the
+line-level version.
+
+A test that fails in a selected run fails in the full command too, so
+selection can lose a detection but not invent one. A selected outcome that
+is neither a pass nor a failed test, such as exit 79 when the chosen files
+ran no test at all, is re-asked of the full command. Known ways a detection
+is lost: a mutant that changes an inferred type and breaks the compilation
+of a test file that never enters its function; code reached only through a
+subprocess or `Isolate.spawnUri`; code that runs only sometimes.
+
+Selection is refused wherever the coverage pass could see different tests
+than the full command runs, with a note on stderr and
+`selectedByCoverage: false`: a `--test-command` that is not `dart test …`
+or `flutter test …`; one that collects coverage itself, uses `--`, runs off
+the VM, or has an argument that is neither a known option's value nor an
+existing path; a `dart_test.yaml` setting `filename`, `include`, a platform,
+or `paths` for a command naming none; under `flutter test`, a test that
+imports `lib/` by relative path; and a coverage pass that fails, writes no
+report, or writes one in an unexpected shape. Under `flutter test` a file
+with `coverage:ignore` comments runs its mutants in full, since those
+comments can delete a function's entry from the report.
+
+Measured on three packages in this repository, in two rounds, with every
+verdict identical mutant by mutant (full → selected, round 1 / round 2):
+`clock_anchor` (430 mutants, `dart test`) 343s → 281s / 328s → 236s;
+`log_system` (182, `flutter test`) 317s → 174s / 260s → 185s; `ui_kit`
+(243, `flutter test`) 556s → 145s / 356s → 103s, where 118 of 132 survivors
+are in functions no test enters and are no longer run. Machine load moved
+the full runs by up to 200s between rounds, so compare within a round. A
+large app's scope has not been measured with the flag yet.
+
+The report gains `uncovered` on a mutant and a per-file count of them
+(inside `undetected`; the score is unchanged), and `selectedByCoverage` on
+every completed run, `false` included.
+
+Also documented: `flutter test --no-pub` skips a dependency check on every
+invocation — 0.17s a run on a small package here, 0.5–0.6s on one test file
+of a consuming app.
 
 **The compile-safety gate now runs in process by default.** Every mutant
 used to cost a fresh `dart analyze` process, which rebuilt the package's

@@ -86,6 +86,12 @@ class FileMutationReport {
 
   int get total => detected + undetected;
 
+  /// How many of [undetectedMutants] no test executed at all — see
+  /// [MutantResult.uncovered]. Always 0 unless tests are selected by
+  /// coverage.
+  int get uncovered =>
+      undetectedMutants.where((MutantResult r) => r.uncovered).length;
+
   /// `null` when [total] is 0 — a file with no mutants at all has no rate to
   /// report, and `0/0` is not `1.0`.
   double? get detectionRate => total == 0 ? null : detected / total;
@@ -95,6 +101,7 @@ class FileMutationReport {
     'total': total,
     'detected': detected,
     'undetected': undetected,
+    'uncovered': uncovered,
     'invalid': invalid,
     'timedOut': timedOut,
     'undetectedMutants': undetectedMutants

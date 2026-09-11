@@ -38,14 +38,22 @@ class MutationRunReport {
     this.abortReason, {
     this.baselineDuration,
     this.mutantTimeout,
-  }) : files = const <FileMutationReport>[];
+  }) : files = const <FileMutationReport>[],
+       selectedByCoverage = null;
 
   const MutationRunReport.completed(
     this.files, {
     this.baselineDuration,
     this.mutantTimeout,
+    this.selectedByCoverage = false,
   }) : abortKind = null,
        abortReason = null;
+
+  /// Whether each mutant ran only the test files that cover it. `false` on a
+  /// completed run that ran the full test command for every mutant — which
+  /// includes a run that asked for coverage selection and fell back, so a
+  /// caller can tell the two apart. `null` on an aborted run.
+  final bool? selectedByCoverage;
 
   /// How long the test command took against unmodified code, or `null` when
   /// it never finished.
@@ -75,6 +83,7 @@ class MutationRunReport {
     if (baselineDuration != null)
       'baselineSeconds': _seconds(baselineDuration!),
     if (mutantTimeout != null) 'mutantTimeoutSeconds': _seconds(mutantTimeout!),
+    if (selectedByCoverage != null) 'selectedByCoverage': selectedByCoverage,
     'files': <String, Object?>{
       for (final FileMutationReport f in files) f.filePath: f.toJson(),
     },

@@ -37,6 +37,28 @@ void main() {
   );
 
   test(
+    '[partition] an uncovered mutant says so, and only then — the key is '
+    'absent rather than false everywhere else',
+    () {
+      expect(
+        MutantResult(
+          mutant: _mutant(),
+          verdict: MutantVerdict.undetected,
+          uncovered: true,
+        ).toJson()['uncovered'],
+        isTrue,
+      );
+      expect(
+        MutantResult(
+          mutant: _mutant(),
+          verdict: MutantVerdict.undetected,
+        ).toJson().containsKey('uncovered'),
+        isFalse,
+      );
+    },
+  );
+
+  test(
     '[boundary] the verdict serialises as its enum name, not its index — '
     'index would silently renumber if the enum\'s declaration order ever '
     'changed',
