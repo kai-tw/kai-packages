@@ -1,3 +1,93 @@
+## Unreleased
+
+The three findings below are documentation only — no behaviour change. They
+come from measuring where a mutation run's time actually goes, and are written
+down so the next person does not have to re-run them. One of the three is a
+null result and is labelled as one. Every figure is from one package:
+`clock_anchor` — 26 files at the time, 430 mutants, pure Dart, `dart test`.
+Nothing here was measured against a Flutter package or against any other
+consumer, so read the ratios rather than the seconds.
+
+**`--fail-fast` belongs in your test command, and the gain is this package's
+rather than the flag's.** This package reads nothing but the
+test command's exit code, so every test that runs after the first failure is
+waste. Measured on `clock_anchor` over 40 detected mutants, timing the test
+command alone: mean wall time per run fell from 1.03s to 0.80s. Measured the
+same way but with 0.2.6's clearing suppressed, the same flag takes the same
+suite from 0.81s to 12.54s — the sign inverts. Why is not established; four
+wall-clock means cannot establish a mechanism.
+
+Nothing this package exposes can suppress the clearing, so the recommendation
+stands unconditionally for a caller here. It is reported because it locates
+the benefit: it belongs to this package's cold-every-run inner loop rather
+than to `--fail-fast`, and does not transfer to a mutation runner that reuses
+its kernel cache. The README now says so beside the recommendation.
+
+**Clearing `.dart_tool/test/` once per file instead of once per mutant was
+measured, and the experiment could not tell the two apart.** Six full runs
+across four frequencies (per-mutant ×3, per-file, never, and keeping the
+cache but forcing invalidation through the file's mtime) produced five
+byte-identical verdict files, all four frequencies among them. That is a null
+result, not a refutation of per-file: on this corpus per-file was exactly as
+correct as per-mutant, and cheaper. The reason it proves nothing in either
+direction is that the corpus had no *verified* positive control: the one
+mutant known to be sensitive — `NtpPacket.kissCode`, which motivated 0.2.6 —
+scores `detected` today even with the cache never cleared. Whether any of the
+other 429 would have discriminated the frequencies is not something six
+identical verdict files can separate from "the bug is gone"; that ambiguity
+is the null result, not an explanation of it.
+
+The saving itself is softer than one number suggests. Per-mutant is the mean
+of three runs — 856s, 872s, 938s — so the within-condition spread is about as
+wide as the effect, and per-file is a single run at 793s. Every per-mutant run
+was slower than every non-per-mutant run (793s, 797s, 803s), so the direction
+is solid; the magnitude is not. Against per-file's 793s the three per-mutant
+runs give 7.4%, 9.1% and 15.5%, so "~11%" is only the gap between the means,
+and measuring the fastest per-mutant run against `never` instead drops the
+floor to 6.2%.
+
+The per-mutant clearing is **kept**, and not because the measurement
+vindicated it. It stays because what the runs establish is narrow: 0.2.6's
+false negative does not reproduce on this package, on this SDK, with the one
+mutant known to have caught it no longer sensitive — which is not the same as
+the bug being gone.
+
+Worth stating plainly, because it cuts against keeping it: 0.2.6's bug was
+**score-deflating**, not inflating. A killed mutant scored `undetected` reads
+the detection rate *low*. And this package's own 0.2.1 entry argues that
+deflation is the self-correcting direction — "an under-count reads as 'write
+more tests' and nobody files it, while the inflating direction is the one that
+silently passes a gate". So the guard being kept here protects against the
+less dangerous of the two directions, and the case for keeping it is caution
+about a bug that has not been shown to be gone, not the severity of the
+direction it guards. Buying the 11% honestly needs a corpus containing a
+mutant the frequencies actually disagree on.
+
+One thing these runs did **not** re-test: whether `flutter test` populates
+this directory. 0.2.6 inferred that it does not — from an absence, no
+`log_system` run having reproduced the false negative — and on that basis
+treated the clearing as free for a Flutter consumer. Every run here was
+`dart test` against a pure-Dart package, so that inference stands exactly
+where 0.2.6 left it, neither firmer nor weaker.
+
+**A verdict is not perfectly reproducible, and the error is one-sided.** Two
+runs of the same corpus, same inputs, differed on one mutant of 430; the
+outlier scored `detected` where hand-checking against a cold cache proves the
+mutant is `undetected`, and an equivalent mutant deleting the enclosing `if`
+was scored `undetected` in that same run. It has not reproduced — 0 failures
+in 500 runs of unmodified code, 0 spurious failures in 150 targeted runs of
+that exact mutant, 0 non-assertion failures across three instrumented full
+runs. One flip in six runs of 430 is the only denominator available, so
+~1 in 2,600 mutant evaluations; 0 in 150 bounds the per-mutant rate no
+tighter than a few percent. Cause unknown, and with n=1 there is nothing to
+attribute it to: the flip landed in a per-mutant-clearing run, but three of
+the six runs were per-mutant, so that is where chance would put a single
+event anyway — and it was also the first run executed, which is an equally
+available confound. The clearing is not ruled out; neither is it implicated.
+It is in the known limitations for the direction rather than the size: any
+non-zero exit reads as `detected`, so a spurious failure can only move a
+score up.
+
 ## 0.2.6
 
 **Fixes a false negative**: a mutant that a project's real test suite
