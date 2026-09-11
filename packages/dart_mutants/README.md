@@ -111,6 +111,38 @@ is the right move for score accuracy (see the output contract below) and it
 buys that accuracy with peak memory — worth knowing before raising it on a
 machine that is also running other suites.
 
+## `--fail-fast` belongs in your test command
+
+Runtime is mutant count times one test run, so the cheapest thing a caller
+can do is make that one run cheaper. This package only ever reads the test
+command's **exit code**; every test that runs after the first failure has
+already told it what it needed to know. Both `dart test` and `flutter test`
+support stopping there:
+
+```bash
+dart run dart_mutants \
+  --test-command "dart test --fail-fast" \
+  lib/foo.dart
+```
+
+Measured on `clock_anchor` over 40 detected mutants, timing the test
+command alone: mean wall time per run fell from **1.03s to 0.80s**, about a
+fifth. It does nothing for an undetected mutant — that one runs the whole
+suite either way — so the saving scales with your detection rate.
+
+**That saving depends on something this package does, and does not
+generalise.** Between mutants it deletes the test runner's incremental
+kernel cache under `.dart_tool/test/`, so every run starts cold. Measured
+the same way but with that deletion suppressed, the same flag takes the same
+suite from 0.81s to **12.54s** — the sign inverts. Why is not established;
+the measurement is four wall-clock means, and a run-to-run compilation
+effect is the obvious suspect rather than a demonstrated cause.
+
+Nothing exposed here can turn the deletion off, so the recommendation above
+holds as written. It is worth knowing anyway, because it says the benefit is
+a property of this package's inner loop rather than of `--fail-fast`: do not
+carry the number over to a mutation runner that reuses its kernel cache.
+
 ## What this package does not decide
 
 Which files to run against, how big a mutant budget to spend, what
@@ -185,6 +217,44 @@ real CLI binary, not just the internal report types:
 
 ## Known limitations
 
+- **A verdict is not perfectly reproducible, and the error is one-sided.**
+  Observed once, and worth knowing before gating on a percentage: two runs
+  of the same 430-mutant corpus, same inputs, differed on one mutant. The
+  outlier said `detected` where hand-checking against a cold cache proves
+  the mutant is `undetected` — and a second mutant in the same run, deleting
+  the *enclosing* `if` rather than its body and so semantically identical,
+  was scored `undetected` in that very run.
+
+  It has not reproduced: 0 failures in 500 runs of unmodified code, 0
+  spurious failures in 150 targeted runs of exactly that mutant, and 0
+  non-assertion failures across three instrumented full runs — which is what
+  a cache clear colliding with the test command's startup would have looked
+  like. One flip in six full runs of 430 mutants is the only denominator
+  there is, so call it 1 in ~2,600 mutant evaluations and note that a run of
+  0 in 150 bounds the per-mutant rate no tighter than a few percent.
+
+  The cause is **unknown**, and with one event there is nothing to pin it
+  on. The flip landed in a per-mutant-clearing run — but three of the six
+  runs were per-mutant, so a single event lands there by chance alone, and
+  that run was also the first one executed. Three instrumented runs rule out
+  one mechanism by which the clearing could produce it, which neither clears
+  the clearing nor implicates it.
+
+  What makes it worth a bullet rather than a shrug is the **direction**.
+  This package reads any non-zero exit as `detected`, so a spurious failure
+  can only ever move a score *up*, never down. Treat a single run's
+  percentage as carrying a small one-sided error. One free signal is already
+  in the report: two mutants that are *semantically the same edit* must score
+  the same, so when they do not, one verdict is wrong. That is how this one
+  surfaced — deleting a `return null;` was reported caught, while deleting
+  the whole `if` whose entire body was that `return` was not. Re-run the pair
+  to find out which.
+
+  This only works when the two really are equivalent, which containment alone
+  does not make them. Deleting `if (a > b) { … }` and mutating its `>` to
+  `>=` perturb different inputs, so a suite covering only `a == b` can
+  legitimately catch one and miss the other — that pair disagrees for a good
+  reason and is not evidence of anything.
 - **Sequential, not parallel.** Runtime is mutant count times one test run.
   Scoping to covered lines and running one file's mutants at a time in
   parallel are both real options for a project that needs it, deliberately
