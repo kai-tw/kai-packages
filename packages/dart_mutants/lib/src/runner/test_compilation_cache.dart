@@ -39,8 +39,8 @@ import 'package:path/path.dart' as p;
 /// the score, and a fast wrong number is worse than a slow right one.
 ///
 /// The obvious saving on that cost has already been measured, and came back
-/// empty. Clearing once per *file* instead is cheaper — 0.2.7 measured
-/// between 6% and 16% over `clock_anchor`, the spread being what three
+/// empty. Clearing once per *file* instead is cheaper — a re-measurement
+/// over `clock_anchor` put it between 6% and 16%, the spread being what three
 /// per-mutant runs against one per-file run can actually support. Six full
 /// runs across four clearing frequencies produced five byte-identical
 /// verdict files, all four frequencies among them — which is a **null
@@ -63,9 +63,10 @@ import 'package:path/path.dart' as p;
 ///
 /// Recorded so the next person to notice that saving knows the cheap
 /// experiment is spent, and that claiming it needs a corpus holding a mutant
-/// the frequencies actually disagree on. The full write-up is in `CHANGELOG.md`
-/// under 0.2.7; the one verdict that did vary across those runs is the
-/// README's known limitation on run-to-run reproducibility.
+/// the frequencies actually disagree on. The full write-up is in
+/// `CHANGELOG.md`, in the entry that added this paragraph; the one verdict
+/// that did vary across those runs is the README's known limitation on
+/// run-to-run reproducibility.
 class TestCompilationCache {
   const TestCompilationCache(this.workingDirectory);
 

@@ -1,12 +1,12 @@
-## 0.2.7
+## Unreleased
 
-Documentation only — no behaviour change. Three findings from measuring where
-a mutation run's time actually goes, written down so the next person does not
-have to re-run them. One of the three is a null result and is labelled as
-one. Every figure below is from one package: `clock_anchor` — 26 files as of
-this release, 430 mutants, pure Dart, `dart test`. Nothing here was measured
-against a Flutter package or against any other consumer, so read the ratios
-rather than the seconds.
+The three findings below are documentation only — no behaviour change. They
+come from measuring where a mutation run's time actually goes, and are written
+down so the next person does not have to re-run them. One of the three is a
+null result and is labelled as one. Every figure is from one package:
+`clock_anchor` — 26 files at the time, 430 mutants, pure Dart, `dart test`.
+Nothing here was measured against a Flutter package or against any other
+consumer, so read the ratios rather than the seconds.
 
 **`--fail-fast` belongs in your test command, and the gain is this package's
 rather than the flag's.** This package reads nothing but the
@@ -63,7 +63,7 @@ about a bug that has not been shown to be gone, not the severity of the
 direction it guards. Buying the 11% honestly needs a corpus containing a
 mutant the frequencies actually disagree on.
 
-One thing this release did **not** re-test: whether `flutter test` populates
+One thing these runs did **not** re-test: whether `flutter test` populates
 this directory. 0.2.6 inferred that it does not — from an absence, no
 `log_system` run having reproduced the false negative — and on that basis
 treated the clearing as free for a Flutter consumer. Every run here was
