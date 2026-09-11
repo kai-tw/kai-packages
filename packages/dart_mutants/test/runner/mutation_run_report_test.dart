@@ -105,4 +105,52 @@ void main() {
       },
     );
   });
+
+  group('the baseline and the budget', () {
+    test(
+      '[partition] toJson reports both in seconds, to the millisecond',
+      () {
+        final MutationRunReport report = MutationRunReport.completed(
+          <FileMutationReport>[_report('lib/src/foo.dart')],
+          baselineDuration: const Duration(milliseconds: 7250),
+          mutantTimeout: const Duration(milliseconds: 29001),
+        );
+
+        final Map<String, Object?> json = report.toJson();
+        expect(json['baselineSeconds'], 7.25);
+        expect(json['mutantTimeoutSeconds'], 29.001);
+      },
+    );
+
+    test(
+      '[boundary] a baseline that never finished has no duration to report, '
+      'and the keys are omitted rather than null',
+      () {
+        const MutationRunReport report = MutationRunReport.aborted(
+          AbortKind.baselineTimeout,
+          'slow',
+        );
+
+        final Map<String, Object?> json = report.toJson();
+        expect(json.containsKey('baselineSeconds'), isFalse);
+        expect(json.containsKey('mutantTimeoutSeconds'), isFalse);
+      },
+    );
+
+    test(
+      '[partition] a red baseline still reports how long it took, with no '
+      'budget — none was ever set',
+      () {
+        const MutationRunReport report = MutationRunReport.aborted(
+          AbortKind.baselineFailed,
+          'red',
+          baselineDuration: Duration(seconds: 3),
+        );
+
+        final Map<String, Object?> json = report.toJson();
+        expect(json['baselineSeconds'], 3.0);
+        expect(json.containsKey('mutantTimeoutSeconds'), isFalse);
+      },
+    );
+  });
 }

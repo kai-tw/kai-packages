@@ -287,6 +287,9 @@ MutationTestRunner _runnerWithGate(
   // Doubling costs ~5s on the one mutant that genuinely hangs. A suite that
   // measures whether OTHER suites are trustworthy cannot be the flaky one.
   mutantTimeout: const Duration(seconds: 10),
+  // Off: a flat 10s, not four cold full-fixture baselines, on that one
+  // hanging mutant. The factor has its own tests below.
+  baselineFactor: 0,
 );
 
 FileMutationReport _reportFor(MutationRunReport report, String name) =>
@@ -700,6 +703,9 @@ void main() {
         expect(report.aborted, isTrue);
         expect(report.abortKind, AbortKind.gateRejectsUnmodified);
         expect(report.abortReason, contains(second));
+        // The baseline passed and the budget was set before the gate check.
+        expect(report.baselineDuration, isNotNull);
+        expect(report.mutantTimeout, isNotNull);
         // The whole point: had the check been done lazily, file by file,
         // `first`'s mutant would have been written and put to the gate before
         // `second` was ever looked at. Every content the gate saw would then
@@ -817,6 +823,12 @@ void main() {
         expect(report.abortKind, AbortKind.baselineFailed);
         expect(report.abortReason, contains('red'));
         expect(report.files, isEmpty);
+        expect(report.baselineDuration, isNotNull);
+        expect(
+          report.mutantTimeout,
+          isNull,
+          reason: 'no mutant ever ran, so no budget was ever set',
+        );
         expect(
           File(p.join(dir.path, 'lib', 'detected.dart')).readAsStringSync(),
           detectedBefore,
@@ -942,7 +954,11 @@ void main() {
           compileSafetyGate: const AnalyzerProcessGate(
             ProcessCommand('dart', <String>['analyze']),
           ),
-          mutantTimeout: const Duration(seconds: 5),
+          // Far longer than the baseline's own budget, and longer than this
+          // test's own timeout: were the baseline still bounded by the
+          // mutant floor, this test would time out rather than pass.
+          mutantTimeout: const Duration(seconds: 60),
+          baselineTimeout: const Duration(seconds: 5),
         );
 
         final MutationRunReport report = await runner.run(<String>[
@@ -956,8 +972,129 @@ void main() {
         expect(report.abortReason, contains('did not finish'));
         expect(report.abortReason, contains('within the timeout'));
         expect(report.files, isEmpty);
+        expect(report.baselineDuration, isNull);
+        expect(report.mutantTimeout, isNull);
       },
       timeout: const Timeout(Duration(seconds: 30)),
+    );
+  });
+
+  group('a baseline slower than the mutant floor', () {
+    // The suite is green, merely slower than one mutant's floor — which used
+    // to abort the whole run as `baseline-timeout`, as if it had hung. The
+    // floor is 1s and the suite sleeps 2s on top of a cold `dart test`
+    // start, so every run outlasts the floor however idle the machine is.
+    Future<(Directory, String)> slowFixture() async {
+      final Directory dir = await _fixturePackage();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      File(p.join(dir.path, 'test', 'slow_test.dart')).writeAsStringSync('''
+import 'package:test/test.dart';
+
+void main() {
+  test('slow but green', () async {
+    await Future<void>.delayed(const Duration(seconds: 2));
+  });
+}
+''');
+      return (dir, p.join(dir.path, 'lib', 'detected.dart'));
+    }
+
+    MutationTestRunner runner(Directory dir, {double? factor}) =>
+        MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: _realGate(dir),
+          mutantTimeout: const Duration(seconds: 1),
+          baselineFactor: factor ?? MutationTestRunner.defaultBaselineFactor,
+          // Not the default ten times the floor: a cold full-fixture run
+          // plus the 2s sleep has blown far looser limits under load.
+          baselineTimeout: const Duration(seconds: 60),
+        );
+
+    test(
+      '[decision] runs to completion, and each mutant gets the baseline '
+      'times the factor — enough to be scored rather than timed out',
+      () async {
+        final (Directory dir, String target) = await slowFixture();
+
+        final MutationRunReport report = await runner(dir).run(<String>[
+          target,
+        ]);
+
+        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(
+          report.baselineDuration,
+          greaterThan(const Duration(seconds: 2)),
+        );
+        expect(
+          report.mutantTimeout,
+          report.baselineDuration! * MutationTestRunner.defaultBaselineFactor,
+        );
+        final FileMutationReport f = _reportFor(report, 'detected.dart');
+        expect(<int>[f.detected, f.timedOut], <int>[1, 0]);
+      },
+      timeout: const Timeout(Duration(seconds: 90)),
+    );
+
+    test(
+      '[decision] with the factor off, the same mutant gets the bare floor '
+      'and times out — the derived budget is what scored it above',
+      () async {
+        final (Directory dir, String target) = await slowFixture();
+
+        final MutationRunReport report = await runner(
+          dir,
+          factor: 0,
+        ).run(<String>[target]);
+
+        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(report.mutantTimeout, const Duration(seconds: 1));
+        final FileMutationReport f = _reportFor(report, 'detected.dart');
+        expect(<int>[f.detected, f.timedOut], <int>[0, 1]);
+      },
+      timeout: const Timeout(Duration(seconds: 90)),
+    );
+  });
+
+  group('the baseline factor', () {
+    test(
+      '[error] a negative, NaN or infinite factor is refused at construction',
+      () {
+        for (final double bad in <double>[
+          -1,
+          double.nan,
+          double.infinity,
+        ]) {
+          expect(
+            () => MutationTestRunner(
+              testCommand: const ProcessCommand('true', <String>[]),
+              compileSafetyGate: const AnalyzerProcessGate(
+                ProcessCommand('true', <String>[]),
+              ),
+              baselineFactor: bad,
+            ),
+            throwsArgumentError,
+            reason: '$bad',
+          );
+        }
+      },
+    );
+
+    test(
+      '[boundary] the baseline gets ten times the mutant floor unless told '
+      'otherwise',
+      () {
+        final MutationTestRunner runner = MutationTestRunner(
+          testCommand: const ProcessCommand('true', <String>[]),
+          compileSafetyGate: const AnalyzerProcessGate(
+            ProcessCommand('true', <String>[]),
+          ),
+          mutantTimeout: const Duration(seconds: 7),
+        );
+
+        expect(runner.baselineTimeout, const Duration(seconds: 70));
+      },
     );
   });
 }

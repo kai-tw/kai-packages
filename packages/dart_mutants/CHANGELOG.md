@@ -59,8 +59,9 @@ and a downstream caller was telling them apart by matching words in
 `abortReason` — which the new kind would have slipped past, landing on the
 "fix your suite" advice for a problem that is not in the suite. `abortKind`
 is part of the output contract; `abortReason` is for people and is not. The
-existing reason texts are unchanged in this release, so a caller still
-matching on them keeps working until it moves to the field.
+existing reason texts keep the words a caller was matching on in this
+release (the baseline-timeout one gains a number and a hint, below), so a
+caller still matching on them keeps working until it moves to the field.
 
 `flutter analyze` was documented as a valid `--analyze-command` and is not,
 as-is. Its exit code treats infos and warnings as fatal, so it rejects a
@@ -74,6 +75,34 @@ invoked this package without `--analyze-command` was affected. The
 unmodified-file check above catches a misconfigured `flutter analyze` only
 when the file already trips a lint before mutation; the flags are still what
 fixes it.
+
+**A slow green suite no longer aborts as if it had hung, and each mutant's
+budget now follows the baseline.** The baseline ran under `--mutant-timeout`,
+so a suite whose cold run took longer than one mutant's budget aborted the
+whole run as `baseline-timeout`. Its code comment already called it the
+longest run of the session. What changes:
+
+- **`--baseline-timeout`** is the baseline's own budget, ten times
+  `--mutant-timeout` by default. The abort text still says the command "did
+  not finish ... within the timeout", now with the number of seconds and a
+  hint to raise this flag. The other side of that trade: a suite that
+  genuinely hangs now takes 300s to abort at the defaults, not 30s.
+- **`--baseline-factor k`**, default 4: each mutant gets the larger of
+  `--mutant-timeout` and `k ×` the baseline's wall time in this run. This
+  can make the budget larger than the `--mutant-timeout` a caller passed,
+  which is the point; `0` restores the flat budget. The multiple is for load
+  drift, not for a cold-versus-warm compile: under `dart test` the kernel
+  cache is cleared before the baseline and every mutant alike. One
+  unmodified suite on a workstation running several sessions at once spread
+  3.2× between its quietest and busiest runs, which 3 would not have
+  covered.
+- **The report carries `baselineSeconds` and `mutantTimeoutSeconds`**, part
+  of the output contract, so a caller reading `timedOutMutants` knows what
+  they timed out against.
+
+A budget that is too small is not the safe side: a mutant that would have
+survived and timed out instead is dropped from the score and from the
+undetected list both.
 
 The three findings below are documentation only — no behaviour change. They
 come from measuring where a mutation run's time actually goes, and are written

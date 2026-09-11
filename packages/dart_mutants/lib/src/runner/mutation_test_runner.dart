@@ -33,7 +33,24 @@ class MutationTestRunner {
     this.onGateFallback,
     List<MutationOperator>? operators,
     this.mutantTimeout = const Duration(seconds: 30),
-  }) : operators = operators ?? defaultOperators();
+    this.baselineFactor = defaultBaselineFactor,
+    Duration? baselineTimeout,
+  }) : operators = operators ?? defaultOperators(),
+       baselineTimeout = baselineTimeout ?? mutantTimeout * 10 {
+    if (baselineFactor.isNaN ||
+        baselineFactor.isInfinite ||
+        baselineFactor < 0) {
+      throw ArgumentError.value(
+        baselineFactor,
+        'baselineFactor',
+        'must be a finite number, 0 or more',
+      );
+    }
+  }
+
+  /// See [baselineFactor]. 4 rather than 3 because the one drift
+  /// measured was 3.2×, which 3 would not have covered.
+  static const double defaultBaselineFactor = 4;
 
   final ProcessCommand testCommand;
   final CompileSafetyGate compileSafetyGate;
@@ -50,11 +67,35 @@ class MutationTestRunner {
 
   final List<MutationOperator> operators;
 
-  /// How long [testCommand] gets before a run is killed and scored as
-  /// [MutantVerdict.timeout] instead of waited on forever. Applied to the
-  /// baseline check too — an already-hanging test command is exactly as
-  /// unusable a baseline as an already-failing one.
+  /// The least time a mutant's test run gets before it is killed and scored
+  /// as [MutantVerdict.timeout] instead of waited on forever. A slow suite
+  /// gets more — see [baselineFactor].
   final Duration mutantTimeout;
+
+  /// Each mutant's budget is the larger of [mutantTimeout] and this many
+  /// times the baseline's own wall time in this run. `0` turns it off.
+  ///
+  /// The baseline is one sample, taken once. Under `dart test` the kernel
+  /// cache is cleared before the baseline and before every mutant (see
+  /// [TestCompilationCache]), so every run compiles from scratch and the
+  /// multiple is not there to cover a cold-versus-warm compile. It is there
+  /// for load: the same unmodified suite on a workstation running several
+  /// sessions at once was measured at 9s at its quietest and 29s at its
+  /// busiest.
+  ///
+  /// Too small a budget does not fail safe. A mutant that would have
+  /// survived and instead timed out leaves the score and the undetected list
+  /// both, which is the survivor a caller most needed to see.
+  final double baselineFactor;
+
+  /// How long the baseline gets. Separate from [mutantTimeout] because the
+  /// baseline has one job, telling a suite that finishes from one that
+  /// hangs, and the mutant budget is derived from it: a suite whose green
+  /// run took longer than one mutant's floor used to abort the whole run as
+  /// if it had hung. An already-hanging test command is exactly as unusable
+  /// a baseline as an already-failing one. Defaults to ten times
+  /// [mutantTimeout].
+  final Duration baselineTimeout;
 
   final MutatedFileRegistry _registry = MutatedFileRegistry();
 
@@ -105,15 +146,19 @@ class MutationTestRunner {
     _registry.armSignalRestore(beforeExit: ProcessCommand.killAllRunning);
     try {
       _testCache.clear();
+      final Stopwatch baselineClock = Stopwatch()..start();
       final int? baselineExitCode = await testCommand.run(
-        timeout: mutantTimeout,
+        timeout: baselineTimeout,
       );
+      final Duration baseline = baselineClock.elapsed;
       if (baselineExitCode == null) {
-        return const MutationRunReport.aborted(
+        return MutationRunReport.aborted(
           AbortKind.baselineTimeout,
           'the test command did not finish against unmodified code within '
-          'the timeout — refusing to score mutants against a baseline that '
-          'never even completes',
+          'the timeout (${baselineTimeout.inSeconds}s) — refusing to score '
+          'mutants against a baseline that never even completes. If the '
+          'suite is merely slow rather than hanging, raise the baseline '
+          'timeout (--baseline-timeout).',
         );
       }
       if (baselineExitCode != 0) {
@@ -122,8 +167,11 @@ class MutationTestRunner {
           'the test command failed against unmodified code (exit '
           '$baselineExitCode) — refusing to score mutants against a baseline '
           'that was already red',
+          baselineDuration: baseline,
         );
       }
+      final Duration derived = baseline * baselineFactor;
+      final Duration budget = derived > mutantTimeout ? derived : mutantTimeout;
 
       final Map<String, CompileSafetyGate> gates =
           <String, CompileSafetyGate>{};
@@ -144,6 +192,8 @@ class MutationTestRunner {
             'error does it too), or the file does not compile and no test '
             'the command runs loads it. Refusing to score mutants with a '
             'gate that rejects the code they start from.',
+            baselineDuration: baseline,
+            mutantTimeout: budget,
           );
         }
         gates[filePath] = gate;
@@ -151,9 +201,13 @@ class MutationTestRunner {
 
       final List<FileMutationReport> fileReports = <FileMutationReport>[];
       for (final String filePath in targets) {
-        fileReports.add(await _runFile(filePath, gates[filePath]!));
+        fileReports.add(await _runFile(filePath, gates[filePath]!, budget));
       }
-      return MutationRunReport.completed(fileReports);
+      return MutationRunReport.completed(
+        fileReports,
+        baselineDuration: baseline,
+        mutantTimeout: budget,
+      );
     } finally {
       // A safety net, not the primary mechanism — _runOne already restores
       // after every individual mutant. This only fires if something escaped
@@ -181,6 +235,7 @@ class MutationTestRunner {
   Future<FileMutationReport> _runFile(
     String filePath,
     CompileSafetyGate gate,
+    Duration budget,
   ) async {
     final String originalSource = await File(filePath).readAsString();
     final List<Mutant> mutants = _collectMutants(filePath, originalSource);
@@ -198,6 +253,7 @@ class MutationTestRunner {
         mutant,
         originalSource,
         gate,
+        budget,
       );
       switch (verdict) {
         case MutantVerdict.invalid:
@@ -256,14 +312,15 @@ class MutationTestRunner {
     return mutants;
   }
 
-  /// Applies [mutant] to disk, checks compile-safety, runs [testCommand] if
-  /// it passed that gate, then restores the file before returning —
-  /// regardless of which branch was taken, so a thrown exception here still
-  /// leaves the file clean.
+  /// Applies [mutant] to disk, checks compile-safety, runs [testCommand] for
+  /// at most [budget] if it passed that gate, then restores the file before
+  /// returning — regardless of which branch was taken, so a thrown exception
+  /// here still leaves the file clean.
   Future<MutantVerdict> _runOne(
     Mutant mutant,
     String originalSource,
     CompileSafetyGate gate,
+    Duration budget,
   ) async {
     _registry.track(mutant.filePath, originalSource);
     await File(mutant.filePath).writeAsString(mutant.applyTo(originalSource));
@@ -272,7 +329,7 @@ class MutationTestRunner {
         return MutantVerdict.invalid;
       }
       _testCache.clear();
-      final int? exitCode = await testCommand.run(timeout: mutantTimeout);
+      final int? exitCode = await testCommand.run(timeout: budget);
       if (exitCode == null) {
         // A mutant that hangs the suite is not neutral evidence — it often
         // means the mutation introduced a genuine infinite loop, which is

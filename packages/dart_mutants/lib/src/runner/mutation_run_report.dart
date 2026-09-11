@@ -33,12 +33,28 @@ enum AbortKind {
 /// The outcome of one whole run: why it stopped, if it stopped before
 /// scoring anything, or the per-file scores if it ran to completion.
 class MutationRunReport {
-  const MutationRunReport.aborted(this.abortKind, this.abortReason)
-    : files = const <FileMutationReport>[];
+  const MutationRunReport.aborted(
+    this.abortKind,
+    this.abortReason, {
+    this.baselineDuration,
+    this.mutantTimeout,
+  }) : files = const <FileMutationReport>[];
 
-  const MutationRunReport.completed(this.files)
-    : abortKind = null,
-      abortReason = null;
+  const MutationRunReport.completed(
+    this.files, {
+    this.baselineDuration,
+    this.mutantTimeout,
+  }) : abortKind = null,
+       abortReason = null;
+
+  /// How long the test command took against unmodified code, or `null` when
+  /// it never finished.
+  final Duration? baselineDuration;
+
+  /// The budget each mutant's test run got — `null` when the run stopped
+  /// before one was set. Not necessarily the `--mutant-timeout` a caller
+  /// passed: see `MutationTestRunner.baselineFactor`.
+  final Duration? mutantTimeout;
 
   /// Non-null exactly when the run never produced any scores at all — see
   /// `MutationTestRunner.run` for the pre-flight checks that can stop it. A
@@ -56,8 +72,14 @@ class MutationRunReport {
   Map<String, Object?> toJson() => <String, Object?>{
     if (abortKind != null) 'abortKind': abortKind!.wireName,
     if (abortReason != null) 'abortReason': abortReason,
+    if (baselineDuration != null)
+      'baselineSeconds': _seconds(baselineDuration!),
+    if (mutantTimeout != null) 'mutantTimeoutSeconds': _seconds(mutantTimeout!),
     'files': <String, Object?>{
       for (final FileMutationReport f in files) f.filePath: f.toJson(),
     },
   };
+
+  /// Millisecond precision — finer than a wall-clock test run means anything.
+  static double _seconds(Duration d) => d.inMilliseconds / 1000;
 }

@@ -84,6 +84,65 @@ void main() {
       final Map<String, Object?> fileReport =
           files.values.single as Map<String, Object?>;
       expect(fileReport['undetected'], 1);
+      // The budget each mutant actually got, next to what it was derived
+      // from — neither is necessarily the --mutant-timeout that was passed.
+      final num baseline = json['baselineSeconds']! as num;
+      final num budget = json['mutantTimeoutSeconds']! as num;
+      expect(baseline, greaterThan(0));
+      expect(budget, greaterThanOrEqualTo(30));
+      expect(budget, greaterThanOrEqualTo(baseline * 4 - 0.001));
+    },
+  );
+
+  for (final (String flag, String value) in <(String, String)>[
+    ('--baseline-timeout', '0'),
+    ('--baseline-timeout', 'soon'),
+    ('--baseline-factor', '-1'),
+    ('--baseline-factor', 'NaN'),
+    ('--baseline-factor', 'Infinity'),
+  ]) {
+    test('[error] $flag $value is a usage error, exit 64', () async {
+      final ProcessResult result = await Process.run('dart', <String>[
+        'run',
+        _binPath,
+        '--test-command',
+        'dart test',
+        flag,
+        value,
+        'lib/anything.dart',
+      ]);
+
+      expect(result.exitCode, 64);
+      // Not just the flag name: an unknown option names it too, so this is
+      // what tells "rejected the value" from "does not know the flag".
+      expect(result.stderr, contains('$flag must be'));
+    });
+  }
+
+  test(
+    '[partition] --baseline-factor 0 leaves the flat floor, and '
+    '--baseline-timeout is accepted',
+    () async {
+      final Directory dir = await _fixtureWithOneUndetectedMutant();
+      addTearDown(() => dir.deleteSync(recursive: true));
+
+      final ProcessResult result = await Process.run('dart', <String>[
+        'run',
+        _binPath,
+        '--test-command',
+        'dart test',
+        '--baseline-factor',
+        '0',
+        '--baseline-timeout',
+        '120',
+        '--json',
+        p.join(dir.path, 'lib', 'uncovered.dart'),
+      ], workingDirectory: dir.path);
+
+      final Map<String, Object?> json =
+          jsonDecode(result.stdout as String) as Map<String, Object?>;
+      expect(json['abortKind'], isNull, reason: '${json['abortReason']}');
+      expect(json['mutantTimeoutSeconds'], 30);
     },
   );
 
@@ -118,6 +177,10 @@ void main() {
       );
       expect(json['abortReason'], isNotNull);
       expect(json['files'], isEmpty);
+      // The baseline finished, red, so it has a duration; no mutant ran, so
+      // there was never a budget.
+      expect(json['baselineSeconds'], isA<num>());
+      expect(json.containsKey('mutantTimeoutSeconds'), isFalse);
     },
   );
 
