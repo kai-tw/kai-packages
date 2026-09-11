@@ -127,12 +127,44 @@ real signal a mutation testing tool can produce. But `package:test`'s own
 per-test timeout is cooperative, built on the event loop, and cannot
 preempt a synchronous `while (true) {}` that never yields to it; this
 package's own subprocess would then wait on the test command forever. Every
-mutant's test run is bounded by `--mutant-timeout` (default 30s, applied to
-the baseline check too) and killed with `SIGKILL` — which cannot be
-ignored — if it does not finish in time. A timed-out mutant is scored
+mutant's test run is bounded by a budget (below) and killed with `SIGKILL` —
+which cannot be ignored — if it does not finish in time. A timed-out mutant is scored
 `timeout`, not `detected`: a hang is not the same evidence as an assertion
 actually catching the wrong output, and counting it as caught would inflate
 the score the same way an uncompilable mutant would.
+
+### The budget follows the baseline
+
+Each mutant gets the larger of `--mutant-timeout` (default 30s) and
+`--baseline-factor` (default 4) times the baseline's own wall time in
+this run. The report carries both numbers, `baselineSeconds` and
+`mutantTimeoutSeconds`, so a caller can see what the budget actually was.
+`--baseline-factor 0` turns the derivation off and leaves the flat
+floor.
+
+The baseline is one sample, and the factor is there for load, not for
+compilation. Under `dart test` this package clears the kernel cache before
+the baseline and before every mutant, so every run compiles from scratch and
+`k × baseline` is not a generous allowance for a cold compile against warm
+ones.
+What it covers is the machine getting busier mid-run. The same unmodified
+suite, on a workstation running several sessions at once, took 9s at its
+quietest and 29s at its busiest, a 3.2× spread; 3 would not have covered
+that, so the default is 4. How cold a `flutter test` run is between mutants
+has not been measured here; the load argument applies either way.
+
+A budget that is too small does not fail safe. A timeout moves the score in
+either direction (see the output contract below), but one harm is certain:
+a mutant that would have survived and timed out instead leaves both the
+score and the undetected list, which is the survivor a caller most needed
+to see. A budget that is too large costs time on mutants that genuinely
+hang, each of which runs for the full budget, and memory (see below).
+
+The baseline itself gets `--baseline-timeout`, ten times `--mutant-timeout`
+by default. It used to get the mutant budget, so a green suite whose cold
+run took longer than one mutant's floor aborted the whole run as
+`baseline-timeout`, as if it had hung. Its only job is to tell a suite that
+finishes from one that does not.
 
 ### The kill goes to the whole process tree
 
@@ -161,10 +193,11 @@ Ctrl-C mid-run is not a second route to the same leak.
 
 ### Your timeout is also your memory budget
 
-`--mutant-timeout` bounds how long a runaway mutant runs *before* the kill,
-and a mutant that allocates inside its loop allocates for that whole window.
-At the 30s default that is a bounded spike; at `--mutant-timeout 300` the same
-mutant has ten times as long to grow. Raising the budget to resolve timeouts
+The budget bounds how long a runaway mutant runs *before* the kill, and a
+mutant that allocates inside its loop allocates for that whole window. At
+the 30s default that is a bounded spike; at a 300s budget, whether passed as
+`--mutant-timeout 300` or derived from a 75s baseline, the same mutant has
+ten times as long to grow. Raising the budget to resolve timeouts
 is the right move for score accuracy (see the output contract below) and it
 buys that accuracy with peak memory — worth knowing before raising it on a
 machine that is also running other suites.
@@ -212,9 +245,9 @@ invalid, and timed-out mutants out.
 
 ## The output contract
 
-These six are guaranteed, not incidental — a caller with its own
+These seven are guaranteed, not incidental — a caller with its own
 pass/fail policy (a per-file threshold other than "zero undetected", for
-instance) depends on all six, and each is covered by a test against the
+instance) depends on all seven, and each is covered by a test against the
 real CLI binary, not just the internal report types:
 
 - **`--json` always prints a complete report to stdout, even when the exit
@@ -276,11 +309,18 @@ real CLI binary, not just the internal report types:
   `baseline-timeout`, `baseline-failed` or `gate-rejects-unmodified`. Branch
   on that, never on `abortReason`, whose wording is for people and is free
   to change. The kinds call for opposite responses — a red suite needs
-  fixing, a slow one needs a bigger budget, a rejected file needs a look at
+  fixing, a slow one needs a bigger `--baseline-timeout`, a rejected file needs a look at
   both the file and the analyzer judging it — so a caller that guesses the
   kind from the prose gets
   the advice backwards the day the prose is reworded, and nothing goes red
   to say so. New kinds may be added; an existing name is never renamed.
+- **The budget each mutant got is in the report**, as
+  `mutantTimeoutSeconds`, next to `baselineSeconds`, the baseline's wall time
+  it was derived from. Neither is necessarily the `--mutant-timeout` a caller
+  passed (see *The budget follows the baseline*), and a caller reading
+  `timedOutMutants` needs to know what they timed out against. Both are
+  present on every run whose baseline passed; a red baseline has only
+  `baselineSeconds`, and a baseline that never finished has neither.
 
 ## Known limitations
 

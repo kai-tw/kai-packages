@@ -36,9 +36,23 @@ Future<void> main(List<String> arguments) async {
       'mutant-timeout',
       defaultsTo: '30',
       help:
-          'Seconds a single mutant\'s test run gets before it is killed and '
-          'scored as a timeout instead of waited on forever. Applied to the '
-          'baseline check too.',
+          'The least number of seconds a single mutant\'s test run gets '
+          'before it is killed and scored as a timeout instead of waited on '
+          'forever. A slow suite gets more: see --baseline-factor.',
+    )
+    ..addOption(
+      'baseline-factor',
+      defaultsTo: _formatFactor(MutationTestRunner.defaultBaselineFactor),
+      help:
+          'Each mutant\'s budget is the larger of --mutant-timeout and this '
+          'many times the baseline\'s own wall time in this run. The headroom '
+          'is for machine load changing mid-run. 0 turns it off.',
+    )
+    ..addOption(
+      'baseline-timeout',
+      help:
+          'Seconds the test command gets against unmodified code before the '
+          'run aborts as hanging. Defaults to ten times --mutant-timeout.',
     )
     ..addFlag('json', help: 'Emit the report as JSON instead of text.')
     ..addFlag('help', abbr: 'h', negatable: false);
@@ -75,6 +89,8 @@ Future<void> main(List<String> arguments) async {
     mutantTimeout: Duration(
       seconds: int.parse(args['mutant-timeout'] as String),
     ),
+    baselineFactor: double.parse(args['baseline-factor'] as String),
+    baselineTimeout: _optionalSeconds(args['baseline-timeout'] as String?),
   );
 
   final MutationRunReport report;
@@ -110,7 +126,7 @@ Future<void> main(List<String> arguments) async {
 
 /// Parses [arguments] against [parser] and validates them. Returns `null`
 /// if something was already wrong enough to handle right here — bad
-/// syntax, `--help`, no files, a malformed `--mutant-timeout` — having
+/// syntax, `--help`, no files, a malformed timeout option — having
 /// already printed whatever was needed and set [exitCode]; the caller
 /// should just return in that case.
 ArgResults? _parseAndValidate(List<String> arguments, ArgParser parser) {
@@ -136,14 +152,61 @@ ArgResults? _parseAndValidate(List<String> arguments, ArgParser parser) {
     return null;
   }
 
-  final int? timeoutSeconds = int.tryParse(args['mutant-timeout'] as String);
-  if (timeoutSeconds == null || timeoutSeconds <= 0) {
-    stderr.writeln('--mutant-timeout must be a positive number of seconds');
+  final String? timeoutError = _timeoutOptionError(args);
+  if (timeoutError != null) {
+    stderr.writeln(timeoutError);
     exitCode = 64;
     return null;
   }
 
   return args;
+}
+
+/// What is wrong with the three timeout options, or `null` if nothing is.
+String? _timeoutOptionError(ArgResults args) {
+  if (!_isPositiveSeconds(args['mutant-timeout'] as String)) {
+    return '--mutant-timeout must be a positive number of seconds';
+  }
+  final String? baselineTimeout = args['baseline-timeout'] as String?;
+  if (baselineTimeout != null && !_isPositiveSeconds(baselineTimeout)) {
+    return '--baseline-timeout must be a positive number of seconds';
+  }
+  final double? factor = double.tryParse(
+    args['baseline-factor'] as String,
+  );
+  if (factor == null || !factor.isFinite || factor < 0) {
+    return '--baseline-factor must be a number, 0 or more';
+  }
+  return null;
+}
+
+bool _isPositiveSeconds(String value) {
+  final int? seconds = int.tryParse(value);
+  return seconds != null && seconds > 0;
+}
+
+Duration? _optionalSeconds(String? value) =>
+    value == null ? null : Duration(seconds: int.parse(value));
+
+/// `4`, not `4.0`, in `--help`.
+String _formatFactor(double factor) => factor == factor.truncateToDouble()
+    ? factor.toInt().toString()
+    : factor.toString();
+
+String _formatSeconds(Duration d) =>
+    '${(d.inMilliseconds / 1000).toStringAsFixed(1)}s';
+
+/// What every mutant's timeout was measured against — see
+/// MutationTestRunner.baselineFactor.
+void _printBudget(MutationRunReport report) {
+  final Duration? baseline = report.baselineDuration;
+  final Duration? budget = report.mutantTimeout;
+  if (baseline != null && budget != null) {
+    stdout.writeln(
+      'baseline ${_formatSeconds(baseline)}, each mutant given '
+      '${_formatSeconds(budget)}',
+    );
+  }
 }
 
 ProcessCommand _parseCommand(String command) {
@@ -156,6 +219,7 @@ void _printText(MutationRunReport report) {
     stdout.writeln('aborted: ${report.abortReason}');
     return;
   }
+  _printBudget(report);
   for (final FileMutationReport f in report.files) {
     final String rate = f.detectionRate == null
         ? 'n/a'
