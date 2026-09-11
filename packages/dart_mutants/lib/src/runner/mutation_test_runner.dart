@@ -29,12 +29,25 @@ class MutationTestRunner {
   MutationTestRunner({
     required this.testCommand,
     required this.compileSafetyGate,
+    this.fallbackCompileSafetyGate,
+    this.onGateFallback,
     List<MutationOperator>? operators,
     this.mutantTimeout = const Duration(seconds: 30),
   }) : operators = operators ?? defaultOperators();
 
   final ProcessCommand testCommand;
   final CompileSafetyGate compileSafetyGate;
+
+  /// Used instead of [compileSafetyGate] for any file that gate rejects
+  /// before it has been mutated at all — see [run]. `null` means there is
+  /// nothing to fall back to, and such a file aborts the run.
+  final CompileSafetyGate? fallbackCompileSafetyGate;
+
+  /// Called with a file that [compileSafetyGate] rejected unmodified and
+  /// [fallbackCompileSafetyGate] will judge instead — a decision the run
+  /// makes on its own, which a person should hear about.
+  final void Function(String filePath)? onGateFallback;
+
   final List<MutationOperator> operators;
 
   /// How long [testCommand] gets before a run is killed and scored as
@@ -62,6 +75,23 @@ class MutationTestRunner {
   /// scoring mutants against a suite that was already red makes every one of
   /// them look detected, for a reason that has nothing to do with the
   /// mutation.
+  ///
+  /// The same rule, applied to the compile-safety gate: before anything is
+  /// mutated, every target file that has mutants is put to the gate as it
+  /// stands. A gate that rejects a target's unmodified code would score every
+  /// one of its mutants `invalid` — silently, and in a shape a caller reads
+  /// as "nothing to measure". Such a file is judged by
+  /// [fallbackCompileSafetyGate] instead if that accepts it, and otherwise
+  /// the run aborts before touching anything.
+  ///
+  /// That abort cannot tell its causes apart: the gate cannot read the file;
+  /// the gate's own configuration rejects code that compiles (a
+  /// caller-chosen command that fails on lints, or a lint promoted to an
+  /// error); or the file genuinely does not compile. The baseline does not
+  /// settle it, because it only vouches for files the test command loads —
+  /// a broken target no test imports passes the baseline and ends up here.
+  /// A file with no mutants is not put to the gate at all: there is nothing
+  /// of it to judge, so nothing a wrong answer could cost.
   Future<MutationRunReport> run(List<String> filePaths) async {
     final List<String> targets = filePaths
         .where((String path) => !isGeneratedFile(path))
@@ -80,6 +110,7 @@ class MutationTestRunner {
       );
       if (baselineExitCode == null) {
         return const MutationRunReport.aborted(
+          AbortKind.baselineTimeout,
           'the test command did not finish against unmodified code within '
           'the timeout — refusing to score mutants against a baseline that '
           'never even completes',
@@ -87,15 +118,40 @@ class MutationTestRunner {
       }
       if (baselineExitCode != 0) {
         return MutationRunReport.aborted(
+          AbortKind.baselineFailed,
           'the test command failed against unmodified code (exit '
           '$baselineExitCode) — refusing to score mutants against a baseline '
           'that was already red',
         );
       }
 
+      final Map<String, CompileSafetyGate> gates =
+          <String, CompileSafetyGate>{};
+      for (final String filePath in targets) {
+        final String source = await File(filePath).readAsString();
+        if (_collectMutants(filePath, source).isEmpty) {
+          gates[filePath] = compileSafetyGate;
+          continue;
+        }
+        final CompileSafetyGate? gate = await _gateFor(filePath);
+        if (gate == null) {
+          return MutationRunReport.aborted(
+            AbortKind.gateRejectsUnmodified,
+            'the compile-safety gate rejects $filePath before it has been '
+            'mutated. The gate cannot read that file, or its configuration '
+            'rejects code that compiles (`flutter analyze` needs '
+            '--no-fatal-infos --no-fatal-warnings; a lint promoted to an '
+            'error does it too), or the file does not compile and no test '
+            'the command runs loads it. Refusing to score mutants with a '
+            'gate that rejects the code they start from.',
+          );
+        }
+        gates[filePath] = gate;
+      }
+
       final List<FileMutationReport> fileReports = <FileMutationReport>[];
       for (final String filePath in targets) {
-        fileReports.add(await _runFile(filePath));
+        fileReports.add(await _runFile(filePath, gates[filePath]!));
       }
       return MutationRunReport.completed(fileReports);
     } finally {
@@ -108,7 +164,24 @@ class MutationTestRunner {
     }
   }
 
-  Future<FileMutationReport> _runFile(String filePath) async {
+  /// The gate that can judge [filePath], asked while the file is still
+  /// unmodified — or `null` when neither gate accepts it. See [run].
+  Future<CompileSafetyGate?> _gateFor(String filePath) async {
+    if (await compileSafetyGate.compiles(filePath)) {
+      return compileSafetyGate;
+    }
+    final CompileSafetyGate? fallback = fallbackCompileSafetyGate;
+    if (fallback == null || !await fallback.compiles(filePath)) {
+      return null;
+    }
+    onGateFallback?.call(filePath);
+    return fallback;
+  }
+
+  Future<FileMutationReport> _runFile(
+    String filePath,
+    CompileSafetyGate gate,
+  ) async {
     final String originalSource = await File(filePath).readAsString();
     final List<Mutant> mutants = _collectMutants(filePath, originalSource);
 
@@ -121,7 +194,11 @@ class MutationTestRunner {
     final List<MutantResult> timedOutResults = <MutantResult>[];
 
     for (final Mutant mutant in mutants) {
-      final MutantVerdict verdict = await _runOne(mutant, originalSource);
+      final MutantVerdict verdict = await _runOne(
+        mutant,
+        originalSource,
+        gate,
+      );
       switch (verdict) {
         case MutantVerdict.invalid:
           invalid++;
@@ -183,11 +260,15 @@ class MutationTestRunner {
   /// it passed that gate, then restores the file before returning —
   /// regardless of which branch was taken, so a thrown exception here still
   /// leaves the file clean.
-  Future<MutantVerdict> _runOne(Mutant mutant, String originalSource) async {
+  Future<MutantVerdict> _runOne(
+    Mutant mutant,
+    String originalSource,
+    CompileSafetyGate gate,
+  ) async {
     _registry.track(mutant.filePath, originalSource);
     await File(mutant.filePath).writeAsString(mutant.applyTo(originalSource));
     try {
-      if (!await compileSafetyGate.compiles(mutant.filePath)) {
+      if (!await gate.compiles(mutant.filePath)) {
         return MutantVerdict.invalid;
       }
       _testCache.clear();

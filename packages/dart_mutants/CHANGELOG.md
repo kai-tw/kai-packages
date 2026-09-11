@@ -1,12 +1,87 @@
 ## Unreleased
 
+**The compile-safety gate now runs in process by default.** Every mutant
+used to cost a fresh `dart analyze` process, which rebuilt the package's
+entire element model to type-check the one file that changed. The gate now
+keeps a single analyzer alive for the run and re-resolves what changed. How
+much of a run that saves depends on how expensive the test command is next
+to it; the one end-to-end measurement below is a pure-Dart package with a
+fast `dart test`.
+
+Measured against the gate it replaces, over 384 mutants: 264 across three
+pure-Dart packages in this repository and 120 across two Flutter ones, where
+`dart:ui` and `package:flutter` resolve like any other dependency. The two
+agreed on every verdict, at 9–89ms per mutant against 1.2–2.2s. End to end,
+the real CLI over `clock_anchor`'s whole `lib/` (430 mutants) went from 852s
+to 332s and produced a byte-identical JSON report. (An earlier build of this
+change measured 360s. That 8% gap is inside the spread of three identical
+runs of this same package on this same machine, reported further down in
+this entry: 856s to 938s.)
+
+What changes for a caller:
+
+- **Passing nothing** now gets the in-process gate. `--analyze-command` no
+  longer defaults to `dart analyze`.
+- **Passing `--analyze-command`** keeps the old behaviour exactly: that
+  command, once per mutant, judged by its exit code.
+- **What counts as compiling differs where a project re-rates a
+  diagnostic**, in both directions and each time on the compiler's side. The
+  in-process gate judges each diagnostic on its own severity, so a lint that
+  `analysis_options.yaml` **promotes** to an error no longer makes a mutant
+  invalid — it compiles and runs, so it is now measured — while a real
+  compile error that it **downgrades** to a warning now does. The second is a
+  fix: `dart analyze` accepted such a file, the compiler does not, and the
+  test command's failure was read as `detected`. A project that re-rates
+  diagnostics can see mutants move between `invalid` and the score in
+  either direction. Both are pinned by tests against both gates; no package
+  in this repository re-rates anything, so the corpus above could not have
+  exercised either.
+- **Every target file with mutants is put to the gate unmodified, before
+  anything is mutated** — the rule the baseline test run already applies to
+  the test command, applied to the gate. A gate that rejects a target's
+  unmodified code would score every one of its mutants `invalid`, which
+  reads downstream as a file with nothing to measure. The in-process gate
+  can hit this: it is the
+  `package:analyzer` this package resolved, not the SDK's own analyzer, and
+  a file using language features newer than that analyzer knows reads as
+  broken. Reproduced with a primary constructor on a 3.13 SDK — every mutant
+  `invalid` in process, `2/3 detected` with one real survivor under
+  `dart analyze`. Such a file is now judged by `dart analyze`, with a note on
+  stderr. With `--analyze-command` there is no fallback, and a gate that
+  rejects an unmodified file aborts the run before anything is touched. So
+  does a file both gates reject — which can also mean the file itself does
+  not compile, since the baseline only vouches for files a test loads.
+
+**An aborted run now says which kind of abort it was**, in a new `abortKind`
+field: `baseline-timeout`, `baseline-failed`, or `gate-rejects-unmodified`
+for the abort the item above adds. The kinds call for opposite responses,
+and a downstream caller was telling them apart by matching words in
+`abortReason` — which the new kind would have slipped past, landing on the
+"fix your suite" advice for a problem that is not in the suite. `abortKind`
+is part of the output contract; `abortReason` is for people and is not. The
+existing reason texts are unchanged in this release, so a caller still
+matching on them keeps working until it moves to the field.
+
+`flutter analyze` was documented as a valid `--analyze-command` and is not,
+as-is. Its exit code treats infos and warnings as fatal, so it rejects a
+mutant that compiles fine but trips a lint, and this package reads that as
+`invalid`. `statement_deletion` trips one almost every time — it leaves a
+bare `;`, and `empty_statements` flags it. Over 120 mutants of two Flutter
+packages, bare `flutter analyze` threw out 42 valid mutants; with
+`--no-fatal-infos --no-fatal-warnings` it agreed with `dart analyze` on all
+120. The README, the CLI help and the gate's doc now say so. Nothing that
+invoked this package without `--analyze-command` was affected. The
+unmodified-file check above catches a misconfigured `flutter analyze` only
+when the file already trips a lint before mutation; the flags are still what
+fixes it.
+
 The three findings below are documentation only — no behaviour change. They
 come from measuring where a mutation run's time actually goes, and are written
 down so the next person does not have to re-run them. One of the three is a
-null result and is labelled as one. Every figure is from one package:
-`clock_anchor` — 26 files at the time, 430 mutants, pure Dart, `dart test`.
-Nothing here was measured against a Flutter package or against any other
-consumer, so read the ratios rather than the seconds.
+null result and is labelled as one. Every figure in those three is from one
+package: `clock_anchor` — 26 files at the time, 430 mutants, pure Dart,
+`dart test`. None of them was measured against a Flutter package or against
+any other consumer, so read the ratios rather than the seconds.
 
 **`--fail-fast` belongs in your test command, and the gain is this package's
 rather than the flag's.** This package reads nothing but the

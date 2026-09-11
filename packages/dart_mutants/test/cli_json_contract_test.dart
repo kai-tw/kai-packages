@@ -109,6 +109,13 @@ void main() {
       expect(result.exitCode, isNot(0));
       final Map<String, Object?> json =
           jsonDecode(result.stdout as String) as Map<String, Object?>;
+      expect(
+        json['abortKind'],
+        'baseline-failed',
+        reason:
+            'the field a caller branches on — a red suite and a slow one call '
+            'for opposite fixes, and the reason text is not a contract',
+      );
       expect(json['abortReason'], isNotNull);
       expect(json['files'], isEmpty);
     },
