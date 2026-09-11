@@ -58,9 +58,67 @@ An AST-legal edit is not a type-legal one. A mutant that fails to compile
 still makes the test command exit non-zero, which — read naively — counts
 as "detected": a broken mutant would make the score go *up*, not down, for
 a file the mutation never actually ran against. Every mutant is checked
-against the project's own analyzer before it is ever handed to the test
-command; one that fails compiles is `invalid` and excluded from both the
-numerator and denominator of the score, not counted as caught.
+against the analyzer before it is ever handed to the test command; one that
+fails compiles is `invalid` and excluded from both the numerator and
+denominator of the score, not counted as caught.
+
+The check runs **in process** by default: one analyzer, kept alive for the
+whole run, re-resolving only the file each mutant changed. The alternative is
+a fresh `dart analyze` process per mutant, which rebuilds the package's whole
+element model every time to type-check one file. Over 384 mutants — 264 from
+three pure-Dart packages in this repository, 120 from two Flutter ones — the
+two agreed on every verdict, at 9–89ms per mutant against 1.2–2.2s. On a
+whole-package run over `clock_anchor` (430 mutants) that took the run from
+852s to 332s, with a byte-identical report.
+
+"Compiles" means no diagnostic whose own severity is an error, whatever your
+`analysis_options.yaml` re-rates it to. Mostly that is where `dart analyze`
+draws its exit-code line too, but where a project re-rates a diagnostic the
+two differ, both ways, each time with the in-process gate on the compiler's
+side:
+
+- a lint **promoted** to an error does not make a mutant invalid — it still
+  compiles and runs, so it is still measured;
+- a real compile error **downgraded** to a warning still does. `dart
+  analyze` accepts that file, the compiler does not, and the test command's
+  resulting failure would otherwise read as `detected`.
+
+Before anything is mutated, every target file that has mutants is put to
+the gate as it stands — the same rule as the baseline test run, applied to
+the gate. A gate that rejects a target's unmodified code would score every
+one of its mutants `invalid`, which reads downstream as a file with nothing
+to measure. The in-process analyzer can do that: it is the
+`package:analyzer` this package was built with, not your SDK's own, and a
+file using language features newer than it knows reads as broken. Such a
+file is judged by `dart analyze` instead, with a note on stderr. If
+`dart analyze` rejects it too — or there is no fallback, because you chose
+the analyzer yourself — the run aborts before touching anything, as
+`gate-rejects-unmodified`. The run cannot tell you why, and there are three
+candidates: the analyzer cannot read the file; the analyzer's own
+configuration rejects code that does compile — bare `flutter analyze` on
+any lint, or `dart analyze` on a lint your options promote to an error;
+or the file genuinely does not compile. The baseline only vouches for files
+your tests load, so a broken file no test imports passes it and lands here.
+
+To have your own analyzer command be the judge instead — its configuration,
+its exit code — pass it, and pay a process per mutant for it. Its
+configuration is exactly what then decides, including a downgraded error:
+
+```bash
+dart run dart_mutants --analyze-command "dart analyze" \
+  --test-command "dart test" lib/foo.dart
+```
+
+**`flutter analyze` needs `--no-fatal-infos --no-fatal-warnings` here.**
+Without them its exit code fails on any info or warning, so a mutant that
+compiles fine but trips a lint is thrown out as invalid. `statement_deletion`
+trips one almost every time — it leaves a bare `;`, and `empty_statements`
+flags it. Measured over 120 mutants of two Flutter packages, bare
+`flutter analyze` rejected 42 valid ones; with both flags it agreed with
+`dart analyze` on all 120. `dart analyze` needs no flags, for a Flutter
+package too. The unmodified-file check above only catches this when the
+file already trips a lint before it is mutated; a lint-clean file passes
+it, and then loses its mutants one lint at a time.
 
 ## The timeout gate
 
@@ -154,9 +212,9 @@ invalid, and timed-out mutants out.
 
 ## The output contract
 
-These four are guaranteed, not incidental — a caller with its own
+These six are guaranteed, not incidental — a caller with its own
 pass/fail policy (a per-file threshold other than "zero undetected", for
-instance) depends on all four, and each is covered by a test against the
+instance) depends on all six, and each is covered by a test against the
 real CLI binary, not just the internal report types:
 
 - **`--json` always prints a complete report to stdout, even when the exit
@@ -214,6 +272,15 @@ real CLI binary, not just the internal report types:
   one that assumes either form will silently match nothing. Echoing is the
   only behaviour that lets a caller use its own paths as lookup keys without
   this package deciding what a path should look like.
+- **An aborted run says which kind of abort it was, in `abortKind`** —
+  `baseline-timeout`, `baseline-failed` or `gate-rejects-unmodified`. Branch
+  on that, never on `abortReason`, whose wording is for people and is free
+  to change. The kinds call for opposite responses — a red suite needs
+  fixing, a slow one needs a bigger budget, a rejected file needs a look at
+  both the file and the analyzer judging it — so a caller that guesses the
+  kind from the prose gets
+  the advice backwards the day the prose is reworded, and nothing goes red
+  to say so. New kinds may be added; an existing name is never renamed.
 
 ## Known limitations
 

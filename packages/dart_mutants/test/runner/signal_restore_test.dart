@@ -183,10 +183,16 @@ void main() {
       process.stdout.drain<void>();
       process.stderr.drain<void>();
 
-      // A mutated file means a subprocess is genuinely in flight — the
-      // analyzer or the test command — so there is something to orphan.
+      // Wait for a subprocess to actually be in flight, not merely for the
+      // file to be mutated. Those used to coincide, back when the compile
+      // gate was itself a subprocess; with the default in-process gate a
+      // mutated file is first judged inside this very process, and sampling
+      // that window finds nothing to orphan. The child that can leak is the
+      // test command, so that is what to wait for.
       await _waitUntil(
-        () => target.readAsStringSync() != original,
+        () =>
+            target.readAsStringSync() != original &&
+            _descendantsOf(process.pid).isNotEmpty,
         timeout: const Duration(seconds: 30),
       );
       final List<int> inFlight = _descendantsOf(process.pid);

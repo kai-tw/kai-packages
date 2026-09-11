@@ -25,8 +25,12 @@ Future<void> main(List<String> arguments) async {
     )
     ..addOption(
       'analyze-command',
-      defaultsTo: 'dart analyze',
-      help: 'The analyzer invocation used for the compile-safety gate.',
+      help:
+          'Judge compile-safety by running this analyzer command once per '
+          'mutant instead of the default in-process analyzer. Much slower: a '
+          'fresh analyzer process per mutant. "dart analyze" works as-is; '
+          '"flutter analyze" needs --no-fatal-infos --no-fatal-warnings, or '
+          'it rejects valid mutants that merely trip a lint.',
     )
     ..addOption(
       'mutant-timeout',
@@ -44,10 +48,27 @@ Future<void> main(List<String> arguments) async {
     return;
   }
 
+  // With no --analyze-command: the in-process gate, backed by `dart analyze`
+  // for any file it cannot judge (see MutationTestRunner.run). With one: that
+  // command alone — a caller who named their judge gets no substitute.
+  final String? analyzeCommand = args['analyze-command'] as String?;
+  final CompileSafetyGate gate = analyzeCommand == null
+      ? InProcessAnalyzerGate(args.rest)
+      : AnalyzerProcessGate(_parseCommand(analyzeCommand));
+  final CompileSafetyGate? fallback = analyzeCommand == null
+      ? const AnalyzerProcessGate(ProcessCommand('dart', <String>['analyze']))
+      : null;
+
   final MutationTestRunner runner = MutationTestRunner(
     testCommand: _parseCommand(args['test-command'] as String),
-    compileSafetyGate: CompileSafetyGate(
-      _parseCommand(args['analyze-command'] as String),
+    compileSafetyGate: gate,
+    fallbackCompileSafetyGate: fallback,
+    onGateFallback: (String filePath) => stderr.writeln(
+      'note: the in-process analyzer rejects $filePath before it has been '
+      'mutated, so its mutants are judged by `dart analyze` instead — one '
+      'process per mutant, much slower. One known cause: the file uses '
+      'language features newer than the analyzer package this was built with '
+      'understands.',
     ),
     // Already validated by _parseAndValidate — safe to parse again here
     // rather than thread the number through as a second return value.
@@ -56,7 +77,15 @@ Future<void> main(List<String> arguments) async {
     ),
   );
 
-  final MutationRunReport report = await runner.run(args.rest);
+  final MutationRunReport report;
+  try {
+    report = await runner.run(args.rest);
+  } finally {
+    // The runner is handed the gates, so it does not close them; this is
+    // where they were made.
+    await gate.close();
+    await fallback?.close();
+  }
 
   // The report is always printed here, before exitCode is touched below —
   // a non-zero exit (an aborted run, or any file with undetected mutants)

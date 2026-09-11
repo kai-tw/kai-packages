@@ -15,9 +15,9 @@ import 'package:test/test.dart';
 /// A real temp Dart package — `pubspec.yaml`, `dart pub get`, real `lib/`
 /// and `test/` files — because the property under test (a mutant that
 /// fails to compile must never read as "detected") only actually exists at
-/// the boundary between three real subprocesses: `dart analyze`, `dart
-/// test`, and this package's own file-mutation logic. A mock of any one of
-/// them would test that the mock behaves as scripted, not that the real
+/// the boundary between three real things: the analyzer, a `dart test`
+/// subprocess, and this package's own file-mutation logic. A mock of any one
+/// of them would test that the mock behaves as scripted, not that the real
 /// pipeline gets the classification right.
 Future<Directory> _fixturePackage() async {
   final Directory dir = Directory.systemTemp.createTempSync(
@@ -253,13 +253,25 @@ void main() {
   return dir;
 }
 
-MutationTestRunner _runnerFor(Directory dir) => MutationTestRunner(
+/// Uses the DEFAULT gate on purpose. This fixture is where "a mutant that
+/// fails to compile must never read as detected" is actually proven end to
+/// end, so it has to be proven against the gate a caller gets when they pass
+/// nothing. The runner does not own the gate it is handed, so the test closes
+/// it.
+MutationTestRunner _runnerFor(Directory dir) {
+  final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[dir.path]);
+  addTearDown(gate.close);
+  return _runnerWithGate(dir, gate);
+}
+
+MutationTestRunner _runnerWithGate(
+  Directory dir,
+  CompileSafetyGate gate,
+) => MutationTestRunner(
   testCommand: ProcessCommand('dart', <String>[
     'test',
   ], workingDirectory: dir.path),
-  compileSafetyGate: const CompileSafetyGate(
-    ProcessCommand('dart', <String>['analyze']),
-  ),
+  compileSafetyGate: gate,
   // Short, but not as short as it wants to be. Every mutant in this fixture
   // except hangs.dart's finishes near-instantly, and that one is designed
   // never to finish at all, so the timeout only has to outlast a `dart test`
@@ -543,6 +555,246 @@ void main() {
     );
   });
 
+  group('the subprocess gate, end to end', () {
+    test(
+      '[partition] classifies every invalid-mutant fixture exactly as the '
+      'default in-process gate does — the opt-in path still ships, so it '
+      'still has to be proven through a real run and not only in isolation',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final List<String> files = <String>[
+          p.join(dir.path, 'lib', 'invalid.dart'),
+          p.join(dir.path, 'lib', 'invalid_arithmetic.dart'),
+          p.join(dir.path, 'lib', 'invalid_statement_deletion.dart'),
+          p.join(dir.path, 'lib', 'invalid_mixed.dart'),
+        ];
+
+        final MutationRunReport viaSubprocess = await _runnerWithGate(
+          dir,
+          const AnalyzerProcessGate(
+            ProcessCommand('dart', <String>['analyze']),
+          ),
+        ).run(files);
+        final MutationRunReport viaInProcess = await _runnerFor(
+          dir,
+        ).run(files);
+
+        expect(viaSubprocess.aborted, isFalse);
+        for (final String file in files) {
+          final String name = p.basename(file);
+          final FileMutationReport a = _reportFor(viaSubprocess, name);
+          final FileMutationReport b = _reportFor(viaInProcess, name);
+          expect(
+            <int>[a.invalid, a.detected, a.undetected, a.timedOut],
+            <int>[b.invalid, b.detected, b.undetected, b.timedOut],
+            reason: '$name: [invalid, detected, undetected, timedOut]',
+          );
+          expect(
+            a.invalid,
+            greaterThan(0),
+            reason: '$name is an invalid fixture',
+          );
+        }
+      },
+    );
+  });
+
+  group('a gate that rejects a file before it is mutated', () {
+    // Stub gates, deliberately — unlike the real gates everywhere else in this
+    // file. What is under test is the runner's reaction to "the gate rejects
+    // a target's unmodified code", which is the runner's own policy.
+    // Producing that with a real analyzer means a real version skew between an
+    // analyzer package and the SDK, which would make these tests pass or fail
+    // by which SDK happens to run them. Each stub wraps a real gate for every
+    // file it does not reject, and records what was on disk each time it was
+    // asked — which is what lets these tests see ORDER, not just outcome.
+
+    test(
+      '[decision] a file the primary rejects is judged by the fallback, and '
+      'ONLY that file — the others keep the primary, every file is scored as '
+      'a working gate would score it, and the fallback is announced',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final String kept = p.join(dir.path, 'lib', 'detected.dart');
+        final String rejected = p.join(
+          dir.path,
+          'lib',
+          'detected_and_undetected.dart',
+        );
+        final _RecordingGate primary = _RecordingGate(
+          _realGate(dir),
+          rejected: <String>{rejected},
+        );
+        final _RecordingGate fallback = _RecordingGate(_realGate(dir));
+        final List<String> fellBack = <String>[];
+
+        final MutationRunReport report = await MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: primary,
+          fallbackCompileSafetyGate: fallback,
+          onGateFallback: fellBack.add,
+          mutantTimeout: const Duration(seconds: 10),
+        ).run(<String>[kept, rejected]);
+
+        expect(report.aborted, isFalse);
+        // Scored exactly as the full-run fixture above scores them. A single
+        // gate for the whole run would have sent `kept` through the fallback
+        // too, or scored `rejected`'s mutants with a primary that rejects it.
+        final FileMutationReport k = _reportFor(report, 'detected.dart');
+        final FileMutationReport r = _reportFor(
+          report,
+          'detected_and_undetected.dart',
+        );
+        expect(<int>[k.detected, k.undetected, k.invalid], <int>[1, 0, 0]);
+        expect(<int>[r.detected, r.undetected, r.invalid], <int>[1, 1, 0]);
+        expect(fellBack, <String>[rejected]);
+        expect(
+          fallback.asked.map(((String, String) a) => a.$1).toSet(),
+          <String>{rejected},
+          reason: 'the fallback judges the file it was brought in for, only',
+        );
+        expect(
+          primary.asked.where(((String, String) a) => a.$1 == rejected),
+          hasLength(1),
+          reason:
+              'the primary is asked about the rejected file once — the '
+              'unmodified check — and never about its mutants',
+        );
+      },
+    );
+
+    test(
+      '[state] every target is put to the gate while STILL UNMODIFIED, before '
+      'any file is mutated — so a rejection late in the target list aborts '
+      'with nothing earlier already mutated and scored',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final String first = p.join(dir.path, 'lib', 'detected.dart');
+        final String second = p.join(
+          dir.path,
+          'lib',
+          'detected_and_undetected.dart',
+        );
+        final Map<String, String> original = <String, String>{
+          first: File(first).readAsStringSync(),
+          second: File(second).readAsStringSync(),
+        };
+        final _RecordingGate primary = _RecordingGate(
+          _realGate(dir),
+          rejected: <String>{second},
+        );
+
+        final MutationRunReport report = await MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: primary,
+          mutantTimeout: const Duration(seconds: 10),
+        ).run(<String>[first, second]);
+
+        expect(report.aborted, isTrue);
+        expect(report.abortKind, AbortKind.gateRejectsUnmodified);
+        expect(report.abortReason, contains(second));
+        // The whole point: had the check been done lazily, file by file,
+        // `first`'s mutant would have been written and put to the gate before
+        // `second` was ever looked at. Every content the gate saw would then
+        // not all be the originals.
+        for (final (String path, String content) in primary.asked) {
+          expect(
+            content,
+            original[path],
+            reason: 'the gate was shown a mutated $path before the abort',
+          );
+        }
+        expect(File(first).readAsStringSync(), original[first]);
+        expect(File(second).readAsStringSync(), original[second]);
+      },
+    );
+
+    test(
+      '[decision] with a fallback that rejects the file too, the run aborts '
+      'the same way',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final String target = p.join(dir.path, 'lib', 'detected.dart');
+
+        final MutationRunReport report = await MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: _RecordingGate(
+            _realGate(dir),
+            rejected: <String>{target},
+          ),
+          fallbackCompileSafetyGate: _RecordingGate(
+            _realGate(dir),
+            rejected: <String>{target},
+          ),
+          mutantTimeout: const Duration(seconds: 10),
+        ).run(<String>[target]);
+
+        expect(report.aborted, isTrue);
+        expect(report.abortKind, AbortKind.gateRejectsUnmodified);
+      },
+    );
+
+    test(
+      '[boundary] a target with no mutants is never put to the gate, so a '
+      'gate that would reject it cannot abort the run over a file with '
+      'nothing to judge',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final String empty = p.join(dir.path, 'lib', 'no_mutants.dart');
+        final _RecordingGate primary = _RecordingGate(
+          _realGate(dir),
+          rejected: <String>{empty},
+        );
+
+        final MutationRunReport report = await MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: primary,
+          mutantTimeout: const Duration(seconds: 10),
+        ).run(<String>[empty]);
+
+        expect(report.aborted, isFalse);
+        expect(_reportFor(report, 'no_mutants.dart').total, 0);
+        expect(primary.asked, isEmpty);
+      },
+    );
+
+    test(
+      '[partition] a primary that accepts every file is used, and the '
+      'fallback is never even asked',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final String target = p.join(dir.path, 'lib', 'detected.dart');
+        final _RecordingGate fallback = _RecordingGate(_realGate(dir));
+
+        final MutationRunReport report = await MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: _realGate(dir),
+          fallbackCompileSafetyGate: fallback,
+          mutantTimeout: const Duration(seconds: 10),
+        ).run(<String>[target]);
+
+        expect(report.aborted, isFalse);
+        expect(fallback.asked, isEmpty);
+      },
+    );
+  });
+
   group('a red baseline', () {
     test(
       '[boundary] aborts before touching any file, rather than scoring '
@@ -562,6 +814,7 @@ void main() {
         ]);
 
         expect(report.aborted, isTrue);
+        expect(report.abortKind, AbortKind.baselineFailed);
         expect(report.abortReason, contains('red'));
         expect(report.files, isEmpty);
         expect(
@@ -584,7 +837,7 @@ void main() {
           testCommand: ProcessCommand('dart', <String>[
             'test',
           ], workingDirectory: dir.path),
-          compileSafetyGate: const CompileSafetyGate(
+          compileSafetyGate: const AnalyzerProcessGate(
             ProcessCommand('dart', <String>['analyze']),
           ),
           operators: <MutationOperator>[TernarySwap()],
@@ -686,7 +939,7 @@ void main() {
           testCommand: ProcessCommand('dart', <String>[
             'test',
           ], workingDirectory: dir.path),
-          compileSafetyGate: const CompileSafetyGate(
+          compileSafetyGate: const AnalyzerProcessGate(
             ProcessCommand('dart', <String>['analyze']),
           ),
           mutantTimeout: const Duration(seconds: 5),
@@ -697,10 +950,43 @@ void main() {
         ]);
 
         expect(report.aborted, isTrue);
+        expect(report.abortKind, AbortKind.baselineTimeout);
+        // Kept alongside the kind: plan-cycle 1.3.1 tells this abort apart by
+        // matching these words, and will until it reads abortKind instead.
         expect(report.abortReason, contains('did not finish'));
+        expect(report.abortReason, contains('within the timeout'));
         expect(report.files, isEmpty);
       },
       timeout: const Timeout(Duration(seconds: 30)),
     );
   });
+}
+
+/// A real in-process gate over [dir], closed when the current test ends.
+InProcessAnalyzerGate _realGate(Directory dir) {
+  final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[dir.path]);
+  addTearDown(gate.close);
+  return gate;
+}
+
+/// Rejects every file in [rejected] and defers to [inner] for the rest,
+/// recording each question as (path, what was on disk at that moment).
+class _RecordingGate implements CompileSafetyGate {
+  _RecordingGate(this.inner, {this.rejected = const <String>{}});
+
+  final CompileSafetyGate inner;
+  final Set<String> rejected;
+  final List<(String, String)> asked = <(String, String)>[];
+
+  @override
+  Future<bool> compiles(String filePath) async {
+    asked.add((filePath, File(filePath).readAsStringSync()));
+    if (rejected.contains(filePath)) {
+      return false;
+    }
+    return inner.compiles(filePath);
+  }
+
+  @override
+  Future<void> close() async {}
 }
