@@ -837,6 +837,280 @@ void main() {
     );
   });
 
+  group('selecting tests by coverage', () {
+    late Directory dir;
+    late MutationRunReport report;
+    final List<String> fallbacks = <String>[];
+
+    tearDownAll(() => dir.deleteSync(recursive: true));
+
+    setUpAll(() async {
+      dir = await _fixturePackage();
+      final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+        dir.path,
+      ]);
+      report =
+          await MutationTestRunner(
+            testCommand: ProcessCommand('dart', <String>[
+              'test',
+            ], workingDirectory: dir.path),
+            compileSafetyGate: gate,
+            mutantTimeout: const Duration(seconds: 10),
+            baselineFactor: 0,
+            selectByCoverage: true,
+            onSelectionFallback: fallbacks.add,
+          ).run(<String>[
+            p.join(dir.path, 'lib', 'detected.dart'),
+            p.join(dir.path, 'lib', 'undetected.dart'),
+            p.join(dir.path, 'lib', 'detected_and_undetected.dart'),
+            p.join(dir.path, 'lib', 'invalid.dart'),
+          ]);
+      await gate.close();
+    });
+
+    test('[partition] is applied, and says so in the report', () {
+      expect(fallbacks, isEmpty);
+      expect(report.selectedByCoverage, isTrue);
+    });
+
+    test(
+      '[partition] a covered mutant is still detected — running only the '
+      'tests that reach it is enough to catch it',
+      () {
+        final FileMutationReport f = _reportFor(report, 'detected.dart');
+        expect(<int>[f.detected, f.undetected], <int>[1, 0]);
+      },
+    );
+
+    test(
+      '[decision] a mutant in a loaded file that no test executes is '
+      'undetected and marked uncovered; its covered neighbour is unaffected',
+      () {
+        final FileMutationReport f = _reportFor(
+          report,
+          'detected_and_undetected.dart',
+        );
+        expect(<int>[f.detected, f.undetected, f.uncovered], <int>[1, 1, 1]);
+        expect(f.undetectedMutants.single.uncovered, isTrue);
+        expect(f.undetectedMutants.single.mutant.line, 2);
+      },
+    );
+
+    test(
+      '[boundary] a file no test loads has no coverage data at all, so its '
+      'mutant runs the full command and is NOT marked uncovered — absence '
+      'from a report is not evidence',
+      () {
+        final FileMutationReport f = _reportFor(report, 'undetected.dart');
+        expect(<int>[f.undetected, f.uncovered], <int>[1, 0]);
+      },
+    );
+
+    test(
+      '[decision] a mutant that does not compile is invalid, whatever '
+      'coverage says — the gate comes first',
+      () {
+        final FileMutationReport f = _reportFor(report, 'invalid.dart');
+        expect(<int>[f.invalid, f.detected, f.undetected], <int>[1, 1, 0]);
+      },
+    );
+  });
+
+  group('selecting tests by coverage, where coverage alone would mislead', () {
+    late Directory dir;
+    late MutationRunReport report;
+
+    tearDownAll(() => dir.deleteSync(recursive: true));
+
+    setUpAll(() async {
+      dir = Directory.systemTemp.createTempSync('selection_edges_');
+      File(p.join(dir.path, 'pubspec.yaml')).writeAsStringSync('''
+name: fixture
+environment:
+  sdk: ^3.8.0
+dev_dependencies:
+  test: ^1.25.0
+''');
+      // Line 2 runs, and the VM reports it at ZERO hits when `b` is true:
+      // its only instrumented point is the call to `g`, skipped. Its
+      // ternary swap is caught by the test all the same.
+      File(p.join(dir.path, 'lib', 'partial.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+String f(bool b) {
+  final String s = b ? 'x' : g();
+  return s;
+}
+
+String g() => 'y';
+''');
+      File(p.join(dir.path, 'test', 'partial_test.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+import 'package:fixture/partial.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('f', () => expect(f(true), 'x'));
+}
+''');
+      // Entered while tests are being declared, by a file that declares
+      // none: coverage credits it with `label`, and running it alone runs
+      // no test at all — exit 79, not a failed assertion.
+      File(
+        p.join(dir.path, 'lib', 'declared.dart'),
+      ).writeAsStringSync("String label(bool b) => b ? 'on' : 'off';\n");
+      File(p.join(dir.path, 'test', 'declared_test.dart')).writeAsStringSync('''
+import 'package:fixture/declared.dart';
+
+void main() {
+  label(true);
+}
+''');
+      // Imported by path from one test, which calls it, and as `package:`
+      // from another, which does not. The path copy is a `file:` library
+      // that a `--coverage-package` filter drops; the package copy reports
+      // zero. Read that way the function looks unentered, and a test that
+      // catches its mutant is never asked.
+      File(
+        p.join(dir.path, 'lib', 'relative.dart'),
+      ).writeAsStringSync("String rel(bool b) => b ? 'r' : 's';\n");
+      File(p.join(dir.path, 'test', 'relative_test.dart')).writeAsStringSync('''
+import 'package:test/test.dart';
+
+import '../lib/relative.dart';
+
+void main() {
+  test('rel', () => expect(rel(true), 'r'));
+}
+''');
+      File(p.join(dir.path, 'test', 'loader_test.dart')).writeAsStringSync('''
+import 'package:fixture/relative.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('loads', () => expect(rel, isNotNull));
+}
+''');
+      // Reaches nothing under test, and counts how often it is run.
+      File(p.join(dir.path, 'test', 'canary_test.dart')).writeAsStringSync('''
+import 'dart:io';
+
+import 'package:test/test.dart';
+
+void main() {
+  File('${p.join(dir.path, 'canary.log')}')
+      .writeAsStringSync('x', mode: FileMode.append);
+  test('canary', () {});
+}
+''');
+      final ProcessResult pubGet = await Process.run('dart', <String>[
+        'pub',
+        'get',
+      ], workingDirectory: dir.path);
+      if (pubGet.exitCode != 0) {
+        throw StateError('dart pub get failed:\n${pubGet.stderr}');
+      }
+      final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+        dir.path,
+      ]);
+      report =
+          await MutationTestRunner(
+            testCommand: ProcessCommand('dart', <String>[
+              'test',
+            ], workingDirectory: dir.path),
+            compileSafetyGate: gate,
+            mutantTimeout: const Duration(seconds: 10),
+            baselineFactor: 0,
+            selectByCoverage: true,
+          ).run(<String>[
+            p.join(dir.path, 'lib', 'partial.dart'),
+            p.join(dir.path, 'lib', 'declared.dart'),
+            p.join(dir.path, 'lib', 'relative.dart'),
+          ]);
+      await gate.close();
+    });
+
+    test(
+      '[decision] a mutant on a line the VM reports at zero hits, in a '
+      'function a test entered, is run and detected — not called uncovered',
+      () {
+        expect(report.selectedByCoverage, isTrue);
+        final FileMutationReport f = _reportFor(report, 'partial.dart');
+        expect(<int>[f.detected, f.undetected, f.uncovered], <int>[1, 0, 0]);
+      },
+    );
+
+    test(
+      '[decision] a selected run that runs no test at all is asked of the '
+      'full command, rather than its exit 79 being read as a detection',
+      () {
+        final FileMutationReport f = _reportFor(report, 'declared.dart');
+        expect(<int>[f.detected, f.undetected, f.uncovered], <int>[0, 1, 0]);
+      },
+    );
+
+    test(
+      '[decision] a function a test reaches through a relative import is '
+      'entered, not unentered — its mutant is run and detected',
+      () {
+        final FileMutationReport f = _reportFor(report, 'relative.dart');
+        expect(<int>[f.detected, f.undetected, f.uncovered], <int>[1, 0, 0]);
+      },
+    );
+
+    test(
+      '[state] a test file that reaches neither target runs only in the full '
+      'runs — the baseline, the coverage pass, and the one retry of the '
+      'mutant whose selected files ran no test',
+      () {
+        expect(
+          File(p.join(dir.path, 'canary.log')).readAsStringSync().length,
+          3,
+        );
+      },
+    );
+  });
+
+  group('selecting tests by coverage, when it cannot be done', () {
+    test(
+      '[error] a test command that is not dart test or flutter test runs '
+      'every mutant in full, reports why, and says so in the report',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final List<String> fallbacks = <String>[];
+
+        final MutationRunReport report =
+            await MutationTestRunner(
+              testCommand: ProcessCommand('sh', <String>[
+                '-c',
+                'dart test',
+              ], workingDirectory: dir.path),
+              compileSafetyGate: _realGate(dir),
+              mutantTimeout: const Duration(seconds: 10),
+              baselineFactor: 0,
+              selectByCoverage: true,
+              onSelectionFallback: fallbacks.add,
+            ).run(<String>[
+              p.join(dir.path, 'lib', 'detected_and_undetected.dart'),
+            ]);
+
+        expect(report.selectedByCoverage, isFalse);
+        expect(fallbacks.single, contains('not `dart test'));
+        final FileMutationReport f = _reportFor(
+          report,
+          'detected_and_undetected.dart',
+        );
+        expect(
+          <int>[f.detected, f.undetected, f.uncovered],
+          <int>[1, 1, 0],
+          reason: 'same verdicts as a selected run, none of them uncovered',
+        );
+      },
+    );
+  });
+
   group('a caller-supplied operators list', () {
     test(
       '[boundary] only the given operators run — not silently falling back '

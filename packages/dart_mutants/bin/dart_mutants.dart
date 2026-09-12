@@ -54,6 +54,17 @@ Future<void> main(List<String> arguments) async {
           'Seconds the test command gets against unmodified code before the '
           'run aborts as hanging. Defaults to ten times --mutant-timeout.',
     )
+    ..addFlag(
+      'select-by-coverage',
+      negatable: false,
+      help:
+          'Collect per-test-file coverage once, then run each mutant against '
+          'only the test files that enter the function it is in, and score a '
+          'mutant in a function no test enters as undetected (marked '
+          'uncovered) without running anything. Needs a "dart test ..." or '
+          '"flutter test ..." --test-command; otherwise every mutant runs the '
+          'full command.',
+    )
     ..addFlag('json', help: 'Emit the report as JSON instead of text.')
     ..addFlag('help', abbr: 'h', negatable: false);
 
@@ -91,6 +102,11 @@ Future<void> main(List<String> arguments) async {
     ),
     baselineFactor: double.parse(args['baseline-factor'] as String),
     baselineTimeout: _optionalSeconds(args['baseline-timeout'] as String?),
+    selectByCoverage: args['select-by-coverage'] as bool,
+    onSelectionFallback: (String reason) => stderr.writeln(
+      'note: --select-by-coverage was not applied ($reason), so every '
+      'mutant runs the full test command.',
+    ),
   );
 
   final MutationRunReport report;
@@ -230,7 +246,8 @@ void _printText(MutationRunReport report) {
     );
     for (final MutantResult r in f.undetectedMutants) {
       stdout.writeln(
-        '  undetected: ${r.mutant.operatorName} at '
+        '  ${r.uncovered ? 'undetected (no test enters it)' : 'undetected'}: '
+        '${r.mutant.operatorName} at '
         '${f.filePath}:${r.mutant.line}:${r.mutant.column} — '
         '${r.mutant.description}',
       );

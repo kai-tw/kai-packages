@@ -234,6 +234,94 @@ holds as written. It is worth knowing anyway, because it says the benefit is
 a property of this package's inner loop rather than of `--fail-fast`: do not
 carry the number over to a mutation runner that reuses its kernel cache.
 
+For `flutter test`, add `--no-pub` as well. Without it every invocation
+re-checks dependencies first: measured at 0.17s a run on a small package
+here, and 0.5–0.6s on a single test file of a consuming app.
+
+## `--select-by-coverage`: run only the tests that reach the mutant
+
+Where a Flutter mutant's time goes, measured on a consuming app's real
+mutation scope — 44 test files, 314 tests: each `flutter test` took 23–24s,
+of which 22.3–22.7s was loading and compiling the 44 test files and 1.3–1.7s
+was tool startup. The tests themselves barely registered. Every mutant paid
+to load every test file in scope, whether or not any of them could reach the
+code it changed.
+
+With `--select-by-coverage`, each test file is run once with coverage on,
+after the baseline, and that records which test files entered which
+functions. Each mutant then gets one of three answers, about the **function
+it sits in**:
+
+- **some test files entered it** — only those run;
+- **no test file entered it** — the mutant is scored `undetected` without
+  running anything, and marked `uncovered`: it needs a test that reaches the
+  function at all, not a better assertion;
+- **coverage cannot say** — the mutant runs the full test command, as it
+  would without the flag. That covers code outside any function (field and
+  top-level initializers), a `const` constructor (its initializers run at
+  compile time), and a file no report mentions (one with no executable code
+  is absent even when every test loads it).
+
+**Why the function and not the line.** The VM instruments calls and
+function entries, not statements. Measured: `final s = b ? 'x' : g();`, run
+with `b` true, is reported at **zero** hits, because its only instrumented
+point is the call it skipped, and the `return s;` under it is not reported at
+all. A line-level answer called the ternary swap on that line uncovered; a
+test catches it. A function's entry is always instrumented.
+
+The coverage pass is `dart test` once, or `flutter test` once per test file,
+since `flutter test` writes one combined report per run. It needs a
+`--test-command` of `dart test …` or `flutter test …` whose test files it
+can list exactly as the runner would, and it refuses any command where it
+could not: one that collects coverage itself, uses `--`, runs on a platform
+other than the VM, or carries an argument it cannot place (such as
+`test/a_test.dart?name=x`), and a `dart_test.yaml` that sets `filename`,
+`include` or a platform, or `paths` for a command that names none. Any of
+those could make the coverage pass see different tests than the full
+command runs. `flutter test` is also refused when a test imports `lib/` by
+relative path, since its coverage drops that copy of the file; `dart test`
+handles it by collecting coverage unfiltered. A refusal, or a pass that
+fails, runs every mutant against the full command, with a note on stderr,
+and the report says `selectedByCoverage: false`. Under `flutter test`, a
+file containing `coverage:ignore` comments also runs its mutants in full:
+those comments delete lines from the report, and can delete a function's
+entry.
+
+**It can only err low.** A test that fails in a selected run fails in the
+full command too, so selection can lose a detection and not invent one. A
+selected outcome that is neither a pass nor a failed test — exit 79 when the
+chosen files ran no test at all, as when a filter in the command skips
+them, or a tool error — is asked of the full command instead. The known
+ways it loses a detection:
+
+- a mutant that changes a declaration's inferred type can break the
+  compilation of a test file that never enters its function. Run in full,
+  that failure reads as `detected` — a detection by compile error, the kind
+  the gate exists to keep out of the score;
+- code reached only from a subprocess or `Isolate.spawnUri`, whose coverage
+  the test runner does not collect;
+- code whose execution depends on timing or randomness, which one coverage
+  pass can miss.
+
+Measured on three packages here, twice each, every verdict identical with
+and without the flag, mutant by mutant. The two rounds ran at different
+times on a workstation doing other work, which is why the same full run
+moved by as much as 200s; read each round's pair together:
+
+| package | runner | mutants | round 1: full → selected | round 2: full → selected |
+|---|---|---|---|---|
+| `clock_anchor` | `dart test` | 430 | 343s → 281s | 328s → 236s |
+| `log_system` | `flutter test` | 182 | 317s → 174s | 260s → 185s |
+| `ui_kit` | `flutter test` | 243 | 556s → 145s | 356s → 103s |
+
+`clock_anchor`'s whole suite takes about a second, so there was little to
+cut. `ui_kit` saved the most because 118 of its 132 survivors sit in
+functions no test enters, and those are no longer run at all. The saving
+grows with how many test files a mutant's scope loads against how few of
+them enter its function; a 44-file scope like the one measured above is
+where it should matter most, and that has not been measured with the flag
+yet.
+
 ## What this package does not decide
 
 Which files to run against, how big a mutant budget to spend, what
@@ -245,9 +333,9 @@ invalid, and timed-out mutants out.
 
 ## The output contract
 
-These seven are guaranteed, not incidental — a caller with its own
+These eight are guaranteed, not incidental — a caller with its own
 pass/fail policy (a per-file threshold other than "zero undetected", for
-instance) depends on all seven, and each is covered by a test against the
+instance) depends on all eight, and each is covered by a test against the
 real CLI binary, not just the internal report types:
 
 - **`--json` always prints a complete report to stdout, even when the exit
@@ -321,6 +409,12 @@ real CLI binary, not just the internal report types:
   `timedOutMutants` needs to know what they timed out against. Both are
   present on every run whose baseline passed; a red baseline has only
   `baselineSeconds`, and a baseline that never finished has neither.
+- **A survivor no test ran is marked as one.** Under `--select-by-coverage`
+  an undetected mutant in a function no test enters carries
+  `uncovered: true`, and each file counts them in `uncovered`, a subset of
+  `undetected` — the score is unchanged. `selectedByCoverage` on every
+  completed run says whether selection actually happened, so a run that
+  asked for it and fell back cannot pass for one that did.
 
 ## Known limitations
 
@@ -362,10 +456,11 @@ real CLI binary, not just the internal report types:
   `>=` perturb different inputs, so a suite covering only `a == b` can
   legitimately catch one and miss the other — that pair disagrees for a good
   reason and is not evidence of anything.
-- **Sequential, not parallel.** Runtime is mutant count times one test run.
-  Scoping to covered lines and running one file's mutants at a time in
-  parallel are both real options for a project that needs it, deliberately
-  not attempted here yet — a mutant applied to a shared file while another
+- **Sequential, not parallel.** Runtime is mutant count times one test
+  run. `--select-by-coverage` makes each run cheaper and skips the ones no
+  test could reach, but the rest still run one at a time. Running mutants in
+  parallel is a real option for a project that needs it, deliberately not
+  attempted here yet — a mutant applied to a shared file while another
   mutant's test run is in flight is a correctness risk this package has not
   solved, and a wrong number is worse than a slow one.
 - **`SIGKILL` cannot be caught.** `SIGINT`/`SIGTERM` restore whatever is

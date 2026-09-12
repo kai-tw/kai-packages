@@ -100,12 +100,47 @@ void main() {
         'total': 2,
         'detected': 1,
         'undetected': 1,
+        'uncovered': 0,
         'invalid': 2,
         'timedOut': 1,
         'undetectedMutants': <Object?>[undetected.toJson()],
         'invalidMutants': <Object?>[invalid.toJson()],
         'timedOutMutants': <Object?>[timedOut.toJson()],
       });
+    },
+  );
+
+  test(
+    '[partition] uncovered counts the survivors no test executed, and only '
+    'those — they stay inside undetected, and the score is unchanged',
+    () {
+      final FileMutationReport report = FileMutationReport(
+        filePath: 'lib/src/foo.dart',
+        detected: 1,
+        undetected: 3,
+        invalid: 0,
+        timedOut: 0,
+        undetectedMutants: <MutantResult>[
+          MutantResult(mutant: _mutant(1), verdict: MutantVerdict.undetected),
+          MutantResult(
+            mutant: _mutant(2),
+            verdict: MutantVerdict.undetected,
+            uncovered: true,
+          ),
+          MutantResult(
+            mutant: _mutant(3),
+            verdict: MutantVerdict.undetected,
+            uncovered: true,
+          ),
+        ],
+        invalidMutants: <MutantResult>[],
+        timedOutMutants: <MutantResult>[],
+      );
+
+      expect(report.uncovered, 2);
+      expect(report.total, 4);
+      expect(report.detectionRate, 0.25);
+      expect(report.toJson()['uncovered'], 2);
     },
   );
 }
