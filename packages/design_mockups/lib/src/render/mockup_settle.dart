@@ -20,13 +20,18 @@ class MockupSettle {
     this.policy = MockupSettlePolicy.captureAnyway,
   });
 
-  /// Rounds of "pump, then precache every `Image` under `runAsync`".
+  /// Rounds of "pump, then precache every image in the tree under `runAsync`".
   ///
-  /// Each round drains microtasks so a `FutureBuilder` resolves and its
-  /// `Image` widget appears, then decodes what appeared — decoding needs the
+  /// Each round drains microtasks so a `FutureBuilder` resolves and whatever
+  /// paints the image appears, then decodes what appeared — decoding needs the
   /// real engine loop, which only `runAsync` provides. A few rounds cover
-  /// future → Image → decode → paint. Zero skips the whole step, for a
+  /// future → widget → decode → paint. Zero skips the whole step, for a
   /// fixture with no async images.
+  ///
+  /// "Every image" means every provider the tree will paint, not every `Image`
+  /// widget: a photo behind a scrim is usually a `BoxDecoration(image:)`, and
+  /// an un-precached one is photographed as empty space the first time an
+  /// asset is used in a run. See `_imagesInTree` in `render_engine.dart`.
   final int precacheRounds;
 
   final Duration roundDuration;
