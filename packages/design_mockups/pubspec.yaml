@@ -3,7 +3,7 @@ description: >-
   A headless design-mockup renderer for Flutter apps: mounts the real widgets
   and photographs them across breakpoint x state x theme x locale, with no
   simulator and no golden files.
-version: 0.1.1
+version: 0.1.2
 repository: https://github.com/kai-tw/kai-packages/tree/main/packages/design_mockups
 issue_tracker: https://github.com/kai-tw/kai-packages/issues
 # Consumed by git tag, not from pub.dev.
@@ -42,3 +42,9 @@ dependencies:
 
 dev_dependencies:
   flutter_lints: ^6.0.0
+
+# A test-only fixture: the harness's own image-settling test needs a real
+# asset, because an `AssetImage` is what a consuming app actually paints.
+flutter:
+  assets:
+    - test/fixtures/red.png

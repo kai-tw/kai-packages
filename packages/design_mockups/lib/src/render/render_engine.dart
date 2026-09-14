@@ -140,9 +140,8 @@ Future<void> _settle(
   for (int round = 0; round < settle.precacheRounds; round++) {
     await tester.pump(settle.roundDuration);
     await tester.runAsync(() async {
-      for (final Element element in find.byType(Image).evaluate()) {
-        final Image widget = element.widget as Image;
-        await precacheImage(widget.image, element);
+      for (final _PendingImage pending in _imagesInTree()) {
+        await precacheImage(pending.provider, pending.element);
       }
     });
   }
@@ -167,5 +166,85 @@ Future<void> _settle(
       '${settle.timeout.inSeconds}s — captured mid-animation. Expected for a '
       'loading state; a surprise anywhere else.',
     );
+  }
+}
+
+/// One image the mounted tree will paint, with the element whose configuration
+/// resolves it.
+class _PendingImage {
+  const _PendingImage(this.provider, this.element);
+
+  final ImageProvider<Object> provider;
+  final Element element;
+}
+
+/// The image providers the mounted tree paints, as far as a widget scan can
+/// name them.
+///
+/// **Why a walk and not `find.byType(Image)`.** A photo behind a scrim or a
+/// gradient is a `DecorationImage`, and an app written that way holds no
+/// `Image` widget at all — so a scan for that one type names none of its
+/// photos, and what is not precached is not decoded in time. An asset decodes
+/// on the real event loop, which a widget test reaches only inside `runAsync`;
+/// an image left to resolve on its own therefore lands during the CAPTURE's
+/// `runAsync`, after the frame is rasterised, and the render photographs the
+/// scrim over bare background. Only the FIRST render of an asset does — every
+/// later one finds the decode in the process-wide image cache — so the miss
+/// arrives looking like "the photo is too pale" or "the layers are wrong", and
+/// costs an afternoon in widgets that were never broken.
+///
+/// **What earns an entry in [_providersOf].** A widget whose image reaches the
+/// screen through a render object of its own, because the walk cannot see
+/// past it: `Image` itself, and the decoration carriers `DecoratedBox`,
+/// `DecoratedSliver`, `Table` (its rows) and `Ink`. A widget that composes
+/// from those needs no entry and gets none — `Container`, `AnimatedContainer`,
+/// `CircleAvatar`, `FadeInImage`, `DrawerHeader` all build one of them, and
+/// the walk reaches the result.
+///
+/// **What no widget scan can reach**, here or in any other design: an image
+/// painted by a `CustomPainter` (`TabBar.indicator`), and a `Decoration`
+/// subclass of the app's own that holds a provider this code cannot know
+/// about. Those still photograph blank on first use.
+Iterable<_PendingImage> _imagesInTree() {
+  final List<_PendingImage> found = <_PendingImage>[];
+  void visit(Element element) {
+    for (final ImageProvider<Object> provider in _providersOf(element.widget)) {
+      found.add(_PendingImage(provider, element));
+    }
+    element.visitChildren(visit);
+  }
+
+  WidgetsBinding.instance.rootElement?.visitChildren(visit);
+  return found;
+}
+
+Iterable<ImageProvider<Object>> _providersOf(Widget widget) sync* {
+  if (widget is Image) {
+    yield widget.image;
+  } else if (widget is DecoratedBox) {
+    yield* _decorationProviders(widget.decoration);
+  } else if (widget is DecoratedSliver) {
+    yield* _decorationProviders(widget.decoration);
+  } else if (widget is Ink) {
+    yield* _decorationProviders(widget.decoration);
+  } else if (widget is Table) {
+    // A row's decoration is painted by `RenderTable`, and a `TableRow` is not
+    // a widget — nothing in the element tree carries it.
+    for (final TableRow row in widget.children) {
+      yield* _decorationProviders(row.decoration);
+    }
+  }
+}
+
+Iterable<ImageProvider<Object>> _decorationProviders(
+  Decoration? decoration,
+) sync* {
+  final DecorationImage? image = switch (decoration) {
+    BoxDecoration(image: final DecorationImage? image) => image,
+    ShapeDecoration(image: final DecorationImage? image) => image,
+    _ => null,
+  };
+  if (image != null) {
+    yield image.image;
   }
 }

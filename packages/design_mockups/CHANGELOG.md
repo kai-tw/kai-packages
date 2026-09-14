@@ -1,3 +1,34 @@
+## 0.1.2
+
+Precaches every image the mounted tree will paint, not only `Image` widgets.
+
+The scan was `find.byType(Image)`, which finds nothing in an app that paints
+its photos through `BoxDecoration(image:)` — a scrim or a gradient over a
+photo, which is the ordinary way to do it. Nothing was precached, and an asset
+decodes on the real event loop that a widget test only reaches inside
+`runAsync`, so the image first resolved during the CAPTURE's `runAsync` —
+after the frame had been rasterised.
+
+What that produced was a first-use miss, and its shape is what made it
+expensive: the first render to use an asset photographed the scrim over bare
+background, and every later render of it was fine, because by then the decode
+sat in the process-wide image cache. So a light/dark pair came out as one
+blank card and one correct one, which reads as "the photo is too pale" or "the
+widget's layers are wrong" and sends you editing widgets that were never
+broken.
+
+The scan now walks the element tree, naming the widgets whose image reaches
+the screen through a render object of their own — `Image`, and the
+`BoxDecoration` / `ShapeDecoration` of a `DecoratedBox`, a `DecoratedSliver`,
+a `Table` row and an `Ink`. Anything that composes from those needs no entry
+and has none: `Container`, `CircleAvatar`, `FadeInImage` and friends are
+covered because the walk reaches what they build, which the new tests pin
+directly.
+
+Still not covered, and not coverable by any widget scan: an image painted by a
+`CustomPainter` (`TabBar.indicator`), and an app's own `Decoration` subclass
+holding a provider this package cannot know about.
+
 ## 0.1.1
 
 Drops this package's dependency on `design_mockups_annotations`, which made the
