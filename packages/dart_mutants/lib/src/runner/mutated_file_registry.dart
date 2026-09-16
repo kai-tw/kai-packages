@@ -19,6 +19,21 @@ import 'dart:io';
 /// (rather than only at the very end) is the actual mitigation: at any
 /// moment during a run, at most one file is in a mutated state.
 class MutatedFileRegistry {
+  /// [watchSignal] and [exitProcess] default to the real `ProcessSignal.watch`
+  /// and `exit`; a test swaps them to deliver a signal, or refuse to watch
+  /// one, and to observe the exit, without ending its own process.
+  MutatedFileRegistry({
+    Stream<ProcessSignal> Function(ProcessSignal signal) watchSignal =
+        _watchReal,
+    void Function(int code) exitProcess = exit,
+  }) : _watchSignal = watchSignal,
+       _exitProcess = exitProcess;
+
+  static Stream<ProcessSignal> _watchReal(ProcessSignal signal) =>
+      signal.watch();
+
+  final Stream<ProcessSignal> Function(ProcessSignal signal) _watchSignal;
+  final void Function(int code) _exitProcess;
   final Map<String, String> _originalContent = <String, String>{};
   StreamSubscription<ProcessSignal>? _sigintSubscription;
   StreamSubscription<ProcessSignal>? _sigtermSubscription;
@@ -43,15 +58,11 @@ class MutatedFileRegistry {
       return;
     }
     _beforeExit = beforeExit;
-    _sigintSubscription = ProcessSignal.sigint.watch().listen(_onSignal);
+    _sigintSubscription = _watchSignal(ProcessSignal.sigint).listen(_onSignal);
     try {
-      _sigtermSubscription = ProcessSignal.sigterm.watch().listen(_onSignal);
-      // coverage:ignore-start
-      // `ProcessSignal.sigterm.watch()` only throws on a platform that
-      // cannot watch SIGTERM at all (Windows). This CI and every dev
-      // machine this package is exercised on is POSIX, so the call above
-      // never throws here — there is no way to make it throw from inside a
-      // test process short of actually running the suite on Windows.
+      _sigtermSubscription = _watchSignal(
+        ProcessSignal.sigterm,
+      ).listen(_onSignal);
     } on SignalException catch (e) {
       // Not every platform can watch SIGTERM (Windows cannot). Worth saying
       // out loud, not just silently degrading — SIGINT alone still covers
@@ -62,30 +73,15 @@ class MutatedFileRegistry {
         '— only SIGINT (Ctrl-C) will trigger a restore.',
       );
     }
-    // coverage:ignore-end
   }
 
-  // coverage:ignore-start
-  // Reachable only from a real `SIGINT`/`SIGTERM` delivered to this process
-  // by the OS — not something a test in this same process can trigger
-  // without also ending the test process itself. Proven correct instead by
-  // `test/runner/signal_restore_test.dart`, which starts the real CLI
-  // binary as a subprocess, sends it a real signal, and asserts on the
-  // subprocess's own observable effects (the file restored, the descendant
-  // process reaped). That integration coverage lives in a separate Dart VM
-  // and is structurally invisible to this process's `--coverage`
-  // instrumentation — the same process-boundary shape as
-  // `log_system`'s Firebase Crashlytics client factory.
-  //
-  // Torn off directly as the `.listen()` callback in [armSignalRestore]
-  // rather than wrapped in `(ProcessSignal _) => _onSignal()` — that wrapper
-  // would itself be a separate, permanently-uncovered line for the same
-  // process-boundary reason, doubling this ignore block for no benefit.
+  // `test/runner/signal_restore_test.dart` proves this against a real signal
+  // in a subprocess; the injected [_watchSignal] and [_exitProcess] let this
+  // process's own tests drive it as well.
   void _onSignal(ProcessSignal _) {
     handleSignal();
-    exit(1);
+    _exitProcess(1);
   }
-  // coverage:ignore-end
 
   /// The non-exiting half of the signal handler: restores every tracked
   /// file, then runs the [armSignalRestore]-time `beforeExit` callback.

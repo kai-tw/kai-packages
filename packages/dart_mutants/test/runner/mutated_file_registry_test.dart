@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:dart_mutants/src/runner/mutated_file_registry.dart';
@@ -131,4 +132,68 @@ void main() {
       await registry.disarm();
     },
   );
+
+  test(
+    '[partition] a delivered signal restores, runs beforeExit, then exits 1',
+    () async {
+      final StreamController<ProcessSignal> sigterm =
+          StreamController<ProcessSignal>();
+      final List<String> order = <String>[];
+      final MutatedFileRegistry registry = MutatedFileRegistry(
+        watchSignal: (ProcessSignal s) => s == ProcessSignal.sigterm
+            ? sigterm.stream
+            : const Stream<ProcessSignal>.empty(),
+        exitProcess: (int code) => order.add('exit $code'),
+      );
+      registry.track(file.path, 'original content');
+      file.writeAsStringSync('mutated content');
+      registry.armSignalRestore(
+        beforeExit: () => order.add(
+          'beforeExit, file: ${file.readAsStringSync()}',
+        ),
+      );
+
+      sigterm.add(ProcessSignal.sigterm);
+      await pumpEventQueue();
+
+      expect(order, <String>[
+        'beforeExit, file: original content',
+        'exit 1',
+      ]);
+      await registry.disarm();
+      await sigterm.close();
+    },
+  );
+
+  test(
+    '[boundary] a platform that cannot watch SIGTERM still arms on SIGINT, '
+    'and says so',
+    () async {
+      final _RecordingStdout err = _RecordingStdout();
+      final MutatedFileRegistry registry = MutatedFileRegistry(
+        watchSignal: (ProcessSignal s) => s == ProcessSignal.sigterm
+            ? throw const SignalException('unsupported')
+            : const Stream<ProcessSignal>.empty(),
+      );
+
+      IOOverrides.runZoned(registry.armSignalRestore, stderr: () => err);
+
+      expect(registry.isArmed, isTrue);
+      expect(
+        err.text.toString(),
+        contains('cannot watch SIGTERM on this platform (unsupported)'),
+      );
+      await registry.disarm();
+    },
+  );
+}
+
+class _RecordingStdout implements Stdout {
+  final StringBuffer text = StringBuffer();
+
+  @override
+  void writeln([Object? object = '']) => text.writeln(object);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

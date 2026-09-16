@@ -469,4 +469,42 @@ void main() {
       );
     },
   );
+
+  group('processTableForTest', () {
+    test('[partition] parses pid/ppid pairs and skips malformed rows', () {
+      expect(
+        ProcessCommand.processTableForTest(
+          () => ProcessResult(0, 0, '  10   1\n 11 10\nbogus\n\n x 3\n', ''),
+        ),
+        <List<int>>[
+          <int>[10, 1],
+          <int>[11, 10],
+        ],
+      );
+    });
+
+    test('[boundary] no `ps` degrades to an empty table, and says so', () {
+      final _RecordingStdout err = _RecordingStdout();
+
+      final List<List<int>> table = IOOverrides.runZoned(
+        () => ProcessCommand.processTableForTest(
+          () => throw const ProcessException('ps', <String>[]),
+        ),
+        stderr: () => err,
+      );
+
+      expect(table, isEmpty);
+      expect(err.text.toString(), contains('no `ps` on this platform'));
+    });
+  });
+}
+
+class _RecordingStdout implements Stdout {
+  final StringBuffer text = StringBuffer();
+
+  @override
+  void writeln([Object? object = '']) => text.writeln(object);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }

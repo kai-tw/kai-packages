@@ -23,9 +23,8 @@ import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 /// against the real SDK type — see `firebase_crashlytics_client_test.dart`.
 abstract class FirebaseCrashlyticsClient {
   /// Wraps a real [FirebaseCrashlytics] instance. The only call site is
-  /// `LogSystem.init`, gated the same way — and for the same reason — as
-  /// every other reach into [FirebaseCrashlytics.instance]; see the
-  /// `coverage:ignore` comment there.
+  /// `LogSystem.realCrashlyticsClientForTest`, the factory `LogSystem.init`
+  /// passes along.
   factory FirebaseCrashlyticsClient.wrapping(FirebaseCrashlytics instance) =
       _RealFirebaseCrashlyticsClient;
 

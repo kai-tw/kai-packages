@@ -204,19 +204,17 @@ class ProcessCommand {
 
   /// `[pid, ppid]` for every process on the machine, or empty when this
   /// platform has no `ps` to ask.
-  static List<List<int>> _processTable() {
+  static List<List<int>> _processTable() => processTableForTest(
+    () => Process.runSync('ps', <String>['-Ao', 'pid=,ppid=']),
+  );
+
+  /// [_processTable] with the `ps` call passed in, so a test can make it
+  /// fail — `Process.runSync` resolves `ps` against the inherited `PATH`,
+  /// which a running Dart process cannot rewrite for itself.
+  static List<List<int>> processTableForTest(ProcessResult Function() runPs) {
     final ProcessResult result;
     try {
-      result = Process.runSync('ps', <String>['-Ao', 'pid=,ppid=']);
-      // coverage:ignore-start
-      // `ps` is on every machine this package is developed and run on
-      // (POSIX CI, POSIX dev machines). Making this branch fire would mean
-      // making `ps` itself unresolvable from inside the test process —
-      // `Process.runSync` resolves it against the real inherited `PATH`,
-      // which `Platform.environment` in Dart cannot rewrite for the
-      // current process (it is read-only), so there is no in-process way
-      // to fake "no `ps`" without actually running on a platform that
-      // lacks it.
+      result = runPs();
     } on ProcessException {
       stderr.writeln(
         'dart_mutants: no `ps` on this platform, so only the direct child is '
@@ -224,7 +222,6 @@ class ProcessCommand {
         'process (`flutter test` does) will leak that engine.',
       );
       return const <List<int>>[];
-      // coverage:ignore-end
     }
 
     final List<List<int>> rows = <List<int>>[];

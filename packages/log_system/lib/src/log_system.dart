@@ -181,18 +181,7 @@ class LogSystem {
           reportCrashes: reportCrashes,
           customKeys: customKeys,
           deferredCustomKeys: deferredCustomKeys,
-          // coverage:ignore-start
-          // `FirebaseCrashlytics.instance` resolves a real plugin singleton:
-          // reaching it needs a registered `FirebaseCrashlyticsPlatform`,
-          // which in a pure-Dart test binary fails an internal plugin
-          // assertion (`pluginConstants['isCrashlyticsCollectionEnabled'] !=
-          // null`) the moment anything calls a method on the client this
-          // builds — see `buildCrashlyticsReportForTest`'s own doc for why
-          // that assertion is structurally unreachable from here, and for
-          // everything this one line is not responsible for proving.
-          clientFactory: () =>
-              FirebaseCrashlyticsClient.wrapping(FirebaseCrashlytics.instance),
-          // coverage:ignore-end
+          clientFactory: realCrashlyticsClientForTest,
         ),
       ),
     );
@@ -248,6 +237,10 @@ class LogSystem {
   /// substitution reaches a private field in a package this one does not
   /// own; only re-implementing that plugin's own native handshake would, and
   /// that is testing the SDK, not this package.
+  ///
+  /// [init] passes [realCrashlyticsClientForTest] as the factory, which a test
+  /// can call on its own: resolving `FirebaseCrashlytics.instance` and wrapping
+  /// it calls no method on it, so it runs against a mocked `FirebasePlatform`.
   @visibleForTesting
   static LogDataSource? buildCrashlyticsReportForTest({
     required bool hasFirebase,
@@ -267,19 +260,30 @@ class LogSystem {
     );
   }
 
+  /// The factory [init] hands [buildCrashlyticsReportForTest]: the real SDK
+  /// singleton, wrapped. Named rather than a closure so a test can run it.
+  @visibleForTesting
+  static FirebaseCrashlyticsClient realCrashlyticsClientForTest() =>
+      FirebaseCrashlyticsClient.wrapping(FirebaseCrashlytics.instance);
+
   /// The two handlers every uncaught throw arrives at, wired once here so two
   /// apps cannot drift apart on the judgements they involve. They did.
   ///
   /// Both handler bodies are extracted to [handleFrameworkErrorForTest] and
   /// [handleAsyncErrorForTest] rather than written inline, and the reason is
-  /// the first of the two gates below: `kReleaseMode` is a compile-time
-  /// constant, always false in a `flutter test` binary, so the assignment
-  /// this method makes under `if (kReleaseMode)` never runs there — a test
-  /// cannot flip the constant, and therefore cannot reach an inline closure's
-  /// body at all. Extracted as ordinary static methods, this package's own
-  /// tests can call the logic directly, bypassing the release gate that only
-  /// decides *whether Flutter should wire it up*, never what it does.
-  static void _installErrorHandlers() {
+  /// the release gate below: `kReleaseMode` is a compile-time constant,
+  /// always false in a `flutter test` binary, so a test cannot flip it.
+  /// Extracted as ordinary static methods, this package's own tests can call
+  /// the logic directly. The gate itself is a parameter of
+  /// [installErrorHandlersForTest] for the same reason — so the release-only
+  /// assignment is exercised too, not just the handler it installs.
+  static void _installErrorHandlers() =>
+      installErrorHandlersForTest(releaseMode: kReleaseMode);
+
+  /// [_installErrorHandlers] with the release gate passed in; production
+  /// always passes `kReleaseMode`.
+  @visibleForTesting
+  static void installErrorHandlersForTest({required bool releaseMode}) {
     // Release only. In debug `FlutterError.onError` already defaults to
     // `FlutterError.presentError`, so overriding it there reimplements the
     // default — and presenting *and* logging prints the same error twice while
@@ -290,15 +294,8 @@ class LogSystem {
     // exception.toString())` branch, and `debugPrint` is not assert-gated, so
     // it would put the raw exception on logcat / oslog — the object the
     // redaction exists to stop, reaching a different sink.
-    if (kReleaseMode) {
-      // coverage:ignore-start
-      // The assignment itself is release-only by the same `kReleaseMode`
-      // gate as the handler it installs, so it can no more be exercised
-      // under `flutter test` than the body it points at — see
-      // `handleFrameworkErrorForTest` for where that body is actually
-      // tested.
+    if (releaseMode) {
       FlutterError.onError = handleFrameworkErrorForTest;
-      // coverage:ignore-end
     }
 
     // Unconditional, because Flutter installs nothing here by default.

@@ -270,6 +270,26 @@ void main() {
       );
     });
 
+    test(
+      '[partition] the release gate installs the framework handler, and only '
+      'when open',
+      () {
+        final FlutterExceptionHandler? original = FlutterError.onError;
+        try {
+          LogSystem.installErrorHandlersForTest(releaseMode: false);
+          expect(FlutterError.onError, same(original));
+
+          LogSystem.installErrorHandlersForTest(releaseMode: true);
+          expect(
+            FlutterError.onError,
+            same(LogSystem.handleFrameworkErrorForTest),
+          );
+        } finally {
+          FlutterError.onError = original;
+        }
+      },
+    );
+
     test('installErrorHandlers: false leaves it untouched', () {
       PlatformDispatcher.instance.onError = null;
       LogSystem.init(installErrorHandlers: false);

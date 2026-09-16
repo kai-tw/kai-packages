@@ -21,6 +21,9 @@ dev_dependencies:
   # instead, because for them it is a released tool rather than a sibling.
   dart_mutants:
     path: ../dart_mutants
+  # `setupFirebaseCoreMocks()`, for the one test that resolves the real
+  # `FirebaseCrashlytics.instance` (real_crashlytics_client_test.dart).
+  firebase_core_platform_interface: ^8.1.0
   flutter_lints: ^6.0.0
   flutter_test:
     sdk: flutter
