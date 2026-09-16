@@ -1,3 +1,22 @@
+## 0.2.8
+
+No behaviour change to a run.
+
+**No more `// coverage:ignore` blocks in this package's own source.** The
+three branches they hid are now run in process by a test:
+
+- `MutatedFileRegistry` takes optional `watchSignal` and `exitProcess`
+  functions, defaulting to `ProcessSignal.watch` and `exit`. A test delivers a
+  signal and checks the restore → `beforeExit` → exit(1) order, and makes
+  SIGTERM unwatchable to reach the warning path.
+  `test/runner/signal_restore_test.dart` still covers the real signal in a
+  subprocess.
+- `ProcessCommand`'s process-table read takes the `ps` call as a parameter
+  (`processTableForTest`), so the no-`ps` fallback is tested too.
+
+How the tool treats `coverage:ignore` comments in the code it mutates is
+unchanged.
+
 ## 0.2.7
 
 **`--select-by-coverage` runs each mutant against only the tests that

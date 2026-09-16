@@ -1,3 +1,21 @@
+## 0.4.2
+
+No behaviour change to anything a host app calls.
+
+**No more `// coverage:ignore` blocks.** Both lines they hid are now run by a
+test instead of dropped from the coverage report:
+
+- The Crashlytics client factory `init` passes is a named static,
+  `realCrashlyticsClientForTest`, and a new test runs it against mocked
+  Firebase core. Resolving and wrapping the SDK singleton calls no method on
+  it, so the mock is enough.
+- The release-only `FlutterError.onError` assignment moved into
+  `installErrorHandlersForTest(releaseMode:)`; `init` still passes
+  `kReleaseMode`, and a test now drives both sides of the gate.
+
+Both are `@visibleForTesting` and not exported. `firebase_core_platform_interface`
+is a new dev dependency, for `setupFirebaseCoreMocks()`.
+
 ## 0.4.1
 
 Tests only — no API or behaviour change to anything a host app calls.
