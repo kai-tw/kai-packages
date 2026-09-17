@@ -68,6 +68,16 @@ Future<void> main(List<String> arguments) async {
           'full command.',
     )
     ..addOption(
+      'workers',
+      abbr: 'j',
+      defaultsTo: '1',
+      help:
+          'How many mutants run at once. Above 1, each worker runs in a copy '
+          'of the package made of links, a few megabytes each plus what the '
+          'test command builds, and the package itself is never written to. '
+          'Memory is the usual limit: each worker runs its own test command.',
+    )
+    ..addOption(
       'output',
       abbr: 'o',
       valueHelp: 'path',
@@ -136,6 +146,11 @@ Future<void> main(List<String> arguments) async {
       'note: --select-by-coverage was not applied ($reason), so every '
       'mutant runs the full test command.',
     ),
+    workers: int.parse(args['workers'] as String),
+    onWorkersFallback: (String reason) => stderr.writeln(
+      'note: --workers was not applied ($reason), so mutants run one at a '
+      'time in the package itself.',
+    ),
     onPlan: _planPrinter(quiet: jsonOnStdout),
     onProgress: _progressPrinter(quiet: jsonOnStdout),
   );
@@ -201,7 +216,9 @@ ArgResults? _parseAndValidate(List<String> arguments, ArgParser parser) {
   }
 
   final String? optionError =
-      _timeoutOptionError(args) ?? _outputOptionError(args);
+      _timeoutOptionError(args) ??
+      _outputOptionError(args) ??
+      _workersOptionError(args);
   if (optionError != null) {
     stderr.writeln(optionError);
     exitCode = 64;
@@ -295,6 +312,13 @@ bool _writeReport(String path, String json) {
     stderr.writeln('could not write the report to $path: $e');
     return false;
   }
+}
+
+String? _workersOptionError(ArgResults args) {
+  final int? workers = int.tryParse(args['workers'] as String);
+  return workers == null || workers < 1
+      ? '--workers must be a whole number, 1 or more'
+      : null;
 }
 
 bool _isPositiveSeconds(String value) {

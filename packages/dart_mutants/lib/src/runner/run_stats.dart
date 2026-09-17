@@ -32,6 +32,16 @@ class RunStats {
 
   Duration? coveragePass;
 
+  /// Making the workers' sandboxes — see `MutationTestRunner.workers`.
+  Duration? sandboxSetup;
+
+  /// How many workers ran the mutants.
+  int? workers;
+
+  /// Each sandboxed worker's own disk use when the last mutant finished,
+  /// links not counted. Empty when the mutants ran in the package itself.
+  List<int>? workerDiskBytes;
+
   final List<MutantTiming> mutants = <MutantTiming>[];
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -45,16 +55,25 @@ class RunStats {
       'start': loadAtStart?.toJson(),
       'end': loadAtEnd?.toJson(),
     },
-    'phases': <String, Object?>{
-      if (baseline != null) 'baselineSeconds': _s(baseline!),
-      if (gateCheck != null) 'gateCheckSeconds': _s(gateCheck!),
-      if (coveragePass != null) 'coveragePassSeconds': _s(coveragePass!),
-      'mutantsSeconds': _s(_sum(mutants, (MutantTiming m) => m.elapsed)),
-    },
+    'phases': _phases(),
     'verdicts': _breakdown((MutantTiming m) => m.bucket),
     'operators': _breakdown((MutantTiming m) => m.result.mutant.operatorName),
     'selection': _selection(),
+    if (workers != null) 'workers': workers,
+    if (workerDiskBytes != null) 'workerDiskBytes': workerDiskBytes,
     'mutants': mutants.map((MutantTiming m) => m.toJson()).toList(),
+  };
+
+  /// Seconds per phase that ran.
+  Map<String, Object?> _phases() => <String, Object?>{
+    for (final MapEntry<String, Duration?> phase in <String, Duration?>{
+      'baselineSeconds': baseline,
+      'gateCheckSeconds': gateCheck,
+      'coveragePassSeconds': coveragePass,
+      'sandboxSetupSeconds': sandboxSetup,
+    }.entries)
+      if (phase.value case final Duration took) phase.key: _s(took),
+    'mutantsSeconds': _s(_sum(mutants, (MutantTiming m) => m.elapsed)),
   };
 
   /// Count and seconds per [key], and — per operator — per verdict too.

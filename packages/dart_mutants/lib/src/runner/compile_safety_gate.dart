@@ -5,6 +5,8 @@ import 'package:analyzer/dart/analysis/analysis_context_collection.dart';
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:analyzer/diagnostic/diagnostic.dart';
 import 'package:analyzer/error/error.dart';
+import 'package:analyzer/file_system/overlay_file_system.dart';
+import 'package:analyzer/file_system/physical_file_system.dart';
 import 'package:path/path.dart' as p;
 
 import 'process_command.dart';
@@ -40,6 +42,19 @@ abstract interface class CompileSafetyGate {
   /// Releases whatever the gate holds for the run. Safe to call when
   /// [compiles] never ran, and safe to call twice.
   Future<void> close();
+}
+
+/// A gate that can judge a file's would-be content without it being on
+/// disk.
+///
+/// The runner prefers this where a gate offers it: a mutant that does not
+/// compile is then never written anywhere, and parallel workers can share
+/// one gate — the files they write sit in their own directories, which a
+/// disk-reading gate would each have to be pointed at.
+abstract interface class SourceCompileSafetyGate implements CompileSafetyGate {
+  /// Whether [filePath] would compile with [source] as its content. The file
+  /// on disk is neither read for this nor changed.
+  Future<bool> compilesSource(String filePath, String source);
 }
 
 /// Asks the analyzer in this process whether a mutated file still compiles,
@@ -91,7 +106,7 @@ abstract interface class CompileSafetyGate {
 /// puts every target to the gate before mutating anything, and a file the
 /// gate rejects unmodified is judged by a fallback instead (see
 /// `MutationTestRunner.run`).
-class InProcessAnalyzerGate implements CompileSafetyGate {
+class InProcessAnalyzerGate implements SourceCompileSafetyGate {
   /// [includedPaths] must cover every file [compiles] will be asked about —
   /// the analyzer refuses a file outside them. Passing the run's own target
   /// files is enough; each is resolved within its enclosing package.
@@ -101,6 +116,18 @@ class InProcessAnalyzerGate implements CompileSafetyGate {
   final List<String> _includedPaths;
   AnalysisContextCollection? _collection;
 
+  /// The disk, with a [compilesSource] question's content laid over it for
+  /// as long as that question takes.
+  final OverlayResourceProvider _files = OverlayResourceProvider(
+    PhysicalResourceProvider.INSTANCE,
+  );
+  int _stamp = 0;
+
+  /// The question before the latest one. Questions are answered one at a
+  /// time: an overlay set for one would otherwise be seen by another that
+  /// imports its file.
+  Future<void> _previous = Future<void>.value();
+
   /// Every file this gate has told the analyzer about, and the one it was
   /// last asked to judge.
   final Set<String> _touched = <String>{};
@@ -109,8 +136,36 @@ class InProcessAnalyzerGate implements CompileSafetyGate {
   static String _normalize(String path) => p.normalize(p.absolute(path));
 
   @override
-  Future<bool> compiles(String filePath) async {
+  Future<bool> compiles(String filePath) =>
+      _serially(() => _judge(_normalize(filePath)));
+
+  @override
+  Future<bool> compilesSource(String filePath, String source) {
     final String path = _normalize(filePath);
+    return _serially(() async {
+      _files.setOverlay(path, content: source, modificationStamp: ++_stamp);
+      try {
+        return await _judge(path);
+      } finally {
+        _files.removeOverlay(path);
+        // Applied with the next question, which then reads the file — and
+        // anything importing it — from disk again.
+        _collection?.contextFor(path).changeFile(path);
+      }
+    });
+  }
+
+  Future<bool> _serially(Future<bool> Function() question) {
+    final Future<bool> answer = _previous.then((_) => question());
+    _previous = answer.then<void>((_) {}, onError: _ignoreForOrdering);
+    return answer;
+  }
+
+  /// The failure still reaches whoever asked, through the answer itself;
+  /// the queue only needs to know it is over.
+  static void _ignoreForOrdering(Object error) => error;
+
+  Future<bool> _judge(String path) async {
     // The analyzer resolves a missing file as an empty one — which has no
     // errors, and would read as compiling. Checked here, before anything
     // below can be asked about it.
@@ -118,7 +173,10 @@ class InProcessAnalyzerGate implements CompileSafetyGate {
       return false;
     }
     final AnalysisContextCollection collection = _collection ??=
-        AnalysisContextCollection(includedPaths: _includedPaths);
+        AnalysisContextCollection(
+          includedPaths: _includedPaths,
+          resourceProvider: _files,
+        );
 
     // The mutant was written to disk by the caller, behind the analyzer's
     // back. Without this the collection answers from the version it last

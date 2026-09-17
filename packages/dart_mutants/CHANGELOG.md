@@ -36,6 +36,22 @@ selection cost, and a timing entry for every mutant, `detected` ones
 included. `--history <path>` appends each run's report to a JSON Lines
 file, aborted runs included. See *Run statistics* in the README.
 
+**`--workers N` runs mutants in parallel, without copying the package.**
+Each worker gets a sandbox made of symbolic links, where only the target
+files are real copies, and the package itself is never written to while
+more than one worker runs. A sandbox holds a few kilobytes of its own plus
+what the test command builds there (46MB of `build/` for `flutter test` on a
+small Flutter package). Before the workers start, the full test command runs
+once in one sandbox against unmodified code, and a run whose sandbox fails
+that check falls back to one worker, in place, saying why. The default is 1,
+which runs as before. See *Running mutants in parallel* in the README.
+
+- The in-process compile-safety gate now judges a mutant's content in
+  memory, one question at a time, so it can serve every worker, and a
+  mutant that does not compile is never written to disk.
+- Statistics add `workers`, each sandbox's disk use, the sandbox setup time
+  and, per mutant, the `worker` that ran it.
+
 **Temporary directories are always cleaned up.** The coverage pass's
 report directory used to be left behind when a run was interrupted with
 `SIGINT` or `SIGTERM`. Every temporary directory now goes through one

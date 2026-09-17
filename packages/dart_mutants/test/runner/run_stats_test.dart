@@ -26,7 +26,9 @@ MutantTiming _timing(
   bool selected = false,
   int? measurementMs,
   int? retryMs,
+  int worker = 0,
 }) => MutantTiming(
+  worker: worker,
   result: MutantResult(
     mutant: _mutant(operatorName, ms),
     verdict: verdict,
@@ -55,6 +57,9 @@ RunStats _stats() =>
       )
       ..baseline = const Duration(milliseconds: 1500)
       ..gateCheck = const Duration(milliseconds: 40)
+      ..sandboxSetup = const Duration(milliseconds: 250)
+      ..workers = 2
+      ..workerDiskBytes = <int>[1024, 2048]
       ..finishedAt = DateTime.utc(2026, 9, 17, 1, 0, 10)
       ..mutants.addAll(<MutantTiming>[
         _timing(
@@ -63,6 +68,7 @@ RunStats _stats() =>
           ms: 2000,
           selected: true,
           measurementMs: 900,
+          worker: 1,
         ),
         _timing('ternary_swap', MutantVerdict.invalid, ms: 10),
         _timing(
@@ -102,6 +108,7 @@ void main() {
     expect(json['phases'], <String, Object?>{
       'baselineSeconds': 1.5,
       'gateCheckSeconds': 0.04,
+      'sandboxSetupSeconds': 0.25,
       'mutantsSeconds': 35.017,
     });
   });
@@ -159,6 +166,7 @@ void main() {
       'column': 3,
       'operatorName': 'ternary_swap',
       'verdict': 'detected',
+      'worker': 1,
       'seconds': 2,
       'gateSeconds': 0.005,
       'selected': true,
@@ -172,10 +180,16 @@ void main() {
       'column': 3,
       'operatorName': 'ternary_swap',
       'verdict': 'invalid',
+      'worker': 0,
       'seconds': 0.01,
       'gateSeconds': 0.005,
       'selected': false,
     });
+  });
+
+  test('[partition] how many workers ran, and what each held on disk', () {
+    expect(json['workers'], 2);
+    expect(json['workerDiskBytes'], <int>[1024, 2048]);
   });
 
   test('[boundary] an unfinished run has no end and no wall time', () {

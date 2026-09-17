@@ -349,6 +349,50 @@ them enter its function; a 44-file scope like the one measured above is
 where it should matter most, and that has not been measured with the flag
 yet.
 
+## Running mutants in parallel
+
+`--workers N` (`-j N`) runs N mutants at once. The default, 1, writes each
+mutant into the package itself and puts the file back afterwards.
+
+With more than one, the package itself is never written to. Each worker gets
+a sandbox: a copy of the package made of symbolic links, in which only the
+target files are real copies. The directories on the way to them, and every
+directory under `lib/` and `test/`, are real directories full of links. Every
+other top-level directory is one link, top-level files are copied (tools
+rewrite some of them in place), and `.dart_tool/` holds a package config that
+resolves the package to the sandbox. `build/`, `.git/` and, under
+`flutter test`, the platform directories are left out. Under `flutter test`
+each worker's command also gets `--no-pub`.
+
+So a sandbox costs a few kilobytes of its own, plus what the test command
+builds there: measured on a small Flutter package, 46MB of `build/` from
+`flutter test`, and about 30MB of compiled test runner in `.dart_tool/` from
+`dart test`. Each sandbox is deleted with the run's other temporary
+directories, and the statistics record how much each one held at the end.
+
+The compile-safety gate is shared: the default in-process analyzer judges a
+mutant's content in memory, one question at a time, so a mutant that does not
+compile is never written anywhere. `--analyze-command` still reads the
+mutant from the worker's copy.
+
+Before any mutant runs, the full test command runs once in the first sandbox
+against unmodified code. The baseline vouches for the package, not for a
+copy of it, and a copy the tools cannot work in would fail every command run
+there, which would read as every mutant `detected`. If that check fails, the
+run says why on stderr and goes on with one worker, in place.
+
+Memory is usually the limit, not processors: each worker runs its own test
+command, and a `flutter test` process can take a gigabyte or two.
+
+Do not expect N times the speed. Measured on `log_system` here (182
+mutants, `--select-by-coverage`, a 10-core machine at a load average of
+about 2.3 both times), two workers gave the same verdicts, mutant by mutant,
+as one, in 727s against 872s. Each test run slowed from 5.7s to 8.2s on
+average, because a `flutter test` run compiles on several cores itself, so
+the two workers competed for them. The first sandbox's check added 20s. The
+baseline and the coverage pass still run once, in the package, before the
+workers start.
+
 ## Run statistics
 
 Every report carries `stats`: what the run cost and where the time went, so
@@ -373,15 +417,19 @@ dart run dart_mutants --select-by-coverage \
   gives one. The same suite has taken 9s and 29s on one machine depending on
   what else ran, so a slow run needs this to be read at all;
 - `phases`: `baselineSeconds`, `gateCheckSeconds` (every target put to the
-  gate unmodified), `coveragePassSeconds` and `mutantsSeconds`. A phase that
-  did not run is absent;
+  gate unmodified), `coveragePassSeconds`, `sandboxSetupSeconds` (making the
+  sandboxes and checking one) and `mutantsSeconds`. A phase that did not run
+  is absent;
+- `workers`: how many ran the mutants, and `workerDiskBytes`: what each
+  sandbox held of its own at the end;
 - `verdicts` and `operators`: count and seconds for each, and for each
   operator its verdicts. `uncovered` is counted apart from `undetected`;
 - `selection`: how many mutants ran a selection, how many selections were
   measured and for how long, and how many selected runs fell back to the
   full command and what that cost;
 - `mutants`: one entry per mutant, `detected` ones included, with its
-  location, operator, verdict, `seconds`, `gateSeconds`, whether it was
+  location, operator, verdict, the `worker` that ran it, `seconds`,
+  `gateSeconds`, whether it was
   `selected`, and `measurementSeconds`, `testSeconds`, `retrySeconds` and
   `timeoutSeconds` where they apply.
 
@@ -528,13 +576,16 @@ real CLI binary, not just the internal report types:
   `>=` perturb different inputs, so a suite covering only `a == b` can
   legitimately catch one and miss the other — that pair disagrees for a good
   reason and is not evidence of anything.
-- **Sequential, not parallel.** Runtime is mutant count times one test
-  run. `--select-by-coverage` makes each run cheaper and skips the ones no
-  test could reach, but the rest still run one at a time. Running mutants in
-  parallel is a real option for a project that needs it, deliberately not
-  attempted here yet — a mutant applied to a shared file while another
-  mutant's test run is in flight is a correctness risk this package has not
-  solved, and a wrong number is worse than a slow one.
+- **Parallel runs rest on symbolic links.** `--workers` above 1 keeps each
+  worker's mutants out of the others' way by giving it its own copy of the
+  package (see *Running mutants in parallel*), made of links. A tool that
+  writes to a linked file in place would write to the package itself; the
+  known ones are handled (top-level files are copied, platform directories
+  left out, `--no-pub` under Flutter), and the check in the first sandbox
+  catches a copy the tools cannot work in, but not a stray write. A test
+  that updates a checked-in file, such as a golden image, should not run
+  with more than one worker. Parallel runs are untested on Windows, where
+  creating a link can need extra privileges.
 - **`SIGKILL` cannot be caught.** `SIGINT`/`SIGTERM` restore whatever is
   mutated, kill the in-flight test command's process tree and delete the
   run's temporary directories before exiting (all tested against the real

@@ -9,6 +9,7 @@ class MutantTiming {
   const MutantTiming({
     required this.result,
     required this.elapsed,
+    this.worker = 0,
     required this.gate,
     required this.selected,
     this.measurement,
@@ -17,6 +18,9 @@ class MutantTiming {
   });
 
   final MutantResult result;
+
+  /// Which worker ran it, numbered from 0.
+  final int worker;
 
   /// Everything: writing the mutant, the gate, any test runs, the restore.
   final Duration elapsed;
@@ -49,6 +53,7 @@ class MutantTiming {
     'column': result.mutant.column,
     'operatorName': result.mutant.operatorName,
     'verdict': bucket,
+    'worker': worker,
     'seconds': seconds(elapsed),
     'gateSeconds': seconds(gate),
     'selected': selected,
