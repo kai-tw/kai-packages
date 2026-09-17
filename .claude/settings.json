@@ -1,5 +1,6 @@
 {
   "enabledPlugins": {
-    "plan-cycle@kai-tw": true
+    "flutter-toolkit@kai-tw": true,
+    "reclaim-space@kai-tw": true
   }
 }
