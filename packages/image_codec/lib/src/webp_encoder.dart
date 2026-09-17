@@ -34,7 +34,7 @@ abstract final class WebpEncoder {
   /// without violating this repo's own `avoid_catching_error`. This method
   /// therefore **checks the platform before calling** rather than catching
   /// afterwards: prevention converts a whole class of uncatchable `Error` into
-  /// this package's own [ImageEncodeException] without a catch clause anywhere.
+  /// this package's own [ImageCodecEncodeException] without a catch clause anywhere.
   ///
   /// **Silently resizes when the source is large.** The compressor's
   /// [minWidth]/[minHeight] are a FLOOR on the result, not a ceiling, and the
@@ -65,7 +65,7 @@ abstract final class WebpEncoder {
   /// cannot catch correct-sized-but-wrong-pixels, which would need a real
   /// device to establish.
   ///
-  /// Throws [ImageEncodeException] on an unsupported platform, on empty or
+  /// Throws [ImageCodecEncodeException] on an unsupported platform, on empty or
   /// undecodable bytes, and when neither encode path produces output.
   static Future<Uint8List> encodeWebp(
     Uint8List bytes, {
@@ -74,10 +74,10 @@ abstract final class WebpEncoder {
     int minHeight = 1080,
   }) async {
     if (bytes.isEmpty) {
-      throw const ImageEncodeException('cannot encode empty bytes');
+      throw const ImageCodecEncodeException('cannot encode empty bytes');
     }
     if (!Platform.isAndroid && !Platform.isIOS) {
-      throw ImageEncodeException(
+      throw ImageCodecEncodeException(
         'WebP encoding is available on Android and iOS only; this is '
         '${Platform.operatingSystem}',
       );
@@ -137,7 +137,7 @@ abstract final class WebpEncoder {
     }
   }
 
-  /// Compresses [bytes], converting a failure into [ImageEncodeException]
+  /// Compresses [bytes], converting a failure into [ImageCodecEncodeException]
   /// **with the original attached**.
   ///
   /// Separate from [_compressOrNull] because the two calls want opposite
@@ -162,7 +162,7 @@ abstract final class WebpEncoder {
         minHeight: minHeight,
       );
     } on CompressError catch (e) {
-      throw ImageEncodeException(failureMessage, cause: e);
+      throw ImageCodecEncodeException(failureMessage, cause: e);
     }
   }
 
@@ -193,7 +193,7 @@ abstract final class WebpEncoder {
     int minHeight,
   ) async {
     if (!await ImageCodec.isPixelDataComplete(bytes)) {
-      throw const ImageEncodeException(
+      throw const ImageCodecEncodeException(
         'the source pixel data is incomplete or corrupt, so it cannot be '
         're-encoded',
       );
@@ -203,7 +203,7 @@ abstract final class WebpEncoder {
       bytes,
     );
     if (png == null) {
-      throw const ImageEncodeException(
+      throw const ImageCodecEncodeException(
         'the bytes could not be decoded by any available decoder',
       );
     }
@@ -221,7 +221,7 @@ abstract final class WebpEncoder {
   /// Returns `null` rather than throwing on a failed decode: an exception
   /// raised here has to survive being sent across the isolate boundary, and a
   /// nullable return is the shape that cannot go wrong. The caller converts it
-  /// into an [ImageEncodeException] on the other side.
+  /// into an [ImageCodecEncodeException] on the other side.
   static Uint8List? _decodeToPng(Uint8List bytes) {
     try {
       final img.Image? decoded = img.decodeImage(bytes);

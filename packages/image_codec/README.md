@@ -82,8 +82,8 @@ each one up.
 state of every plain `flutter test` — its stub throws `UnimplementedError`. Both
 are `Error` subtypes, which this repo's `avoid_catching_error` forbids catching,
 so this package **checks the platform before calling** rather than catching
-after. On any other platform you get an `ImageEncodeException`, not a raw
-`Error`.
+after. On any other platform you get an `ImageCodecEncodeException`, not a
+raw `Error`.
 
 It also **resizes large sources**, and the parameter names mean the opposite of
 what most people read them as. `minWidth`/`minHeight` (default 1920x1080) are a
@@ -134,9 +134,9 @@ here would only put distance between you and the plugin's own FAQ.
   output is verified by reading the dimensions back, which catches "not an image
   at all" but not correct-sized-wrong-pixels. Establishing that needs a real
   device.
-- **`ImageDecodeException` currently has no thrower.** It is exported for the
-  decode failures the encode path reports, which today all surface as
-  `ImageEncodeException`.
+- **`ImageCodecDecodeException` currently has no thrower.** It is exported for
+  the decode failures the encode path reports, which today all surface as
+  `ImageCodecEncodeException`.
 - **One engine handle's release is unpinnable.** Three of the four `dispose()`
   calls in the boundary have tests that go red when the call is deleted;
   `ui.ImmutableBuffer.dispose()` does not, because `ImmutableBuffer` is a

@@ -1,3 +1,57 @@
+## 0.6.0
+
+**Naming rules.** A type's name should still say, away from its declaration,
+which family it belongs to, what kind of thing it is and which one. Seven
+rules check the parts of that a machine can decide. All but one are on by
+default in their bundles, so **upgrading reports names an existing codebase
+already has**; there is no warning level or baseline, so adopt a rule over
+existing violations by disabling it in an area until the renames land.
+
+New:
+
+- `sealed_family_naming` (`core`): a direct subtype of a `sealed` class starts
+  with the base's category words and ends with its kind word —
+  `ConnectionFailure` → `ConnectionTimeoutFailure`. Words are split at case
+  changes, an acronym staying one word, and compared whole: a prefix that
+  matches only by characters does not count.
+- `failure_type_naming` (`core`): a subtype of `Error` ends in `Error`, and a
+  class ending in `Error` is one; an `Exception` implementation ends in
+  `failureWord` — `Exception` (default) or `Failure`, one per project — and a
+  class ending in that word, or in `Exception`, implements `Exception`.
+  `exemptSubtypesOf` lists types whose subtypes are named by another scheme.
+- `avoid_vague_type_words` (`core`): no `Manager`, `Helper`, `Util` or `Utils`
+  in a class, mixin, enum, extension, extension type or typedef name.
+  `forbiddenWords` replaces the list; `scopedWords` forbids a word except on a
+  class that is, or extends or implements, one of the listed types.
+- `interface_implementation_naming` (`core`, **opt-in**): an implementation of
+  one of the package's own interfaces is named `<Interface>Impl` or
+  `<Technology><Interface>`, as the required `style` option says (`impl` /
+  `tech_prefix`). An interface is a class declared `interface`, or abstract
+  with no concrete instance member; `extends` counts as well as `implements`.
+- `require_notifier_suffix` (new `riverpod` bundle): a `Notifier`,
+  `AsyncNotifier` or `StreamNotifier` ends in that word, and a class ending in
+  one is that type. The longest suffix a name ends in decides. Riverpod's
+  generated notifiers extend a generated base and are not checked.
+- `domain_entity_suffix` (`clean_arch`): a public class in a feature's
+  `domain/entities/` ends in `Entity`. Enums are not checked;
+  `entityDirectory`, `suffix` and `forbiddenWords` are options.
+
+Changed:
+
+- `require_cubit_suffix` now checks both directions — a `Cubit` or `Bloc`
+  carries the suffix, and a class with the suffix is one — and that the state
+  type, where it is a type of the project, is named for the holder:
+  `ReaderSettingsCubit` holds a `ReaderSettingsState`. A class that only
+  implements a cubit (a test double) is not held to the state name.
+  `stateHolders` configures the roles and `stateSuffix` the state word;
+  `stateHolderBase` / `requiredSuffix` still work, as one role.
+- `avoid_reserved_widget_suffix` also reserves `Bloc`, `Notifier` and
+  `Provider` by default. A bare `Widget` suffix stays allowed.
+
+**Opt-in rules.** `RuleDescriptor.optIn` keeps a rule out of what its bundle
+enables, for a rule with no defensible default: in the bundle's list, its
+required option would stop every project using the bundle until each chose.
+
 ## 0.5.3
 
 `avoid_high_cyclomatic_complexity` gains an opt-in `exemptFlatDispatch`

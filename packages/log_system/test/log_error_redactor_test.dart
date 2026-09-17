@@ -9,8 +9,8 @@ import 'package:log_system/log_system.dart';
 // inside the same package is the point of `src/`.
 import 'package:log_system/src/data/adapters/log_error_redactor.dart';
 
-class _Domain implements Exception {
-  const _Domain();
+class _DomainException implements Exception {
+  const _DomainException();
 
   @override
   String toString() => 'customer 王小明, phone 0912345678';
@@ -28,10 +28,10 @@ void main() {
   group('a host describer keeps a field this package cannot name', () {
     test('the field is appended and the type name is still prepended', () {
       LogErrorRedactor.describeExtra = (Object error) =>
-          error is _Domain ? 'status=404' : null;
+          error is _DomainException ? 'status=404' : null;
       expect(
-        LogErrorRedactor.redact(const _Domain()).toString(),
-        '_Domain status=404',
+        LogErrorRedactor.redact(const _DomainException()).toString(),
+        '_DomainException status=404',
       );
     });
 
@@ -39,22 +39,25 @@ void main() {
       LogErrorRedactor.describeExtra = (Object error) =>
           'status=404 connectionTimeout';
       expect(
-        LogErrorRedactor.redact(const _Domain()).toString(),
-        '_Domain status=404 connectionTimeout',
+        LogErrorRedactor.redact(const _DomainException()).toString(),
+        '_DomainException status=404 connectionTimeout',
       );
     });
 
     test('exactly three fields is still allowed — the boundary itself', () {
       LogErrorRedactor.describeExtra = (Object error) => 'a b c';
       expect(
-        LogErrorRedactor.redact(const _Domain()).toString(),
-        '_Domain a b c',
+        LogErrorRedactor.redact(const _DomainException()).toString(),
+        '_DomainException a b c',
       );
     });
 
     test('four fields is gated — one past the boundary', () {
       LogErrorRedactor.describeExtra = (Object error) => 'a b c d';
-      expect(LogErrorRedactor.redact(const _Domain()).toString(), '_Domain');
+      expect(
+        LogErrorRedactor.redact(const _DomainException()).toString(),
+        '_DomainException',
+      );
     });
 
     test('a bare backslash with nothing else present is still gated', () {
@@ -62,7 +65,10 @@ void main() {
       // a value with no space, no slash and no newline, but a backslash,
       // must still be caught by that clause alone.
       LogErrorRedactor.describeExtra = (Object error) => r'a\b';
-      expect(LogErrorRedactor.redact(const _Domain()).toString(), '_Domain');
+      expect(
+        LogErrorRedactor.redact(const _DomainException()).toString(),
+        '_DomainException',
+      );
     });
 
     test('returning null falls through to the built-in arms', () {
@@ -86,26 +92,35 @@ void main() {
       // describer written wrong is a mistake this boundary absorbs.
       LogErrorRedactor.describeExtra = (Object error) =>
           'path=/Users/someone/books/王小明.epub';
-      expect(LogErrorRedactor.redact(const _Domain()).toString(), '_Domain');
+      expect(
+        LogErrorRedactor.redact(const _DomainException()).toString(),
+        '_DomainException',
+      );
     });
 
     test('a describer that returns a sentence is still gated', () {
       LogErrorRedactor.describeExtra = (Object error) =>
           'could not open the file';
-      expect(LogErrorRedactor.redact(const _Domain()).toString(), '_Domain');
+      expect(
+        LogErrorRedactor.redact(const _DomainException()).toString(),
+        '_DomainException',
+      );
     });
 
     test('a describer that returns an over-long value is still gated', () {
       LogErrorRedactor.describeExtra = (Object error) => 'a' * 49;
-      expect(LogErrorRedactor.redact(const _Domain()).toString(), '_Domain');
+      expect(
+        LogErrorRedactor.redact(const _DomainException()).toString(),
+        '_DomainException',
+      );
     });
 
     test('exactly 48 characters is still allowed — the boundary itself', () {
       final String value = 'a' * 48;
       LogErrorRedactor.describeExtra = (Object error) => value;
       expect(
-        LogErrorRedactor.redact(const _Domain()).toString(),
-        '_Domain $value',
+        LogErrorRedactor.redact(const _DomainException()).toString(),
+        '_DomainException $value',
       );
     });
   });
@@ -113,9 +128,9 @@ void main() {
   group('default-deny', () {
     test('an unrecognised type is reduced to its type name', () {
       final String redacted = LogErrorRedactor.redact(
-        const _Domain(),
+        const _DomainException(),
       ).toString();
-      expect(redacted, '_Domain');
+      expect(redacted, '_DomainException');
       expect(redacted, isNot(contains('王小明')));
       expect(redacted, isNot(contains('0912345678')));
     });
@@ -159,8 +174,8 @@ void main() {
         startsWith('SocketException'),
       );
       expect(
-        LogErrorRedactor.redact(const _Domain()).toString(),
-        startsWith('_Domain'),
+        LogErrorRedactor.redact(const _DomainException()).toString(),
+        startsWith('_DomainException'),
       );
     });
   });
@@ -320,7 +335,7 @@ void main() {
     test('drops context and information, keeps stack and library', () {
       final StackTrace stack = StackTrace.current;
       final FlutterErrorDetails details = FlutterErrorDetails(
-        exception: const _Domain(),
+        exception: const _DomainException(),
         stack: stack,
         library: 'my_app',
         context: ErrorDescription('while building CustomerCard for 王小明'),
@@ -333,7 +348,7 @@ void main() {
         details,
       );
 
-      expect(redacted.exception.toString(), '_Domain');
+      expect(redacted.exception.toString(), '_DomainException');
       expect(redacted.stack, same(stack));
       expect(redacted.library, 'my_app');
       expect(redacted.context, isNull);

@@ -84,8 +84,8 @@ class LogRepositoryImpl extends LogRepository {
   ///
   /// Keeping both sites is defence in depth rather than duplication: each
   /// reduces once, for one destination, and **neither ever receives the
-  /// other's output.** Chaining them would reduce a `_RedactedError` to the
-  /// string `_RedactedError`, losing the type name that keeps crash-report
+  /// other's output.** Chaining them would reduce a `_RedactedErrorSurrogate` to the
+  /// string `_RedactedErrorSurrogate`, losing the type name that keeps crash-report
   /// grouping apart.
   static String? _redact(Object? error) =>
       error == null ? null : LogErrorRedactor.redact(error).toString();

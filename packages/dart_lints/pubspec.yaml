@@ -3,7 +3,7 @@ description: >-
   Configurable custom Dart lint rules, shared across my projects. Areas and
   enabled rules come from a per-repo YAML file, so the same rule set serves an
   app and a pure-Dart library without either inheriting the other's house rules.
-version: 0.5.3
+version: 0.6.0
 repository: https://github.com/kai-tw/kai-packages/tree/main/packages/dart_lints
 
 environment:

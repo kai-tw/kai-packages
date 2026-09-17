@@ -107,6 +107,12 @@ options:
     # cleanup pass of the existing 21 in the same change. Fixing any of
     # them is separate, later work.
     maxComplexity: 8
+  failure_type_naming:
+    # dart_lints names each rule class after the rule it implements:
+    # `avoid_catching_error` is `AvoidCatchingError`. The last word there is the
+    # subject of the rule, not the kind of the class, so the rule classes are
+    # named by that scheme instead.
+    exemptSubtypesOf: [LintRule, ResolvedLintRule, ProjectLintRule]
   avoid_top_level_identifiers:
     # These packages are published libraries: their top-level declarations are
     # the public API, not stray globals. The rule's premise does not hold here.

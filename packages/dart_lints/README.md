@@ -57,16 +57,46 @@ pure-Dart library without either inheriting the other's assumptions.
 
 | Bundle | Rules | Looks up |
 |---|---|---|
-| `core` | 16 | nothing but Dart |
+| `core` | 24 (one opt-in) | nothing but Dart |
 | `flutter` | 8 | Flutter / Material types |
-| `clean_arch` | 6 | a layered directory layout |
-| `bloc` | 6 | `Cubit` / `BlocBase` |
+| `clean_arch` | 7 | a layered directory layout |
+| `bloc` | 6 | `Cubit` / `Bloc` |
+| `riverpod` | 1 | `Notifier` / `AsyncNotifier` / `StreamNotifier` |
 | `getit` | 2 | a service locator |
 | `log_system` | 2 | the `log_system` package |
 | `novelglide` | 4 | one specific application — **do not enable elsewhere** |
 
-A Riverpod project enables neither `bloc` nor `getit`: those rules resolve types
-it does not have, so they are dead weight rather than silent gaps.
+A Riverpod project enables `riverpod` and neither `bloc` nor `getit`: those
+rules resolve types it does not have, so they are dead weight rather than
+silent gaps.
+
+**Opt-in rules** sit in a bundle but are not switched on by it; only `enable:`
+turns one on. A rule is opt-in when it needs a choice only the project can
+make, which it declares as a required option — in the bundle's list it would
+stop every project using the bundle until each made that choice.
+
+### Naming rules
+
+These enforce what a type's name claims: its family, its kind and its
+category. A name is read as `<category words><kind word>`, split at case
+changes, with an acronym kept as one word (`HTTPClientError` is `HTTP`,
+`Client`, `Error`).
+
+| Rule | Bundle | Checks |
+|---|---|---|
+| `sealed_family_naming` | `core` | a direct subtype of a `sealed` class starts with its category words and ends with its kind: `ConnectionFailure` → `ConnectionTimeoutFailure` |
+| `failure_type_naming` | `core` | an `Error` subtype ends in `Error` and a class ending in `Error` is one; an `Exception` implementation ends in `failureWord` (`Exception`, the default, or `Failure`) and a class ending in it, or in `Exception`, is one. `exemptSubtypesOf` lists types whose subtypes are named by another scheme |
+| `avoid_vague_type_words` | `core` | no `Manager`, `Helper`, `Util`, `Utils` in a type name (`forbiddenWords` replaces the list); `scopedWords` forbids a word except on subtypes of listed types, e.g. `{word: Service, unlessExtends: [BackgroundService]}` |
+| `interface_implementation_naming` | `core`, **opt-in** | an implementation of one of the package's own interfaces is named in the project's `style` — `impl` (`<Interface>Impl`) or `tech_prefix` (`<Technology><Interface>`); required |
+| `avoid_reserved_widget_suffix` | `flutter` | a public widget does not end in `State`, `Cubit`, `Bloc`, `Notifier`, `Provider` or bare `Sheet`. A bare `Widget` is allowed; a project that forbids it lists it |
+| `require_cubit_suffix` | `bloc` | a `Cubit` / `Bloc` ends in `Cubit` / `Bloc`, a class with either suffix is one, and its state type is `<Concept>State` (`stateSuffix`). `stateHolders` configures the roles |
+| `require_notifier_suffix` | `riverpod` | the same for `Notifier`, `AsyncNotifier` and `StreamNotifier`, without the state-type check. Code-generated notifiers extend a generated base and are not checked |
+| `domain_entity_suffix` | `clean_arch` | a public class in `<feature>/domain/entities/` ends in `Entity`; enums are not checked. `entityDirectory`, `suffix` and `forbiddenWords` (say `[Data]`) are the project's |
+
+⚠️ These are on by default in their bundles, so upgrading reports what an
+existing codebase already has. Nothing here has a warning level or a baseline:
+to adopt a rule over existing violations, disable it — in one area, or for the
+whole project — until the renames land, and enable it again.
 
 ⚠️ `avoid_shared_preferences_outside_owner` reports **every**
 `shared_preferences` import until its `ownerPaths` is set, so a repository

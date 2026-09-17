@@ -313,16 +313,16 @@ void main() {
   group('encodeWebp reports failure as this package\'s own type', () {
     test('[boundary] empty bytes are rejected BEFORE the platform check', () {
       // The message is the assertion, not the type. On a host that is neither
-      // Android nor iOS the platform guard also throws ImageEncodeException,
-      // so `throwsA(isA<ImageEncodeException>())` alone cannot tell the two
+      // Android nor iOS the platform guard also throws ImageCodecEncodeException,
+      // so `throwsA(isA<ImageCodecEncodeException>())` alone cannot tell the two
       // guards apart: delete the empty-bytes check entirely and a type-only
       // assertion still passes here. Naming the message is what makes this
       // test able to go red for its own reason.
       expect(
         () => WebpEncoder.encodeWebp(Uint8List(0)),
         throwsA(
-          isA<ImageEncodeException>().having(
-            (ImageEncodeException e) => e.message,
+          isA<ImageCodecEncodeException>().having(
+            (ImageCodecEncodeException e) => e.message,
             'message',
             contains('empty'),
           ),
@@ -335,9 +335,9 @@ void main() {
       // that shape reach a caller would hand them an Error for an input they
       // do not control, and `on Error` is not something a consumer should have
       // to write.
-      expect(const ImageEncodeException('x'), isA<Exception>());
-      expect(const ImageEncodeException('x'), isNot(isA<Error>()));
-      expect(const ImageDecodeException('x'), isA<ImageCodecException>());
+      expect(const ImageCodecEncodeException('x'), isA<Exception>());
+      expect(const ImageCodecEncodeException('x'), isNot(isA<Error>()));
+      expect(const ImageCodecDecodeException('x'), isA<ImageCodecException>());
     });
 
     test('[partition] cause survives the type collapse', () async {
@@ -348,7 +348,7 @@ void main() {
       // single test noticing.
       final ArgumentError original = ArgumentError('the underlying failure');
       const String message = 'could not encode';
-      final ImageEncodeException wrapped = ImageEncodeException(
+      final ImageCodecEncodeException wrapped = ImageCodecEncodeException(
         message,
         cause: original,
       );
@@ -366,7 +366,9 @@ void main() {
 
     test('[boundary] toString without a cause omits the empty parentheses', () {
       // The other arm of the ternary. Both were dark.
-      const ImageEncodeException bare = ImageEncodeException('no cause here');
+      const ImageCodecEncodeException bare = ImageCodecEncodeException(
+        'no cause here',
+      );
 
       expect(bare.toString(), contains('no cause here'));
       expect(bare.toString(), isNot(contains('(')));
@@ -391,7 +393,7 @@ class _RecordingDescriptor implements ui.ImageDescriptor {
 
   @override
   int get width => _throws
-      ? throw const _SimulatedEngineFailure('cannot read width')
+      ? throw const _SimulatedEngineException('cannot read width')
       : _width;
 
   @override
@@ -423,7 +425,7 @@ class _RecordingCodec implements ui.Codec {
 
   @override
   Future<ui.FrameInfo> getNextFrame() =>
-      throw const _SimulatedEngineFailure('decode failed');
+      throw const _SimulatedEngineException('decode failed');
 
   @override
   void dispose() => disposeCount++;
@@ -437,9 +439,9 @@ class _RecordingCodec implements ui.Codec {
 /// narrows that catch, the real engine's bare throw and this one BOTH stop
 /// being caught, so the fidelity that matters is preserved while the house
 /// rule against throwing a generic Exception stays satisfied.
-class _SimulatedEngineFailure implements Exception {
-  const _SimulatedEngineFailure(this.message);
+class _SimulatedEngineException implements Exception {
+  const _SimulatedEngineException(this.message);
   final String message;
   @override
-  String toString() => 'SimulatedEngineFailure: $message';
+  String toString() => 'SimulatedEngineException: $message';
 }
