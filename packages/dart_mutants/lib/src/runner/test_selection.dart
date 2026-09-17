@@ -8,6 +8,7 @@ import 'coverage_map.dart';
 import 'line_range.dart';
 import 'mutant_scope.dart';
 import 'process_command.dart';
+import 'temp_space.dart';
 import 'test_invocation.dart';
 
 /// A [CoverageMap] and the invocation it was collected through: together,
@@ -75,11 +76,16 @@ class TestSelection {
 /// Returns `null`, with the reason passed to [onFailure], when the pass
 /// cannot give a trustworthy answer — the caller then runs every mutant
 /// against the full command, which is always sound, only slower.
+///
+/// The reports go to a directory from [temps], deleted before this returns;
+/// the runner passes its own, so an interrupt deletes it too.
 Future<TestSelection?> collectCoverage(
   TestInvocation invocation, {
   required Duration timeout,
   required void Function(String reason) onFailure,
+  TempSpace? temps,
 }) async {
+  final TempSpace space = temps ?? TempSpace();
   final String? packageName = _packageName(invocation.root);
   final List<String> testFiles = invocation.testFiles();
   final String? problem = _refusal(invocation, packageName, testFiles);
@@ -87,9 +93,7 @@ Future<TestSelection?> collectCoverage(
     onFailure(problem);
     return null;
   }
-  final Directory out = Directory.systemTemp.createTempSync(
-    'dart_mutants_cov_',
-  );
+  final Directory out = space.create('cov');
   try {
     final CoverageMapBuilder builder = CoverageMapBuilder(invocation.root);
     final String? failure = switch (invocation.runner) {
@@ -120,7 +124,7 @@ Future<TestSelection?> collectCoverage(
     onFailure('its coverage report could not be read ($e)');
     return null;
   } finally {
-    out.deleteSync(recursive: true);
+    space.delete(out);
   }
 }
 

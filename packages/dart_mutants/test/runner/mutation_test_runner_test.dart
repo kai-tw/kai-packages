@@ -4,11 +4,17 @@ import 'package:dart_mutants/src/mutation_operator.dart';
 import 'package:dart_mutants/src/operators/ternary_swap.dart';
 import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
 import 'package:dart_mutants/src/runner/file_mutation_report.dart';
+import 'package:dart_mutants/src/runner/mutant_progress.dart';
 import 'package:dart_mutants/src/runner/mutant_result.dart';
+import 'package:dart_mutants/src/runner/mutant_timing.dart';
 import 'package:dart_mutants/src/runner/mutant_verdict.dart';
 import 'package:dart_mutants/src/runner/mutation_run_report.dart';
 import 'package:dart_mutants/src/runner/mutation_test_runner.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
+import 'package:dart_mutants/src/runner/run_plan.dart';
+import 'package:dart_mutants/src/runner/run_stats.dart';
+import 'package:dart_mutants/src/runner/temp_space.dart';
+import 'package:dart_mutants/src/version.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -833,6 +839,12 @@ void main() {
           File(p.join(dir.path, 'lib', 'detected.dart')).readAsStringSync(),
           detectedBefore,
         );
+        // Kept for an abort too: a red run is still a run worth comparing.
+        final RunStats stats = report.stats!;
+        expect(stats.finishedAt, isNotNull);
+        expect(stats.baseline, report.baselineDuration);
+        expect(stats.gateCheck, isNull);
+        expect(stats.mutants, isEmpty);
       },
     );
   });
@@ -1071,6 +1083,430 @@ void main() {
       },
     );
   });
+
+  group('a selected mutant\'s own budget', () {
+    // The full suite sleeps 4s in a test file that reaches no target, so the
+    // full budget is at least 12s more than any selection's. The floor is
+    // 1s, so every budget here is derived rather than floored.
+    late Directory dir;
+    late Directory temps;
+    late MutationRunReport report;
+    RunPlan? plan;
+    final List<MutantProgress> progress = <MutantProgress>[];
+
+    tearDownAll(() {
+      dir.deleteSync(recursive: true);
+      temps.deleteSync(recursive: true);
+    });
+
+    setUpAll(() async {
+      dir = await _fixturePackage();
+      temps = Directory.systemTemp.createTempSync('runner_temps_');
+      File(p.join(dir.path, 'test', 'slow_test.dart')).writeAsStringSync('''
+import 'package:test/test.dart';
+
+void main() {
+  test('slow but green', () async {
+    await Future<void>.delayed(const Duration(seconds: 4));
+  });
+}
+''');
+      // Two mutants in one function, so one selection: its budget is to be
+      // measured once. The test file counts how often it is loaded.
+      File(p.join(dir.path, 'lib', 'twice.dart')).writeAsStringSync(
+        "String pick(bool a, bool b) => a ? (b ? 'x' : 'y') : 'z';\n",
+      );
+      File(p.join(dir.path, 'test', 'twice_test.dart')).writeAsStringSync('''
+import 'dart:io';
+
+import 'package:fixture/twice.dart';
+import 'package:test/test.dart';
+
+void main() {
+  File('${p.join(dir.path, 'twice.log')}')
+      .writeAsStringSync('x', mode: FileMode.append);
+  test('pick', () {
+    expect(pick(true, true), 'x');
+    expect(pick(true, false), 'y');
+    expect(pick(false, true), 'z');
+  });
+}
+''');
+      final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+        dir.path,
+      ]);
+      report =
+          await MutationTestRunner(
+            testCommand: ProcessCommand('dart', <String>[
+              'test',
+            ], workingDirectory: dir.path),
+            compileSafetyGate: gate,
+            operators: <MutationOperator>[TernarySwap()],
+            mutantTimeout: const Duration(seconds: 1),
+            baselineFactor: 3,
+            baselineTimeout: const Duration(seconds: 120),
+            selectByCoverage: true,
+            onPlan: (RunPlan planned) => plan = planned,
+            onProgress: progress.add,
+            tempSpace: TempSpace(root: temps),
+          ).run(<String>[
+            p.join(dir.path, 'lib', 'hangs.dart'),
+            p.join(dir.path, 'lib', 'twice.dart'),
+            p.join(dir.path, 'lib', 'undetected.dart'),
+          ]);
+      await gate.close();
+    });
+
+    test('[partition] runs to completion, selected', () {
+      expect(report.aborted, isFalse, reason: report.abortReason);
+      expect(report.selectedByCoverage, isTrue);
+    });
+
+    test(
+      '[decision] a mutant that hangs its selection times out at that '
+      'selection\'s budget, well under the full command\'s',
+      () {
+        final MutantResult hung = _reportFor(
+          report,
+          'hangs.dart',
+        ).timedOutMutants.single;
+        expect(hung.timeout, lessThan(report.mutantTimeout!));
+        expect(hung.timeout, greaterThan(const Duration(seconds: 1)));
+      },
+    );
+
+    test(
+      '[decision] a selected mutant that runs to a verdict carries its '
+      'selection\'s budget too',
+      () {
+        final FileMutationReport f = _reportFor(report, 'twice.dart');
+        expect(<int>[f.detected, f.undetected], <int>[2, 0]);
+        final List<Duration?> budgets = progress
+            .where(
+              (MutantProgress m) => m.result.mutant.filePath.endsWith(
+                'twice.dart',
+              ),
+            )
+            .map((MutantProgress m) => m.result.timeout)
+            .toList();
+        expect(budgets.toSet(), hasLength(1));
+        expect(budgets.first, lessThan(report.mutantTimeout!));
+      },
+    );
+
+    test(
+      '[state] a selection is measured once, however many mutants share it '
+      '— baseline, coverage pass, one measurement, its two mutants, and '
+      'undetected.dart\'s full run',
+      () {
+        expect(
+          File(p.join(dir.path, 'twice.log')).readAsStringSync(),
+          'xxxxxx',
+        );
+      },
+    );
+
+    test(
+      '[boundary] a mutant that runs the full command gets the full budget',
+      () {
+        final MutantResult r = _reportFor(
+          report,
+          'undetected.dart',
+        ).undetectedMutants.single;
+        expect(r.uncovered, isFalse);
+        expect(r.timeout, report.mutantTimeout);
+      },
+    );
+
+    test(
+      '[state] the coverage pass wrote into a temporary directory, and none '
+      'is left once the run returns',
+      () {
+        expect(temps.listSync(), isEmpty);
+      },
+    );
+
+    test(
+      '[state] the statistics time every phase that ran and every mutant, '
+      'and count the one measurement',
+      () {
+        final RunStats stats = report.stats!;
+        expect(stats.baseline, report.baselineDuration);
+        expect(stats.gateCheck, isNotNull);
+        expect(stats.coveragePass, greaterThan(Duration.zero));
+        expect(stats.finishedAt!.isBefore(stats.startedAt), isFalse);
+        expect(
+          stats.mutants.map((MutantTiming m) => m.bucket),
+          <String>['timeout', 'detected', 'detected', 'undetected'],
+        );
+        expect(
+          stats.mutants.map((MutantTiming m) => m.selected),
+          <bool>[true, true, true, false],
+        );
+        // hangs.dart's selection and twice.dart's, each measured by the
+        // first mutant to need it.
+        expect(
+          stats.mutants.map((MutantTiming m) => m.measurement != null),
+          <bool>[true, true, false, false],
+        );
+        expect(
+          stats.mutants.every((MutantTiming m) => m.test != null),
+          isTrue,
+        );
+        final Map<String, Object?> environment = stats.environment;
+        expect(environment['dartMutantsVersion'], packageVersion);
+        expect(environment['testCommand'], 'dart test');
+        expect(environment['operators'], <String>['ternary_swap']);
+        expect(environment['selectByCoverage'], isTrue);
+      },
+    );
+
+    test(
+      '[partition] the plan is reported once with every mutant, and progress '
+      'counts each one, in the order they ran',
+      () {
+        expect(plan!.fileCount, 3);
+        expect(plan!.mutantCount, 4);
+        expect(plan!.baseline, report.baselineDuration);
+        expect(plan!.budget, report.mutantTimeout);
+        expect(
+          progress.map((MutantProgress m) => (m.completed, m.total)),
+          <(int, int)>[(1, 4), (2, 4), (3, 4), (4, 4)],
+        );
+        expect(
+          progress.map(
+            (MutantProgress m) => p.basename(m.result.mutant.filePath),
+          ),
+          <String>['hangs.dart', 'twice.dart', 'twice.dart', 'undetected.dart'],
+        );
+      },
+    );
+  }, timeout: const Timeout(Duration(seconds: 180)));
+
+  group('running mutants in parallel', () {
+    // The same package, scored one at a time and by two workers, with and
+    // without coverage selection. The verdicts must not depend on how many
+    // workers there were, and the parallel runs must never write to the
+    // package itself.
+    late Directory dir;
+    late Directory temps;
+    late Map<String, (String, DateTime)> before;
+    late Map<String, (String, DateTime)> afterParallel;
+    final Map<String, MutationRunReport> reports =
+        <String, MutationRunReport>{};
+    final List<MutantProgress> progress = <MutantProgress>[];
+
+    List<String> targets() => <String>[
+      for (final String name in <String>[
+        'detected.dart',
+        'undetected.dart',
+        'detected_and_undetected.dart',
+        'invalid.dart',
+        'invalid_mixed.dart',
+        'no_mutants.dart',
+        'hangs.dart',
+      ])
+        p.join(dir.path, 'lib', name),
+    ];
+
+    Map<String, (String, DateTime)> snapshot() => <String, (String, DateTime)>{
+      for (final String path in targets())
+        path: (
+          File(path).readAsStringSync(),
+          File(path).lastModifiedSync(),
+        ),
+    };
+
+    Future<MutationRunReport> run({
+      required int workers,
+      required bool selected,
+    }) async {
+      final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+        dir.path,
+      ]);
+      try {
+        return await MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: gate,
+          mutantTimeout: const Duration(seconds: 10),
+          baselineFactor: 0,
+          selectByCoverage: selected,
+          workers: workers,
+          tempSpace: TempSpace(root: temps),
+          onProgress: workers > 1 ? progress.add : null,
+        ).run(targets());
+      } finally {
+        await gate.close();
+      }
+    }
+
+    tearDownAll(() {
+      dir.deleteSync(recursive: true);
+      temps.deleteSync(recursive: true);
+    });
+
+    setUpAll(() async {
+      dir = await _fixturePackage();
+      temps = Directory.systemTemp.createTempSync('parallel_temps_');
+      before = snapshot();
+      // Parallel first, so the package has not been written to by anything
+      // yet when its files are compared afterwards.
+      reports['parallel'] = await run(workers: 2, selected: false);
+      reports['parallel, selected'] = await run(workers: 2, selected: true);
+      afterParallel = snapshot();
+      reports['sequential'] = await run(workers: 1, selected: false);
+      reports['sequential, selected'] = await run(workers: 1, selected: true);
+    });
+
+    Map<String, Object?> verdicts(MutationRunReport report) =>
+        <String, Object?>{
+          for (final FileMutationReport f in report.files)
+            p.basename(f.filePath): f.toJson(),
+        };
+
+    for (final String mode in <String>['', ', selected']) {
+      test(
+        '[decision] two workers$mode give the same verdicts, mutant by '
+        'mutant, as one',
+        () {
+          final MutationRunReport parallel = reports['parallel$mode']!;
+          expect(parallel.aborted, isFalse, reason: parallel.abortReason);
+          expect(parallel.stats!.workers, 2);
+          expect(
+            verdicts(parallel),
+            verdicts(reports['sequential$mode']!),
+          );
+          // And they are the verdicts this fixture exists to produce.
+          expect(_reportFor(parallel, 'hangs.dart').timedOut, 1);
+          expect(_reportFor(parallel, 'invalid_mixed.dart').invalid, 4);
+        },
+      );
+    }
+
+    test(
+      '[state] parallel runs leave the package exactly as it was, down to '
+      'the modification times',
+      () {
+        expect(afterParallel, before);
+      },
+    );
+
+    test(
+      '[state] both workers ran mutants, each worker\'s disk use is '
+      'recorded, and every sandbox is gone',
+      () {
+        final RunStats stats = reports['parallel']!.stats!;
+        expect(
+          stats.mutants.map((MutantTiming m) => m.worker).toSet(),
+          <int>{0, 1},
+        );
+        expect(stats.workerDiskBytes, hasLength(2));
+        expect(stats.sandboxSetup, isNotNull);
+        expect(temps.listSync(), isEmpty);
+      },
+    );
+
+    test(
+      '[partition] progress counts every mutant once, whichever worker ran '
+      'it',
+      () {
+        final int total = reports['parallel']!.files.fold(
+          0,
+          (int sum, FileMutationReport f) =>
+              sum + f.total + f.invalid + f.timedOut,
+        );
+        final List<MutantProgress> first = progress.take(total).toList();
+        expect(
+          first.map((MutantProgress m) => m.completed),
+          List<int>.generate(total, (int i) => i + 1),
+        );
+        expect(first.every((MutantProgress m) => m.total == total), isTrue);
+      },
+    );
+
+    test(
+      '[error] a target outside the package the command runs in falls back to '
+      'one worker in place, and says why',
+      () async {
+        final Directory outside = Directory.systemTemp.createTempSync(
+          'parallel_outside_',
+        );
+        addTearDown(() => outside.deleteSync(recursive: true));
+        final File target = File(p.join(outside.path, 'elsewhere.dart'))
+          ..writeAsStringSync("String f(bool b) => b ? 'x' : 'y';\n");
+        final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+          outside.path,
+        ]);
+        addTearDown(gate.close);
+        final List<String> reasons = <String>[];
+
+        final MutationRunReport report = await MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: gate,
+          mutantTimeout: const Duration(seconds: 10),
+          baselineFactor: 0,
+          workers: 2,
+          tempSpace: TempSpace(root: temps),
+          onWorkersFallback: reasons.add,
+        ).run(<String>[target.path]);
+
+        expect(reasons.single, contains('outside the package'));
+        expect(report.stats!.workers, 1);
+        expect(_reportFor(report, 'elsewhere.dart').undetected, 1);
+      },
+    );
+
+    test(
+      '[error] a sandbox the test command fails in is not used: the run falls '
+      'back to one worker in place, rather than scoring every mutant as '
+      'caught',
+      () async {
+        // Passes in the package, fails in any worker, where the file is a
+        // link — a stand-in for a copy the real tools cannot work in.
+        final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+          dir.path,
+        ]);
+        addTearDown(gate.close);
+        final List<String> reasons = <String>[];
+
+        final MutationRunReport report = await MutationTestRunner(
+          testCommand: ProcessCommand('sh', <String>[
+            '-c',
+            '[ ! -L lib/detected.dart ]',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: gate,
+          mutantTimeout: const Duration(seconds: 10),
+          baselineFactor: 0,
+          workers: 2,
+          tempSpace: TempSpace(root: temps),
+          onWorkersFallback: reasons.add,
+        ).run(<String>[p.join(dir.path, 'lib', 'undetected.dart')]);
+
+        expect(reasons.single, contains('failed in a worker'));
+        expect(report.stats!.workers, 1);
+        expect(report.stats!.sandboxSetup, isNotNull);
+        expect(_reportFor(report, 'undetected.dart').undetected, 1);
+        expect(temps.listSync(), isEmpty);
+      },
+    );
+
+    test('[error] fewer than one worker is refused at construction', () {
+      expect(
+        () => MutationTestRunner(
+          testCommand: const ProcessCommand('true', <String>[]),
+          compileSafetyGate: const AnalyzerProcessGate(
+            ProcessCommand('true', <String>[]),
+          ),
+          workers: 0,
+        ),
+        throwsArgumentError,
+      );
+    });
+  }, timeout: const Timeout(Duration(minutes: 10)));
 
   group('selecting tests by coverage, when it cannot be done', () {
     test(

@@ -155,6 +155,8 @@ void main() {
     ('--baseline-factor', '-1'),
     ('--baseline-factor', 'NaN'),
     ('--baseline-factor', 'Infinity'),
+    ('--workers', '0'),
+    ('--workers', 'two'),
   ]) {
     test('[error] $flag $value is a usage error, exit 64', () async {
       final ProcessResult result = await Process.run('dart', <String>[
@@ -297,6 +299,160 @@ void main() {
     // Measured at ~19s for one run alone; the two together tripped the
     // default, which is a test-runtime ceiling, not a `dart_mutants` gate —
     // unlike `--mutant-timeout`, doubling it cannot hide a genuine hang here.
+    timeout: const Timeout(Duration(seconds: 90)),
+  );
+
+  test(
+    '[partition] --output writes the JSON report to the file, and stdout '
+    'keeps the plan, one progress line per mutant, and the text report',
+    () async {
+      final Directory dir = await _fixtureWithOneUndetectedMutant();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final String out = p.join(dir.path, 'reports', 'mutation.json');
+
+      final ProcessResult result = await Process.run('dart', <String>[
+        'run',
+        _binPath,
+        '--test-command',
+        'dart test',
+        '--output',
+        out,
+        'lib/uncovered.dart',
+      ], workingDirectory: dir.path);
+
+      expect(result.exitCode, 1, reason: '${result.stderr}');
+      final Map<String, Object?> json =
+          jsonDecode(File(out).readAsStringSync()) as Map<String, Object?>;
+      final Map<String, Object?> file =
+          (json['files']! as Map<String, Object?>)['lib/uncovered.dart']!
+              as Map<String, Object?>;
+      expect(file['undetected'], 1);
+      final Map<String, Object?> survivor =
+          (file['undetectedMutants']! as List<Object?>).single!
+              as Map<String, Object?>;
+      expect(survivor['timeoutSeconds'], json['mutantTimeoutSeconds']);
+      expect(File('$out.partial').existsSync(), isFalse);
+
+      final List<String> lines = (result.stdout as String).trim().split('\n');
+      expect(lines[0], startsWith('1 mutant in 1 file — baseline '));
+      expect(
+        lines[1],
+        matches(
+          RegExp(
+            r'^\[1/1\] undetected lib/uncovered\.dart:1:\d+ ternary_swap '
+            r'\(\d+\.\ds\)$',
+          ),
+        ),
+      );
+      expect(lines, contains(startsWith('lib/uncovered.dart: 0% ')));
+    },
+  );
+
+  test(
+    '[boundary] --output is written for an aborted run too',
+    () async {
+      final Directory dir = await _fixtureWithOneUndetectedMutant();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      File(p.join(dir.path, 'test', 'broken_test.dart')).writeAsStringSync(
+        "import 'package:test/test.dart';\n\nvoid main() { test('x', () => throw Exception('red')); }\n",
+      );
+      final String out = p.join(dir.path, 'mutation.json');
+
+      final ProcessResult result = await Process.run('dart', <String>[
+        'run',
+        _binPath,
+        '--test-command',
+        'dart test',
+        '--output',
+        out,
+        'lib/uncovered.dart',
+      ], workingDirectory: dir.path);
+
+      expect(result.exitCode, 1);
+      final Map<String, Object?> json =
+          jsonDecode(File(out).readAsStringSync()) as Map<String, Object?>;
+      expect(json['abortKind'], 'baseline-failed');
+      expect(result.stdout, startsWith('aborted: '));
+    },
+  );
+
+  for (final String flag in <String>['--output', '--history']) {
+    test(
+      '[error] $flag naming a directory is a usage error, exit 64, before '
+      'anything runs',
+      () async {
+        final Directory dir = Directory.systemTemp.createTempSync(
+          'cli_output_',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+
+        final ProcessResult result = await Process.run('dart', <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          flag,
+          dir.path,
+          'lib/anything.dart',
+        ]);
+
+        expect(result.exitCode, 64);
+        expect(result.stderr, contains('$flag must name a file'));
+      },
+    );
+  }
+
+  test(
+    '[state] --history appends one line per run, each a whole report with '
+    'its statistics, aborted runs included',
+    () async {
+      final Directory dir = await _fixtureWithOneUndetectedMutant();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final String history = p.join(dir.path, 'history', 'runs.jsonl');
+      Future<ProcessResult> run() => Process.run('dart', <String>[
+        'run',
+        _binPath,
+        '--test-command',
+        'dart test',
+        '--history',
+        history,
+        'lib/uncovered.dart',
+      ], workingDirectory: dir.path);
+
+      await run();
+      File(p.join(dir.path, 'test', 'broken_test.dart')).writeAsStringSync(
+        "import 'package:test/test.dart';\n\nvoid main() { test('x', () => throw Exception('red')); }\n",
+      );
+      await run();
+
+      final List<Map<String, Object?>> lines = File(history)
+          .readAsLinesSync()
+          .map((String l) => jsonDecode(l) as Map<String, Object?>)
+          .toList();
+      expect(lines, hasLength(2));
+
+      final Map<String, Object?> first = lines[0];
+      expect(first['abortKind'], isNull);
+      final Map<String, Object?> stats =
+          first['stats']! as Map<String, Object?>;
+      expect(stats['finishedAt'], isA<String>());
+      final List<Object?> mutants = stats['mutants']! as List<Object?>;
+      expect(
+        (mutants.single! as Map<String, Object?>)['verdict'],
+        'undetected',
+      );
+      expect(
+        ((stats['verdicts']! as Map<String, Object?>)['undetected']!
+            as Map<String, Object?>)['count'],
+        1,
+      );
+
+      expect(lines[1]['abortKind'], 'baseline-failed');
+      expect(
+        (lines[1]['stats']! as Map<String, Object?>)['mutants'],
+        isEmpty,
+      );
+    },
     timeout: const Timeout(Duration(seconds: 90)),
   );
 }

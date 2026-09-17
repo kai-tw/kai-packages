@@ -1,3 +1,70 @@
+## 0.2.9
+
+**Under `--select-by-coverage`, a selected run gets a budget measured
+against its own tests.** Before this, every mutant got the full suite's
+budget, even one running a two-second selection. On one consuming app's
+250-file run, with a 190s baseline, each of eight hanging mutants waited out
+760s, about 18% of 9.4 hours. Now the first mutant that needs a selection
+runs it once against unmodified code, and the budget is that time times
+`--baseline-factor`, never less than `--mutant-timeout` and never more than
+the full command's budget. Mutants sharing the selection reuse it. A
+selection that does not pass unmodified keeps the full budget, and so does
+the full-command retry after a selected exit 79. With the factor at 0 no
+measurement is made.
+
+- Every mutant that ran a test now carries `timeoutSeconds` in the JSON: the
+  budget its last run had. `mutantTimeoutSeconds` stays, as the full
+  command's budget.
+
+**Progress while it runs.** After the baseline, stdout gets one line with
+the number of mutants and files and the budget, then one line per mutant as
+it finishes: `[12/3709] detected lib/foo.dart:10:5 ternary_swap (4.2s)`.
+Mutants are listed once per run; they used to be listed a second time for
+each file as it ran. The runner exposes the same lines as the `onPlan` and
+`onProgress` callbacks.
+
+**`--output <path>` writes the JSON report to a file**, aborted runs
+included, through a temporary sibling and a rename. stdout keeps the
+progress and the text report. A path naming a directory is refused before
+anything runs, with exit 64.
+
+**Run statistics, kept across runs.** Every report now carries `stats`:
+start and end times, the environment (this package's version, Dart, OS,
+processors, the test command and options), the load average at the start
+and end, time per phase, count and time per verdict and per operator, what
+selection cost, and a timing entry for every mutant, `detected` ones
+included. `--history <path>` appends each run's report to a JSON Lines
+file, aborted runs included. See *Run statistics* in the README.
+
+**`--workers N` runs mutants in parallel, without copying the package.**
+Each worker gets a sandbox made of symbolic links, where only the target
+files are real copies, and the package itself is never written to while
+more than one worker runs. A sandbox holds a few kilobytes of its own plus
+what the test command builds there (46MB of `build/` for `flutter test` on a
+small Flutter package). Before the workers start, the full test command runs
+once in one sandbox against unmodified code, and a run whose sandbox fails
+that check falls back to one worker, in place, saying why. The default is 1,
+which runs as before. See *Running mutants in parallel* in the README.
+
+- The in-process compile-safety gate now judges a mutant's content in
+  memory, one question at a time, so it can serve every worker, and a
+  mutant that does not compile is never written to disk.
+- Statistics add `workers`, each sandbox's disk use, the sandbox setup time
+  and, per mutant, the `worker` that ran it.
+
+**Temporary directories are always cleaned up.** The coverage pass's
+report directory used to be left behind when a run was interrupted with
+`SIGINT` or `SIGTERM`. Every temporary directory now goes through one
+owner and is deleted at the end of a run, on an interrupt too, and each
+is named `dart_mutants_<pid>_…`. A run that was killed outright (`kill
+-9`) cannot clean up after itself, so each run starts by deleting the
+directories left by earlier runs whose pid is no longer running. A
+directory whose run is still going is left alone.
+
+`--json` is unchanged apart from the added `stats`: the JSON report on
+stdout, and no progress lines, so stdout still parses as a whole. The text report's timed-out lines now name
+the budget they ran out of.
+
 ## 0.2.8
 
 No behaviour change to a run.

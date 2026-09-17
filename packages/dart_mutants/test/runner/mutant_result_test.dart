@@ -59,6 +59,28 @@ void main() {
   );
 
   test(
+    '[partition] a mutant that ran carries the budget it ran against; one '
+    'that did not has no key at all',
+    () {
+      expect(
+        MutantResult(
+          mutant: _mutant(),
+          verdict: MutantVerdict.timeout,
+          timeout: const Duration(milliseconds: 31500),
+        ).toJson()['timeoutSeconds'],
+        31.5,
+      );
+      expect(
+        MutantResult(
+          mutant: _mutant(),
+          verdict: MutantVerdict.invalid,
+        ).toJson().containsKey('timeoutSeconds'),
+        isFalse,
+      );
+    },
+  );
+
+  test(
     '[boundary] the verdict serialises as its enum name, not its index — '
     'index would silently renumber if the enum\'s declaration order ever '
     'changed',

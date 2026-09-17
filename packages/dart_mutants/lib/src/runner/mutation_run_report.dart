@@ -1,4 +1,5 @@
 import 'file_mutation_report.dart';
+import 'run_stats.dart';
 
 /// Why a run stopped before scoring anything — the machine-readable half of
 /// an abort, next to [MutationRunReport.abortReason]'s human-readable one.
@@ -38,6 +39,7 @@ class MutationRunReport {
     this.abortReason, {
     this.baselineDuration,
     this.mutantTimeout,
+    this.stats,
   }) : files = const <FileMutationReport>[],
        selectedByCoverage = null;
 
@@ -46,6 +48,7 @@ class MutationRunReport {
     this.baselineDuration,
     this.mutantTimeout,
     this.selectedByCoverage = false,
+    this.stats,
   }) : abortKind = null,
        abortReason = null;
 
@@ -59,9 +62,12 @@ class MutationRunReport {
   /// it never finished.
   final Duration? baselineDuration;
 
-  /// The budget each mutant's test run got — `null` when the run stopped
-  /// before one was set. Not necessarily the `--mutant-timeout` a caller
-  /// passed: see `MutationTestRunner.baselineFactor`.
+  /// The budget a mutant running the full test command got — `null` when
+  /// the run stopped before one was set. Not necessarily the
+  /// `--mutant-timeout` a caller passed: see
+  /// `MutationTestRunner.baselineFactor`. A mutant that ran only the tests
+  /// selected for it may have had less; each result carries its own, in
+  /// `MutantResult.timeout`.
   final Duration? mutantTimeout;
 
   /// Non-null exactly when the run never produced any scores at all — see
@@ -75,6 +81,10 @@ class MutationRunReport {
 
   final List<FileMutationReport> files;
 
+  /// What the run cost and where the time went, or `null` when nobody
+  /// collected it.
+  final RunStats? stats;
+
   bool get aborted => abortKind != null;
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -87,6 +97,7 @@ class MutationRunReport {
     'files': <String, Object?>{
       for (final FileMutationReport f in files) f.filePath: f.toJson(),
     },
+    if (stats != null) 'stats': stats!.toJson(),
   };
 
   /// Millisecond precision — finer than a wall-clock test run means anything.

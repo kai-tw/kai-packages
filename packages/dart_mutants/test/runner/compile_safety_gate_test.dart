@@ -269,4 +269,56 @@ void main() {
       },
     );
   });
+
+  group('InProcessAnalyzerGate, judging content in memory', () {
+    late InProcessAnalyzerGate gate;
+    late File callee;
+    late File caller;
+
+    setUp(() {
+      gate = InProcessAnalyzerGate(<String>[tempDir.path]);
+      callee = File(p.join(tempDir.path, 'callee.dart'))
+        ..writeAsStringSync('int limit() => 10;\n');
+      caller = File(p.join(tempDir.path, 'caller.dart'))
+        ..writeAsStringSync("import 'callee.dart';\n\nint f() => limit();\n");
+    });
+    tearDown(() => gate.close());
+
+    test('[partition] content that compiles, and content that does not, '
+        'judged without the file changing', () async {
+      expect(
+        await gate.compilesSource(callee.path, 'int limit() => 3;\n'),
+        isTrue,
+      );
+      expect(
+        await gate.compilesSource(callee.path, "int limit() => 'ten';\n"),
+        isFalse,
+      );
+      expect(callee.readAsStringSync(), 'int limit() => 10;\n');
+    });
+
+    test('[state] once answered, the content is gone: the file, and one that '
+        'imports it, are judged from disk again', () async {
+      expect(
+        await gate.compilesSource(callee.path, 'String other() => "";\n'),
+        isTrue,
+      );
+      // With the content above still laid over the file, `limit` would not
+      // exist and the caller would not compile.
+      expect(await gate.compiles(caller.path), isTrue);
+      expect(await gate.compiles(callee.path), isTrue);
+    });
+
+    test('[state] questions asked at once are answered one at a time, each '
+        'against its own content only', () async {
+      final List<bool> answers = await Future.wait(<Future<bool>>[
+        gate.compilesSource(callee.path, 'String other() => "";\n'),
+        gate.compiles(caller.path),
+        gate.compilesSource(caller.path, 'int f() => missing();\n'),
+        gate.compiles(caller.path),
+      ]);
+
+      expect(answers, <bool>[true, true, false, true]);
+    });
+  });
 }

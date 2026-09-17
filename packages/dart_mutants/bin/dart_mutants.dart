@@ -4,10 +4,12 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
 import 'package:dart_mutants/src/runner/file_mutation_report.dart';
+import 'package:dart_mutants/src/runner/mutant_progress.dart';
 import 'package:dart_mutants/src/runner/mutant_result.dart';
 import 'package:dart_mutants/src/runner/mutation_run_report.dart';
 import 'package:dart_mutants/src/runner/mutation_test_runner.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
+import 'package:dart_mutants/src/runner/run_plan.dart';
 
 /// The CLI contract: a file list and a test command in, per-file
 /// total/undetected out. Which files to pass and what to do with the report
@@ -65,7 +67,39 @@ Future<void> main(List<String> arguments) async {
           '"flutter test ..." --test-command; otherwise every mutant runs the '
           'full command.',
     )
-    ..addFlag('json', help: 'Emit the report as JSON instead of text.')
+    ..addOption(
+      'workers',
+      abbr: 'j',
+      defaultsTo: '1',
+      help:
+          'How many mutants run at once. Above 1, each worker runs in a copy '
+          'of the package made of links, a few megabytes each plus what the '
+          'test command builds, and the package itself is never written to. '
+          'Memory is the usual limit: each worker runs its own test command.',
+    )
+    ..addOption(
+      'output',
+      abbr: 'o',
+      valueHelp: 'path',
+      help:
+          'Also write the report as JSON to this file, replacing it. Written '
+          'on every run, aborted ones included. stdout keeps the progress and '
+          'the text report.',
+    )
+    ..addOption(
+      'history',
+      valueHelp: 'path',
+      help:
+          'Append this run\'s report, statistics included, as one JSON line '
+          'to this file, so runs can be compared later. Aborted runs are '
+          'appended too.',
+    )
+    ..addFlag(
+      'json',
+      help:
+          'Print the report as JSON to stdout instead of text, with no '
+          'progress. Prefer --output, which keeps the progress.',
+    )
     ..addFlag('help', abbr: 'h', negatable: false);
 
   final ArgResults? args = _parseAndValidate(arguments, parser);
@@ -83,6 +117,11 @@ Future<void> main(List<String> arguments) async {
   final CompileSafetyGate? fallback = analyzeCommand == null
       ? const AnalyzerProcessGate(ProcessCommand('dart', <String>['analyze']))
       : null;
+
+  // stdout is the JSON report's under --json, and nothing else may share it.
+  final bool jsonOnStdout = args['json'] as bool;
+  final String? outputPath = args['output'] as String?;
+  final String? historyPath = args['history'] as String?;
 
   final MutationTestRunner runner = MutationTestRunner(
     testCommand: _parseCommand(args['test-command'] as String),
@@ -107,6 +146,13 @@ Future<void> main(List<String> arguments) async {
       'note: --select-by-coverage was not applied ($reason), so every '
       'mutant runs the full test command.',
     ),
+    workers: int.parse(args['workers'] as String),
+    onWorkersFallback: (String reason) => stderr.writeln(
+      'note: --workers was not applied ($reason), so mutants run one at a '
+      'time in the package itself.',
+    ),
+    onPlan: _planPrinter(quiet: jsonOnStdout),
+    onProgress: _progressPrinter(quiet: jsonOnStdout),
   );
 
   final MutationRunReport report;
@@ -124,13 +170,14 @@ Future<void> main(List<String> arguments) async {
   // must never suppress it. A caller scoring per-file at a threshold other
   // than "zero undetected" depends on reading the JSON even when this
   // process's own exit code disagrees with their verdict.
-  if (args['json'] as bool) {
-    stdout.writeln(const JsonEncoder.withIndent('  ').convert(report.toJson()));
-  } else {
-    _printText(report);
-  }
+  final bool written = _emitReport(
+    report,
+    jsonOnStdout: jsonOnStdout,
+    outputPath: outputPath,
+    historyPath: historyPath,
+  );
 
-  if (report.aborted) {
+  if (!written || report.aborted) {
     exitCode = 1;
     return;
   }
@@ -168,9 +215,12 @@ ArgResults? _parseAndValidate(List<String> arguments, ArgParser parser) {
     return null;
   }
 
-  final String? timeoutError = _timeoutOptionError(args);
-  if (timeoutError != null) {
-    stderr.writeln(timeoutError);
+  final String? optionError =
+      _timeoutOptionError(args) ??
+      _outputOptionError(args) ??
+      _workersOptionError(args);
+  if (optionError != null) {
+    stderr.writeln(optionError);
     exitCode = 64;
     return null;
   }
@@ -196,6 +246,81 @@ String? _timeoutOptionError(ArgResults args) {
   return null;
 }
 
+/// What is wrong with --output or --history that can be seen before the
+/// run, or `null`.
+/// Checked up front: a run can take hours, and finding out at the end that
+/// the report has nowhere to go loses all of it.
+String? _outputOptionError(ArgResults args) {
+  for (final String option in <String>['output', 'history']) {
+    final String? path = args[option] as String?;
+    if (path != null &&
+        (path.isEmpty || FileSystemEntity.isDirectorySync(path))) {
+      return '--$option must name a file, not a directory';
+    }
+  }
+  return null;
+}
+
+/// Prints [report] — as JSON when [jsonOnStdout], as text otherwise — writes
+/// it to [outputPath] and appends it to [historyPath], each when given.
+/// Returns whether every write worked; both are attempted either way.
+bool _emitReport(
+  MutationRunReport report, {
+  required bool jsonOnStdout,
+  required String? outputPath,
+  required String? historyPath,
+}) {
+  final Map<String, Object?> data = report.toJson();
+  final String json = const JsonEncoder.withIndent('  ').convert(data);
+  if (jsonOnStdout) {
+    stdout.writeln(json);
+  } else {
+    _printText(report);
+  }
+  final bool written = outputPath == null || _writeReport(outputPath, json);
+  final bool appended =
+      historyPath == null || _appendHistory(historyPath, jsonEncode(data));
+  return written && appended;
+}
+
+/// Appends [line] to [path], creating it and its directory if needed.
+/// Returns whether it worked, having said why on stderr when it did not.
+bool _appendHistory(String path, String line) {
+  try {
+    File(path)
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync('$line\n', mode: FileMode.append, flush: true);
+    return true;
+  } on FileSystemException catch (e) {
+    stderr.writeln('could not append the report to $path: $e');
+    return false;
+  }
+}
+
+/// Writes [json] to [path] through a sibling temporary file and a rename,
+/// so a reader never sees half a report. Returns whether it worked, having
+/// said why on stderr when it did not.
+bool _writeReport(String path, String json) {
+  final File target = File(path);
+  final File partial = File('$path.partial');
+  try {
+    target.parent.createSync(recursive: true);
+    partial.writeAsStringSync('$json\n', flush: true);
+    partial.renameSync(target.path);
+    return true;
+  } on FileSystemException catch (e) {
+    stderr.writeln('could not write the report to $path: $e');
+    return false;
+  }
+}
+
+String? _workersOptionError(ArgResults args) {
+  final int? workers = int.tryParse(args['workers'] as String);
+  return workers == null || workers < 1
+      ? '--workers must be a whole number, 1 or more'
+      : null;
+}
+
 bool _isPositiveSeconds(String value) {
   final int? seconds = int.tryParse(value);
   return seconds != null && seconds > 0;
@@ -212,17 +337,48 @@ String _formatFactor(double factor) => factor == factor.truncateToDouble()
 String _formatSeconds(Duration d) =>
     '${(d.inMilliseconds / 1000).toStringAsFixed(1)}s';
 
-/// What every mutant's timeout was measured against — see
+/// What a full-command mutant's timeout was measured against — see
 /// MutationTestRunner.baselineFactor.
 void _printBudget(MutationRunReport report) {
   final Duration? baseline = report.baselineDuration;
   final Duration? budget = report.mutantTimeout;
   if (baseline != null && budget != null) {
     stdout.writeln(
-      'baseline ${_formatSeconds(baseline)}, each mutant given '
-      '${_formatSeconds(budget)}',
+      'baseline ${_formatSeconds(baseline)}, ${_budgetPhrase(budget)}',
     );
   }
+}
+
+String _budgetPhrase(Duration budget) =>
+    'each mutant given at most ${_formatSeconds(budget)}';
+
+void _printPlan(RunPlan plan) {
+  stdout.writeln(
+    '${_count(plan.mutantCount, 'mutant')} in '
+    '${_count(plan.fileCount, 'file')} — baseline '
+    '${_formatSeconds(plan.baseline)}, ${_budgetPhrase(plan.budget)}',
+  );
+}
+
+/// Nothing when [quiet]: under --json, stdout is the report's alone.
+void Function(RunPlan)? _planPrinter({required bool quiet}) =>
+    quiet ? null : _printPlan;
+
+void Function(MutantProgress)? _progressPrinter({required bool quiet}) =>
+    quiet ? null : _printProgress;
+
+String _count(int n, String noun) => '$n $noun${n == 1 ? '' : 's'}';
+
+/// One line per mutant, `[completed/total] verdict path:line:column
+/// operator (elapsed)`, written as it finishes.
+void _printProgress(MutantProgress progress) {
+  final MutantResult r = progress.result;
+  final String verdict = r.uncovered ? 'uncovered' : r.verdict.name;
+  stdout.writeln(
+    '[${progress.completed}/${progress.total}] $verdict '
+    '${r.mutant.filePath}:${r.mutant.line}:${r.mutant.column} '
+    '${r.mutant.operatorName} (${_formatSeconds(progress.elapsed)})',
+  );
 }
 
 ProcessCommand _parseCommand(String command) {
@@ -265,9 +421,11 @@ void _printText(MutationRunReport report) {
     // Printed with the same weight as an undetected one. A timed-out mutant is
     // real code that went unmeasured, and the count on the line above says so
     // without saying which — so on its own it is a number nobody acts on.
+    // A timed-out mutant always ran, so it always has a budget.
     for (final MutantResult r in f.timedOutMutants) {
       stdout.writeln(
-        '  timed out (NOT scored): ${r.mutant.operatorName} at '
+        '  timed out at ${_formatSeconds(r.timeout!)} '
+        '(NOT scored): ${r.mutant.operatorName} at '
         '${f.filePath}:${r.mutant.line}:${r.mutant.column} — '
         '${r.mutant.description}',
       );
