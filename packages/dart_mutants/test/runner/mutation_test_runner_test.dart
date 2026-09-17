@@ -13,6 +13,7 @@ import 'package:dart_mutants/src/runner/mutation_test_runner.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
 import 'package:dart_mutants/src/runner/run_plan.dart';
 import 'package:dart_mutants/src/runner/run_stats.dart';
+import 'package:dart_mutants/src/runner/temp_space.dart';
 import 'package:dart_mutants/src/version.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
@@ -1088,14 +1089,19 @@ void main() {
     // full budget is at least 12s more than any selection's. The floor is
     // 1s, so every budget here is derived rather than floored.
     late Directory dir;
+    late Directory temps;
     late MutationRunReport report;
     RunPlan? plan;
     final List<MutantProgress> progress = <MutantProgress>[];
 
-    tearDownAll(() => dir.deleteSync(recursive: true));
+    tearDownAll(() {
+      dir.deleteSync(recursive: true);
+      temps.deleteSync(recursive: true);
+    });
 
     setUpAll(() async {
       dir = await _fixturePackage();
+      temps = Directory.systemTemp.createTempSync('runner_temps_');
       File(p.join(dir.path, 'test', 'slow_test.dart')).writeAsStringSync('''
 import 'package:test/test.dart';
 
@@ -1142,6 +1148,7 @@ void main() {
             selectByCoverage: true,
             onPlan: (RunPlan planned) => plan = planned,
             onProgress: progress.add,
+            tempSpace: TempSpace(root: temps),
           ).run(<String>[
             p.join(dir.path, 'lib', 'hangs.dart'),
             p.join(dir.path, 'lib', 'twice.dart'),
@@ -1208,6 +1215,14 @@ void main() {
         ).undetectedMutants.single;
         expect(r.uncovered, isFalse);
         expect(r.timeout, report.mutantTimeout);
+      },
+    );
+
+    test(
+      '[state] the coverage pass wrote into a temporary directory, and none '
+      'is left once the run returns',
+      () {
+        expect(temps.listSync(), isEmpty);
       },
     );
 

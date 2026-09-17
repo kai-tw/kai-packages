@@ -36,6 +36,15 @@ selection cost, and a timing entry for every mutant, `detected` ones
 included. `--history <path>` appends each run's report to a JSON Lines
 file, aborted runs included. See *Run statistics* in the README.
 
+**Temporary directories are always cleaned up.** The coverage pass's
+report directory used to be left behind when a run was interrupted with
+`SIGINT` or `SIGTERM`. Every temporary directory now goes through one
+owner and is deleted at the end of a run, on an interrupt too, and each
+is named `dart_mutants_<pid>_…`. A run that was killed outright (`kill
+-9`) cannot clean up after itself, so each run starts by deleting the
+directories left by earlier runs whose pid is no longer running. A
+directory whose run is still going is left alone.
+
 `--json` is unchanged apart from the added `stats`: the JSON report on
 stdout, and no progress lines, so stdout still parses as a whole. The text report's timed-out lines now name
 the budget they ran out of.

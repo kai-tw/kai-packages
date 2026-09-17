@@ -536,11 +536,14 @@ real CLI binary, not just the internal report types:
   mutant's test run is in flight is a correctness risk this package has not
   solved, and a wrong number is worse than a slow one.
 - **`SIGKILL` cannot be caught.** `SIGINT`/`SIGTERM` restore whatever is
-  mutated and kill the in-flight test command's process tree before exiting
-  (both tested against the real CLI binary, not simulated); no process can
-  catch `SIGKILL`, so a `kill -9` or a timeout wrapper configured to skip
-  straight to it is still a real gap — and there it leaks in both directions
-  at once, leaving a mutated file on disk *and* an orphaned test process.
+  mutated, kill the in-flight test command's process tree and delete the
+  run's temporary directories before exiting (all tested against the real
+  CLI binary, not simulated); no process can catch `SIGKILL`, so a `kill -9`
+  or a timeout wrapper configured to skip straight to it is still a real
+  gap — and there it leaks in both directions at once, leaving a mutated
+  file on disk *and* an orphaned test process. Its temporary directories
+  are the one part that recovers: each is named `dart_mutants_<pid>_…`, and
+  the next run deletes those whose pid is no longer running.
 - **Process enumeration is `ps`.** The tree kill needs it. On a platform
   without `ps` this says so on stderr and degrades to killing the direct
   child, which is the pre-0.2.3 behaviour and leaks a `flutter test` engine.

@@ -223,4 +223,52 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 60)),
   );
+
+  test(
+    'SIGTERM during the coverage pass deletes its temporary directory, '
+    'rather than leaving it to fill the disk',
+    () async {
+      final Directory dir = await _slowFixture();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      // The run's own temporary root, through TMPDIR, so what it leaves can
+      // be seen apart from every other process on the machine.
+      final Directory temps = Directory.systemTemp.createTempSync(
+        'signal_temps_',
+      );
+      addTearDown(() => temps.deleteSync(recursive: true));
+
+      final Process process = await Process.start(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--select-by-coverage',
+          p.join(dir.path, 'lib', 'calc.dart'),
+        ],
+        workingDirectory: dir.path,
+        environment: <String, String>{'TMPDIR': temps.path},
+      );
+      process.stdout.drain<void>();
+      process.stderr.drain<void>();
+
+      bool coverageDirExists() => temps.listSync().any(
+        (FileSystemEntity e) =>
+            p.basename(e.path).startsWith('dart_mutants_${process.pid}_cov_'),
+      );
+      await _waitUntil(
+        coverageDirExists,
+        timeout: const Duration(seconds: 30),
+      );
+
+      process.kill(ProcessSignal.sigterm);
+      expect(
+        await process.exitCode.timeout(const Duration(seconds: 10)),
+        1,
+      );
+      expect(coverageDirExists(), isFalse);
+    },
+    timeout: const Timeout(Duration(seconds: 60)),
+  );
 }

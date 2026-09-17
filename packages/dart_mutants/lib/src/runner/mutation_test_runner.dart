@@ -22,6 +22,7 @@ import 'mutation_run_report.dart';
 import 'process_command.dart';
 import 'run_plan.dart';
 import 'run_stats.dart';
+import 'temp_space.dart';
 import 'test_compilation_cache.dart';
 import 'test_invocation.dart';
 import 'test_selection.dart';
@@ -48,7 +49,9 @@ class MutationTestRunner {
     this.onSelectionFallback,
     this.onPlan,
     this.onProgress,
-  }) : operators = operators ?? defaultOperators(),
+    TempSpace? tempSpace,
+  }) : tempSpace = tempSpace ?? TempSpace(),
+       operators = operators ?? defaultOperators(),
        baselineTimeout = baselineTimeout ?? mutantTimeout * 10 {
     if (baselineFactor.isNaN ||
         baselineFactor.isInfinite ||
@@ -119,6 +122,11 @@ class MutationTestRunner {
   final void Function(MutantProgress progress)? onProgress;
 
   final List<MutationOperator> operators;
+
+  /// Where the run's temporary directories go. [run] deletes every one it
+  /// made before it returns, and on `SIGINT`/`SIGTERM`; it also deletes the
+  /// ones a run that was killed outright left behind — see [TempSpace].
+  final TempSpace tempSpace;
 
   /// The least time a mutant's test run gets before it is killed and scored
   /// as [MutantVerdict.timeout] instead of waited on forever. A slow suite
@@ -206,7 +214,16 @@ class MutationTestRunner {
     // exactly the same way — and it is the longest single run of the session,
     // being the cold one. There is nothing to restore yet at this point; the
     // restore half is simply a no-op until the first mutant is written.
-    _registry.armSignalRestore(beforeExit: ProcessCommand.killAllRunning);
+    //
+    // Processes before directories: a test run killed mid-write would
+    // otherwise be writing into a directory being deleted.
+    _registry.armSignalRestore(
+      beforeExit: () {
+        ProcessCommand.killAllRunning();
+        tempSpace.deleteAll();
+      },
+    );
+    tempSpace.sweepStale();
     final RunStats stats = _stats = RunStats(
       startedAt: DateTime.now(),
       environment: _environment(),
@@ -313,6 +330,7 @@ class MutationTestRunner {
       // before that: at most one file's worth of cleanup, never a whole
       // run's worth.
       _registry.restoreAll();
+      tempSpace.deleteAll();
       await _registry.disarm();
     }
   }
@@ -360,6 +378,7 @@ class MutationTestRunner {
       invocation,
       timeout: baselineTimeout,
       onFailure: (String reason) => onSelectionFallback?.call(reason),
+      temps: tempSpace,
     );
   }
 
