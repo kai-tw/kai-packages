@@ -349,6 +349,45 @@ them enter its function; a 44-file scope like the one measured above is
 where it should matter most, and that has not been measured with the flag
 yet.
 
+## Run statistics
+
+Every report carries `stats`: what the run cost and where the time went, so
+the next change to this package, or to a suite, can be measured against
+real runs instead of guessed at. `--history <path>` appends each run's
+whole report, statistics included, to a JSON Lines file. Aborted runs are
+appended too. A run of a few thousand mutants adds on the order of a
+megabyte, so prune the file as you see fit.
+
+```bash
+dart run dart_mutants --select-by-coverage \
+  --output build/mutation.json --history .mutation/history.jsonl \
+  --test-command "flutter test" lib/foo.dart
+```
+
+`stats` holds:
+
+- `startedAt`, `finishedAt` (UTC) and `wallSeconds`;
+- `environment`: this package's version, the Dart version, the OS, the
+  processor count, the test command, the timeout options and the operators;
+- `loadAverage` at `start` and `end` (1-, 5- and 15-minute), where the OS
+  gives one. The same suite has taken 9s and 29s on one machine depending on
+  what else ran, so a slow run needs this to be read at all;
+- `phases`: `baselineSeconds`, `gateCheckSeconds` (every target put to the
+  gate unmodified), `coveragePassSeconds` and `mutantsSeconds`. A phase that
+  did not run is absent;
+- `verdicts` and `operators`: count and seconds for each, and for each
+  operator its verdicts. `uncovered` is counted apart from `undetected`;
+- `selection`: how many mutants ran a selection, how many selections were
+  measured and for how long, and how many selected runs fell back to the
+  full command and what that cost;
+- `mutants`: one entry per mutant, `detected` ones included, with its
+  location, operator, verdict, `seconds`, `gateSeconds`, whether it was
+  `selected`, and `measurementSeconds`, `testSeconds`, `retrySeconds` and
+  `timeoutSeconds` where they apply.
+
+The statistics are for comparing runs. They are not part of the output
+contract below: keys may be added.
+
 ## What this package does not decide
 
 Which files to run against, how big a mutant budget to spend, what

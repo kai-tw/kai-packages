@@ -1,4 +1,5 @@
 import 'file_mutation_report.dart';
+import 'run_stats.dart';
 
 /// Why a run stopped before scoring anything — the machine-readable half of
 /// an abort, next to [MutationRunReport.abortReason]'s human-readable one.
@@ -38,6 +39,7 @@ class MutationRunReport {
     this.abortReason, {
     this.baselineDuration,
     this.mutantTimeout,
+    this.stats,
   }) : files = const <FileMutationReport>[],
        selectedByCoverage = null;
 
@@ -46,6 +48,7 @@ class MutationRunReport {
     this.baselineDuration,
     this.mutantTimeout,
     this.selectedByCoverage = false,
+    this.stats,
   }) : abortKind = null,
        abortReason = null;
 
@@ -78,6 +81,10 @@ class MutationRunReport {
 
   final List<FileMutationReport> files;
 
+  /// What the run cost and where the time went, or `null` when nobody
+  /// collected it.
+  final RunStats? stats;
+
   bool get aborted => abortKind != null;
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -90,6 +97,7 @@ class MutationRunReport {
     'files': <String, Object?>{
       for (final FileMutationReport f in files) f.filePath: f.toJson(),
     },
+    if (stats != null) 'stats': stats!.toJson(),
   };
 
   /// Millisecond precision — finer than a wall-clock test run means anything.

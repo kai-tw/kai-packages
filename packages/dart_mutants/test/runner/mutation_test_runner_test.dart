@@ -6,11 +6,14 @@ import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
 import 'package:dart_mutants/src/runner/file_mutation_report.dart';
 import 'package:dart_mutants/src/runner/mutant_progress.dart';
 import 'package:dart_mutants/src/runner/mutant_result.dart';
+import 'package:dart_mutants/src/runner/mutant_timing.dart';
 import 'package:dart_mutants/src/runner/mutant_verdict.dart';
 import 'package:dart_mutants/src/runner/mutation_run_report.dart';
 import 'package:dart_mutants/src/runner/mutation_test_runner.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
 import 'package:dart_mutants/src/runner/run_plan.dart';
+import 'package:dart_mutants/src/runner/run_stats.dart';
+import 'package:dart_mutants/src/version.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -835,6 +838,12 @@ void main() {
           File(p.join(dir.path, 'lib', 'detected.dart')).readAsStringSync(),
           detectedBefore,
         );
+        // Kept for an abort too: a red run is still a run worth comparing.
+        final RunStats stats = report.stats!;
+        expect(stats.finishedAt, isNotNull);
+        expect(stats.baseline, report.baselineDuration);
+        expect(stats.gateCheck, isNull);
+        expect(stats.mutants, isEmpty);
       },
     );
   });
@@ -1199,6 +1208,41 @@ void main() {
         ).undetectedMutants.single;
         expect(r.uncovered, isFalse);
         expect(r.timeout, report.mutantTimeout);
+      },
+    );
+
+    test(
+      '[state] the statistics time every phase that ran and every mutant, '
+      'and count the one measurement',
+      () {
+        final RunStats stats = report.stats!;
+        expect(stats.baseline, report.baselineDuration);
+        expect(stats.gateCheck, isNotNull);
+        expect(stats.coveragePass, greaterThan(Duration.zero));
+        expect(stats.finishedAt!.isBefore(stats.startedAt), isFalse);
+        expect(
+          stats.mutants.map((MutantTiming m) => m.bucket),
+          <String>['timeout', 'detected', 'detected', 'undetected'],
+        );
+        expect(
+          stats.mutants.map((MutantTiming m) => m.selected),
+          <bool>[true, true, true, false],
+        );
+        // hangs.dart's selection and twice.dart's, each measured by the
+        // first mutant to need it.
+        expect(
+          stats.mutants.map((MutantTiming m) => m.measurement != null),
+          <bool>[true, true, false, false],
+        );
+        expect(
+          stats.mutants.every((MutantTiming m) => m.test != null),
+          isTrue,
+        );
+        final Map<String, Object?> environment = stats.environment;
+        expect(environment['dartMutantsVersion'], packageVersion);
+        expect(environment['testCommand'], 'dart test');
+        expect(environment['operators'], <String>['ternary_swap']);
+        expect(environment['selectByCoverage'], isTrue);
       },
     );
 

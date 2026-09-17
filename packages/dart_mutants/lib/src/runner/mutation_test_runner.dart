@@ -8,16 +8,20 @@ import '../mutant.dart';
 import '../mutation_operator.dart';
 import '../mutation_visitor.dart';
 import '../operators.dart';
+import '../version.dart';
 import 'compile_safety_gate.dart';
 import 'file_mutation_report.dart';
+import 'host_load.dart';
 import 'mutant_progress.dart';
 import 'mutant_result.dart';
 import 'mutant_scope.dart';
+import 'mutant_timing.dart';
 import 'mutant_verdict.dart';
 import 'mutated_file_registry.dart';
 import 'mutation_run_report.dart';
 import 'process_command.dart';
 import 'run_plan.dart';
+import 'run_stats.dart';
 import 'test_compilation_cache.dart';
 import 'test_invocation.dart';
 import 'test_selection.dart';
@@ -155,6 +159,9 @@ class MutationTestRunner {
   int _completed = 0;
   int _planned = 0;
 
+  /// The current run's — see [run].
+  late RunStats _stats;
+
   /// See [TestCompilationCache]'s own doc for why this exists at all — in
   /// short, `dart test`'s incremental kernel cache does not reliably notice
   /// the fast, repeated, small rewrites this class makes to one file.
@@ -200,6 +207,11 @@ class MutationTestRunner {
     // being the cold one. There is nothing to restore yet at this point; the
     // restore half is simply a no-op until the first mutant is written.
     _registry.armSignalRestore(beforeExit: ProcessCommand.killAllRunning);
+    final RunStats stats = _stats = RunStats(
+      startedAt: DateTime.now(),
+      environment: _environment(),
+      loadAtStart: await HostLoad.read(),
+    );
     try {
       _testCache.clear();
       final Stopwatch baselineClock = Stopwatch()..start();
@@ -209,6 +221,7 @@ class MutationTestRunner {
       final Duration baseline = baselineClock.elapsed;
       if (baselineExitCode == null) {
         return MutationRunReport.aborted(
+          stats: await _finished(stats),
           AbortKind.baselineTimeout,
           'the test command did not finish against unmodified code within '
           'the timeout (${baselineTimeout.inSeconds}s) — refusing to score '
@@ -217,8 +230,10 @@ class MutationTestRunner {
           'timeout (--baseline-timeout).',
         );
       }
+      stats.baseline = baseline;
       if (baselineExitCode != 0) {
         return MutationRunReport.aborted(
+          stats: await _finished(stats),
           AbortKind.baselineFailed,
           'the test command failed against unmodified code (exit '
           '$baselineExitCode) — refusing to score mutants against a baseline '
@@ -233,6 +248,7 @@ class MutationTestRunner {
       final List<_PlannedFile> plan = <_PlannedFile>[];
       final Map<String, CompileSafetyGate> gates =
           <String, CompileSafetyGate>{};
+      final Stopwatch gateClock = Stopwatch()..start();
       for (final String filePath in targets) {
         final String source = await File(filePath).readAsString();
         final List<Mutant> mutants = _collectMutants(filePath, source);
@@ -243,7 +259,9 @@ class MutationTestRunner {
         }
         final CompileSafetyGate? gate = await _gateFor(filePath);
         if (gate == null) {
+          stats.gateCheck = gateClock.elapsed;
           return MutationRunReport.aborted(
+            stats: await _finished(stats),
             AbortKind.gateRejectsUnmodified,
             'the compile-safety gate rejects $filePath before it has been '
             'mutated. The gate cannot read that file, or its configuration '
@@ -258,6 +276,7 @@ class MutationTestRunner {
         }
         gates[filePath] = gate;
       }
+      stats.gateCheck = gateClock.elapsed;
 
       final TestSelection? selection = await _selection();
 
@@ -286,6 +305,7 @@ class MutationTestRunner {
         baselineDuration: baseline,
         mutantTimeout: budget,
         selectedByCoverage: selection != null,
+        stats: await _finished(stats),
       );
     } finally {
       // A safety net, not the primary mechanism — _runOne already restores
@@ -319,6 +339,15 @@ class MutationTestRunner {
     if (!selectByCoverage) {
       return null;
     }
+    final Stopwatch clock = Stopwatch()..start();
+    try {
+      return await _collectSelection();
+    } finally {
+      _stats.coveragePass = clock.elapsed;
+    }
+  }
+
+  Future<TestSelection?> _collectSelection() async {
     final TestInvocation? invocation = TestInvocation.parse(testCommand);
     if (invocation == null) {
       onSelectionFallback?.call(
@@ -341,7 +370,54 @@ class MutationTestRunner {
     return derived > mutantTimeout ? derived : mutantTimeout;
   }
 
-  void _reportProgress(MutantResult result, Duration elapsed) {
+  /// What this run was given and where it runs, for [RunStats.environment].
+  /// The test command is recorded as given; the target paths are in the
+  /// report already.
+  Map<String, Object?> _environment() => <String, Object?>{
+    'dartMutantsVersion': packageVersion,
+    'dartVersion': Platform.version,
+    'os': Platform.operatingSystem,
+    'osVersion': Platform.operatingSystemVersion,
+    'processors': Platform.numberOfProcessors,
+    'testCommand': <String>[
+      testCommand.executable,
+      ...testCommand.arguments,
+    ].join(' '),
+    'mutantTimeoutSeconds': MutantTiming.seconds(mutantTimeout),
+    'baselineFactor': baselineFactor,
+    'baselineTimeoutSeconds': MutantTiming.seconds(baselineTimeout),
+    'selectByCoverage': selectByCoverage,
+    'operators': operators.map((MutationOperator o) => o.name).toList(),
+  };
+
+  Future<RunStats> _finished(RunStats stats) async {
+    stats
+      ..finishedAt = DateTime.now()
+      ..loadAtEnd = await HostLoad.read();
+    return stats;
+  }
+
+  /// [_runOne], timed, recorded in the run's statistics and reported as
+  /// progress.
+  Future<MutantResult> _runTimed(
+    Mutant mutant,
+    String originalSource,
+    CompileSafetyGate gate,
+    Duration budget,
+    ProcessCommand? command,
+  ) async {
+    final Stopwatch clock = Stopwatch()..start();
+    final _Timing timing = _Timing();
+    final MutantResult result = await _runOne(
+      mutant,
+      originalSource,
+      gate,
+      budget,
+      command,
+      timing,
+    );
+    final Duration elapsed = clock.elapsed;
+    _stats.mutants.add(timing.build(result, elapsed));
     _completed++;
     onProgress?.call(
       MutantProgress(
@@ -351,6 +427,7 @@ class MutationTestRunner {
         elapsed: elapsed,
       ),
     );
+    return result;
   }
 
   Future<FileMutationReport> _runFile(
@@ -378,15 +455,13 @@ class MutationTestRunner {
     final List<MutantResult> timedOutResults = <MutantResult>[];
 
     for (final Mutant mutant in mutants) {
-      final Stopwatch clock = Stopwatch()..start();
-      final MutantResult result = await _runOne(
+      final MutantResult result = await _runTimed(
         mutant,
         originalSource,
         gate,
         budget,
         _commandFor(mutant, selection, parsed),
       );
-      _reportProgress(result, clock.elapsed);
       switch (result.verdict) {
         case MutantVerdict.invalid:
           invalid++;
@@ -468,9 +543,10 @@ class MutationTestRunner {
 
   /// Applies [mutant] to disk, checks compile-safety, runs [command] if it
   /// passed that gate — for at most [budget], the full command's, or a
-  /// selected command's own (see [selectByCoverage]) — then restores the file before
-  /// returning — regardless of which branch was taken, so a thrown exception
-  /// here still leaves the file clean. A `null` [command] means no test
+  /// selected command's own (see [selectByCoverage]) — then restores the
+  /// file before returning, whichever branch was taken, so a thrown exception
+  /// here still leaves the file clean. Where the time went is written to
+  /// [timing]. A `null` [command] means no test
   /// reaches the mutant: it is scored undetected, and marked so, unrun.
   ///
   /// The gate comes before that on purpose: a mutant that does not compile
@@ -481,12 +557,16 @@ class MutationTestRunner {
     CompileSafetyGate gate,
     Duration budget,
     ProcessCommand? command,
+    _Timing timing,
   ) async {
     _registry.track(mutant.filePath, originalSource);
     final String mutatedSource = mutant.applyTo(originalSource);
     await File(mutant.filePath).writeAsString(mutatedSource);
     try {
-      if (!await gate.compiles(mutant.filePath)) {
+      final Stopwatch clock = Stopwatch()..start();
+      final bool compiles = await gate.compiles(mutant.filePath);
+      timing.gate = clock.elapsed;
+      if (!compiles) {
         return MutantResult(mutant: mutant, verdict: MutantVerdict.invalid);
       }
       if (command == null) {
@@ -496,18 +576,22 @@ class MutationTestRunner {
           uncovered: true,
         );
       }
-      Duration ranAgainst = identical(command, testCommand)
-          ? budget
-          : await _selectedBudget(
+      timing.selected = !identical(command, testCommand);
+      Duration ranAgainst = timing.selected
+          ? await _selectedBudget(
               command,
               mutant.filePath,
               originalSource,
               mutatedSource,
               budget,
-            );
+              timing,
+            )
+          : budget;
       _testCache.clear();
+      clock.reset();
       int? exitCode = await command.run(timeout: ranAgainst);
-      if (!identical(command, testCommand) && !_isVerdict(exitCode)) {
+      timing.test = clock.elapsed;
+      if (timing.selected && !_isVerdict(exitCode)) {
         // Neither a pass nor a failed test: 79 when the selected files ran
         // no test at all — a file that reaches the function while declaring
         // its tests, whose tests a filter skips, or that declares none — and
@@ -516,7 +600,9 @@ class MutationTestRunner {
         // does not make. Ask the full command.
         _testCache.clear();
         ranAgainst = budget;
+        clock.reset();
         exitCode = await testCommand.run(timeout: budget);
+        timing.retry = clock.elapsed;
       }
       if (exitCode == null) {
         // A mutant that hangs the suite is not neutral evidence — it often
@@ -557,6 +643,7 @@ class MutationTestRunner {
     String originalSource,
     String mutatedSource,
     Duration fullBudget,
+    _Timing timing,
   ) async {
     // Already the floor: no measurement could lower it.
     if (fullBudget <= mutantTimeout) {
@@ -572,6 +659,7 @@ class MutationTestRunner {
       _testCache.clear();
       final Stopwatch clock = Stopwatch()..start();
       final int? exitCode = await command.run(timeout: fullBudget);
+      timing.measurement = clock.elapsed;
       final Duration derived = _budgetFrom(clock.elapsed);
       return _selectedBudgets[key] = exitCode == 0 && derived < fullBudget
           ? derived
@@ -587,7 +675,7 @@ class MutationTestRunner {
     command.workingDirectory ?? '',
     command.executable,
     ...command.arguments,
-  ].join(' ');
+  ].join('\u0000');
 }
 
 /// A target file as [MutationTestRunner.run] read and enumerated it, once.
@@ -597,4 +685,24 @@ class _PlannedFile {
   final String path;
   final String source;
   final List<Mutant> mutants;
+}
+
+/// A [MutantTiming] while [MutationTestRunner._runOne] is still filling it
+/// in.
+class _Timing {
+  Duration gate = Duration.zero;
+  bool selected = false;
+  Duration? measurement;
+  Duration? test;
+  Duration? retry;
+
+  MutantTiming build(MutantResult result, Duration elapsed) => MutantTiming(
+    result: result,
+    elapsed: elapsed,
+    gate: gate,
+    selected: selected,
+    measurement: measurement,
+    test: test,
+    retry: retry,
+  );
 }

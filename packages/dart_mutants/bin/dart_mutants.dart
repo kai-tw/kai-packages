@@ -76,6 +76,14 @@ Future<void> main(List<String> arguments) async {
           'on every run, aborted ones included. stdout keeps the progress and '
           'the text report.',
     )
+    ..addOption(
+      'history',
+      valueHelp: 'path',
+      help:
+          'Append this run\'s report, statistics included, as one JSON line '
+          'to this file, so runs can be compared later. Aborted runs are '
+          'appended too.',
+    )
     ..addFlag(
       'json',
       help:
@@ -103,6 +111,7 @@ Future<void> main(List<String> arguments) async {
   // stdout is the JSON report's under --json, and nothing else may share it.
   final bool jsonOnStdout = args['json'] as bool;
   final String? outputPath = args['output'] as String?;
+  final String? historyPath = args['history'] as String?;
 
   final MutationTestRunner runner = MutationTestRunner(
     testCommand: _parseCommand(args['test-command'] as String),
@@ -150,6 +159,7 @@ Future<void> main(List<String> arguments) async {
     report,
     jsonOnStdout: jsonOnStdout,
     outputPath: outputPath,
+    historyPath: historyPath,
   );
 
   if (!written || report.aborted) {
@@ -219,37 +229,55 @@ String? _timeoutOptionError(ArgResults args) {
   return null;
 }
 
-/// What is wrong with --output that can be seen before the run, or `null`.
+/// What is wrong with --output or --history that can be seen before the
+/// run, or `null`.
 /// Checked up front: a run can take hours, and finding out at the end that
 /// the report has nowhere to go loses all of it.
 String? _outputOptionError(ArgResults args) {
-  final String? path = args['output'] as String?;
-  if (path == null) {
-    return null;
-  }
-  if (path.isEmpty || FileSystemEntity.isDirectorySync(path)) {
-    return '--output must name a file, not a directory';
+  for (final String option in <String>['output', 'history']) {
+    final String? path = args[option] as String?;
+    if (path != null &&
+        (path.isEmpty || FileSystemEntity.isDirectorySync(path))) {
+      return '--$option must name a file, not a directory';
+    }
   }
   return null;
 }
 
-/// Prints [report] — as JSON when [jsonOnStdout], as text otherwise — and
-/// writes it to [outputPath] when there is one. Returns whether the write,
-/// if any, worked.
+/// Prints [report] — as JSON when [jsonOnStdout], as text otherwise — writes
+/// it to [outputPath] and appends it to [historyPath], each when given.
+/// Returns whether every write worked; both are attempted either way.
 bool _emitReport(
   MutationRunReport report, {
   required bool jsonOnStdout,
   required String? outputPath,
+  required String? historyPath,
 }) {
-  final String json = const JsonEncoder.withIndent(
-    '  ',
-  ).convert(report.toJson());
+  final Map<String, Object?> data = report.toJson();
+  final String json = const JsonEncoder.withIndent('  ').convert(data);
   if (jsonOnStdout) {
     stdout.writeln(json);
   } else {
     _printText(report);
   }
-  return outputPath == null || _writeReport(outputPath, json);
+  final bool written = outputPath == null || _writeReport(outputPath, json);
+  final bool appended =
+      historyPath == null || _appendHistory(historyPath, jsonEncode(data));
+  return written && appended;
+}
+
+/// Appends [line] to [path], creating it and its directory if needed.
+/// Returns whether it worked, having said why on stderr when it did not.
+bool _appendHistory(String path, String line) {
+  try {
+    File(path)
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync('$line\n', mode: FileMode.append, flush: true);
+    return true;
+  } on FileSystemException catch (e) {
+    stderr.writeln('could not append the report to $path: $e');
+    return false;
+  }
 }
 
 /// Writes [json] to [path] through a sibling temporary file and a rename,

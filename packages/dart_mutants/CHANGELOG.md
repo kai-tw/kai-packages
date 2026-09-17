@@ -28,8 +28,16 @@ included, through a temporary sibling and a rename. stdout keeps the
 progress and the text report. A path naming a directory is refused before
 anything runs, with exit 64.
 
-`--json` is unchanged: the JSON report on stdout, and no progress lines, so
-stdout still parses as a whole. The text report's timed-out lines now name
+**Run statistics, kept across runs.** Every report now carries `stats`:
+start and end times, the environment (this package's version, Dart, OS,
+processors, the test command and options), the load average at the start
+and end, time per phase, count and time per verdict and per operator, what
+selection cost, and a timing entry for every mutant, `detected` ones
+included. `--history <path>` appends each run's report to a JSON Lines
+file, aborted runs included. See *Run statistics* in the README.
+
+`--json` is unchanged apart from the added `stats`: the JSON report on
+stdout, and no progress lines, so stdout still parses as a whole. The text report's timed-out lines now name
 the budget they ran out of.
 
 ## 0.2.8

@@ -374,25 +374,83 @@ void main() {
     },
   );
 
-  test(
-    '[error] --output naming a directory is a usage error, exit 64, before '
-    'anything runs',
-    () async {
-      final Directory dir = Directory.systemTemp.createTempSync('cli_output_');
-      addTearDown(() => dir.deleteSync(recursive: true));
+  for (final String flag in <String>['--output', '--history']) {
+    test(
+      '[error] $flag naming a directory is a usage error, exit 64, before '
+      'anything runs',
+      () async {
+        final Directory dir = Directory.systemTemp.createTempSync(
+          'cli_output_',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
 
-      final ProcessResult result = await Process.run('dart', <String>[
+        final ProcessResult result = await Process.run('dart', <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          flag,
+          dir.path,
+          'lib/anything.dart',
+        ]);
+
+        expect(result.exitCode, 64);
+        expect(result.stderr, contains('$flag must name a file'));
+      },
+    );
+  }
+
+  test(
+    '[state] --history appends one line per run, each a whole report with '
+    'its statistics, aborted runs included',
+    () async {
+      final Directory dir = await _fixtureWithOneUndetectedMutant();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final String history = p.join(dir.path, 'history', 'runs.jsonl');
+      Future<ProcessResult> run() => Process.run('dart', <String>[
         'run',
         _binPath,
         '--test-command',
         'dart test',
-        '--output',
-        dir.path,
-        'lib/anything.dart',
-      ]);
+        '--history',
+        history,
+        'lib/uncovered.dart',
+      ], workingDirectory: dir.path);
 
-      expect(result.exitCode, 64);
-      expect(result.stderr, contains('--output must name a file'));
+      await run();
+      File(p.join(dir.path, 'test', 'broken_test.dart')).writeAsStringSync(
+        "import 'package:test/test.dart';\n\nvoid main() { test('x', () => throw Exception('red')); }\n",
+      );
+      await run();
+
+      final List<Map<String, Object?>> lines = File(history)
+          .readAsLinesSync()
+          .map((String l) => jsonDecode(l) as Map<String, Object?>)
+          .toList();
+      expect(lines, hasLength(2));
+
+      final Map<String, Object?> first = lines[0];
+      expect(first['abortKind'], isNull);
+      final Map<String, Object?> stats =
+          first['stats']! as Map<String, Object?>;
+      expect(stats['finishedAt'], isA<String>());
+      final List<Object?> mutants = stats['mutants']! as List<Object?>;
+      expect(
+        (mutants.single! as Map<String, Object?>)['verdict'],
+        'undetected',
+      );
+      expect(
+        ((stats['verdicts']! as Map<String, Object?>)['undetected']!
+            as Map<String, Object?>)['count'],
+        1,
+      );
+
+      expect(lines[1]['abortKind'], 'baseline-failed');
+      expect(
+        (lines[1]['stats']! as Map<String, Object?>)['mutants'],
+        isEmpty,
+      );
     },
+    timeout: const Timeout(Duration(seconds: 90)),
   );
 }
