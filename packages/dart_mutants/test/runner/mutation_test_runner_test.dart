@@ -4,11 +4,13 @@ import 'package:dart_mutants/src/mutation_operator.dart';
 import 'package:dart_mutants/src/operators/ternary_swap.dart';
 import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
 import 'package:dart_mutants/src/runner/file_mutation_report.dart';
+import 'package:dart_mutants/src/runner/mutant_progress.dart';
 import 'package:dart_mutants/src/runner/mutant_result.dart';
 import 'package:dart_mutants/src/runner/mutant_verdict.dart';
 import 'package:dart_mutants/src/runner/mutation_run_report.dart';
 import 'package:dart_mutants/src/runner/mutation_test_runner.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
+import 'package:dart_mutants/src/runner/run_plan.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -1071,6 +1073,156 @@ void main() {
       },
     );
   });
+
+  group('a selected mutant\'s own budget', () {
+    // The full suite sleeps 4s in a test file that reaches no target, so the
+    // full budget is at least 12s more than any selection's. The floor is
+    // 1s, so every budget here is derived rather than floored.
+    late Directory dir;
+    late MutationRunReport report;
+    RunPlan? plan;
+    final List<MutantProgress> progress = <MutantProgress>[];
+
+    tearDownAll(() => dir.deleteSync(recursive: true));
+
+    setUpAll(() async {
+      dir = await _fixturePackage();
+      File(p.join(dir.path, 'test', 'slow_test.dart')).writeAsStringSync('''
+import 'package:test/test.dart';
+
+void main() {
+  test('slow but green', () async {
+    await Future<void>.delayed(const Duration(seconds: 4));
+  });
+}
+''');
+      // Two mutants in one function, so one selection: its budget is to be
+      // measured once. The test file counts how often it is loaded.
+      File(p.join(dir.path, 'lib', 'twice.dart')).writeAsStringSync(
+        "String pick(bool a, bool b) => a ? (b ? 'x' : 'y') : 'z';\n",
+      );
+      File(p.join(dir.path, 'test', 'twice_test.dart')).writeAsStringSync('''
+import 'dart:io';
+
+import 'package:fixture/twice.dart';
+import 'package:test/test.dart';
+
+void main() {
+  File('${p.join(dir.path, 'twice.log')}')
+      .writeAsStringSync('x', mode: FileMode.append);
+  test('pick', () {
+    expect(pick(true, true), 'x');
+    expect(pick(true, false), 'y');
+    expect(pick(false, true), 'z');
+  });
+}
+''');
+      final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+        dir.path,
+      ]);
+      report =
+          await MutationTestRunner(
+            testCommand: ProcessCommand('dart', <String>[
+              'test',
+            ], workingDirectory: dir.path),
+            compileSafetyGate: gate,
+            operators: <MutationOperator>[TernarySwap()],
+            mutantTimeout: const Duration(seconds: 1),
+            baselineFactor: 3,
+            baselineTimeout: const Duration(seconds: 120),
+            selectByCoverage: true,
+            onPlan: (RunPlan planned) => plan = planned,
+            onProgress: progress.add,
+          ).run(<String>[
+            p.join(dir.path, 'lib', 'hangs.dart'),
+            p.join(dir.path, 'lib', 'twice.dart'),
+            p.join(dir.path, 'lib', 'undetected.dart'),
+          ]);
+      await gate.close();
+    });
+
+    test('[partition] runs to completion, selected', () {
+      expect(report.aborted, isFalse, reason: report.abortReason);
+      expect(report.selectedByCoverage, isTrue);
+    });
+
+    test(
+      '[decision] a mutant that hangs its selection times out at that '
+      'selection\'s budget, well under the full command\'s',
+      () {
+        final MutantResult hung = _reportFor(
+          report,
+          'hangs.dart',
+        ).timedOutMutants.single;
+        expect(hung.timeout, lessThan(report.mutantTimeout!));
+        expect(hung.timeout, greaterThan(const Duration(seconds: 1)));
+      },
+    );
+
+    test(
+      '[decision] a selected mutant that runs to a verdict carries its '
+      'selection\'s budget too',
+      () {
+        final FileMutationReport f = _reportFor(report, 'twice.dart');
+        expect(<int>[f.detected, f.undetected], <int>[2, 0]);
+        final List<Duration?> budgets = progress
+            .where(
+              (MutantProgress m) => m.result.mutant.filePath.endsWith(
+                'twice.dart',
+              ),
+            )
+            .map((MutantProgress m) => m.result.timeout)
+            .toList();
+        expect(budgets.toSet(), hasLength(1));
+        expect(budgets.first, lessThan(report.mutantTimeout!));
+      },
+    );
+
+    test(
+      '[state] a selection is measured once, however many mutants share it '
+      '— baseline, coverage pass, one measurement, its two mutants, and '
+      'undetected.dart\'s full run',
+      () {
+        expect(
+          File(p.join(dir.path, 'twice.log')).readAsStringSync(),
+          'xxxxxx',
+        );
+      },
+    );
+
+    test(
+      '[boundary] a mutant that runs the full command gets the full budget',
+      () {
+        final MutantResult r = _reportFor(
+          report,
+          'undetected.dart',
+        ).undetectedMutants.single;
+        expect(r.uncovered, isFalse);
+        expect(r.timeout, report.mutantTimeout);
+      },
+    );
+
+    test(
+      '[partition] the plan is reported once with every mutant, and progress '
+      'counts each one, in the order they ran',
+      () {
+        expect(plan!.fileCount, 3);
+        expect(plan!.mutantCount, 4);
+        expect(plan!.baseline, report.baselineDuration);
+        expect(plan!.budget, report.mutantTimeout);
+        expect(
+          progress.map((MutantProgress m) => (m.completed, m.total)),
+          <(int, int)>[(1, 4), (2, 4), (3, 4), (4, 4)],
+        );
+        expect(
+          progress.map(
+            (MutantProgress m) => p.basename(m.result.mutant.filePath),
+          ),
+          <String>['hangs.dart', 'twice.dart', 'twice.dart', 'undetected.dart'],
+        );
+      },
+    );
+  }, timeout: const Timeout(Duration(seconds: 180)));
 
   group('selecting tests by coverage, when it cannot be done', () {
     test(

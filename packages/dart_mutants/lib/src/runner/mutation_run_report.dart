@@ -59,9 +59,12 @@ class MutationRunReport {
   /// it never finished.
   final Duration? baselineDuration;
 
-  /// The budget each mutant's test run got — `null` when the run stopped
-  /// before one was set. Not necessarily the `--mutant-timeout` a caller
-  /// passed: see `MutationTestRunner.baselineFactor`.
+  /// The budget a mutant running the full test command got — `null` when
+  /// the run stopped before one was set. Not necessarily the
+  /// `--mutant-timeout` a caller passed: see
+  /// `MutationTestRunner.baselineFactor`. A mutant that ran only the tests
+  /// selected for it may have had less; each result carries its own, in
+  /// `MutantResult.timeout`.
   final Duration? mutantTimeout;
 
   /// Non-null exactly when the run never produced any scores at all — see

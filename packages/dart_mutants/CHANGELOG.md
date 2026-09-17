@@ -1,3 +1,37 @@
+## 0.2.9
+
+**Under `--select-by-coverage`, a selected run gets a budget measured
+against its own tests.** Before this, every mutant got the full suite's
+budget, even one running a two-second selection. On one consuming app's
+250-file run, with a 190s baseline, each of eight hanging mutants waited out
+760s, about 18% of 9.4 hours. Now the first mutant that needs a selection
+runs it once against unmodified code, and the budget is that time times
+`--baseline-factor`, never less than `--mutant-timeout` and never more than
+the full command's budget. Mutants sharing the selection reuse it. A
+selection that does not pass unmodified keeps the full budget, and so does
+the full-command retry after a selected exit 79. With the factor at 0 no
+measurement is made.
+
+- Every mutant that ran a test now carries `timeoutSeconds` in the JSON: the
+  budget its last run had. `mutantTimeoutSeconds` stays, as the full
+  command's budget.
+
+**Progress while it runs.** After the baseline, stdout gets one line with
+the number of mutants and files and the budget, then one line per mutant as
+it finishes: `[12/3709] detected lib/foo.dart:10:5 ternary_swap (4.2s)`.
+Mutants are listed once per run; they used to be listed a second time for
+each file as it ran. The runner exposes the same lines as the `onPlan` and
+`onProgress` callbacks.
+
+**`--output <path>` writes the JSON report to a file**, aborted runs
+included, through a temporary sibling and a rename. stdout keeps the
+progress and the text report. A path naming a directory is refused before
+anything runs, with exit 64.
+
+`--json` is unchanged: the JSON report on stdout, and no progress lines, so
+stdout still parses as a whole. The text report's timed-out lines now name
+the budget they ran out of.
+
 ## 0.2.8
 
 No behaviour change to a run.

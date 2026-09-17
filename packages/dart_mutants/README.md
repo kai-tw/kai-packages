@@ -16,8 +16,23 @@ dart run dart_mutants \
 ```
 
 ```bash
-dart run dart_mutants --json --test-command "dart test" lib/foo.dart
+dart run dart_mutants --output build/mutation.json \
+  --test-command "dart test" lib/foo.dart
 ```
+
+A run prints what it holds once the baseline has passed, then one line per
+mutant as it finishes, then the text report:
+
+```text
+3 mutants in 1 file — baseline 4.1s, each mutant given at most 16.4s
+[1/3] detected lib/foo.dart:12:10 ternary_swap (3.9s)
+[2/3] invalid lib/foo.dart:18:5 statement_deletion (0.0s)
+[3/3] undetected lib/foo.dart:30:12 condition_negation (4.2s)
+```
+
+`--output` writes the JSON report to a file and leaves stdout to those lines.
+`--json` prints the JSON report to stdout instead, with no progress lines, so
+stdout parses as a whole.
 
 ## What it mutates
 
@@ -159,6 +174,18 @@ a mutant that would have survived and timed out instead leaves both the
 score and the undetected list, which is the survivor a caller most needed
 to see. A budget that is too large costs time on mutants that genuinely
 hang, each of which runs for the full budget, and memory (see below).
+
+Under `--select-by-coverage`, a mutant that runs only the tests that reach
+it gets a budget measured against those tests. The first mutant needing a
+given selection runs it once against unmodified code, and the budget is that
+time times the factor, never less than `--mutant-timeout` and never more
+than the full command's budget. Mutants sharing the selection reuse it.
+Before this, every mutant got the full suite's budget, so one that hung a
+two-second selection waited out a budget sized for the whole suite. On one
+consuming app's run, with a 190s baseline, that was 760s for each of eight
+hanging mutants, about 18% of a 9.4-hour run. A selection that does not pass
+unmodified, such as exit 79 when no test ran, keeps the full budget. Each
+mutant's budget is in its result, as `timeoutSeconds`.
 
 The baseline itself gets `--baseline-timeout`, ten times `--mutant-timeout`
 by default. It used to get the mutant budget, so a green suite whose cold
@@ -338,8 +365,10 @@ pass/fail policy (a per-file threshold other than "zero undetected", for
 instance) depends on all eight, and each is covered by a test against the
 real CLI binary, not just the internal report types:
 
-- **`--json` always prints a complete report to stdout, even when the exit
-  code is non-zero** — an aborted run, or any file with undetected mutants.
+- **`--json` always prints a complete report to stdout, and `--output`
+  always writes one to its file, even when the exit code is non-zero** — an
+  aborted run, or any file with undetected mutants. The file is written
+  through a temporary sibling and a rename, so it never holds half a report.
   Nothing about this binary's own exit-code opinion suppresses the report a
   caller needs to read to form its own.
 - **A file with zero candidate mutants still appears in `files`**, at
@@ -409,6 +438,10 @@ real CLI binary, not just the internal report types:
   `timedOutMutants` needs to know what they timed out against. Both are
   present on every run whose baseline passed; a red baseline has only
   `baselineSeconds`, and a baseline that never finished has neither.
+  `mutantTimeoutSeconds` is the full command's budget. Every mutant that ran
+  a test also carries its own budget, `timeoutSeconds`, which is less for a
+  selected run (see *The budget follows the baseline*). An `invalid` or
+  `uncovered` mutant ran nothing and has no `timeoutSeconds`.
 - **A survivor no test ran is marked as one.** Under `--select-by-coverage`
   an undetected mutant in a function no test enters carries
   `uncovered: true`, and each file counts them in `uncovered`, a subset of

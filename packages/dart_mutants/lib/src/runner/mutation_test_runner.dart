@@ -10,12 +10,14 @@ import '../mutation_visitor.dart';
 import '../operators.dart';
 import 'compile_safety_gate.dart';
 import 'file_mutation_report.dart';
+import 'mutant_progress.dart';
 import 'mutant_result.dart';
 import 'mutant_scope.dart';
 import 'mutant_verdict.dart';
 import 'mutated_file_registry.dart';
 import 'mutation_run_report.dart';
 import 'process_command.dart';
+import 'run_plan.dart';
 import 'test_compilation_cache.dart';
 import 'test_invocation.dart';
 import 'test_selection.dart';
@@ -40,6 +42,8 @@ class MutationTestRunner {
     Duration? baselineTimeout,
     this.selectByCoverage = false,
     this.onSelectionFallback,
+    this.onPlan,
+    this.onProgress,
   }) : operators = operators ?? defaultOperators(),
        baselineTimeout = baselineTimeout ?? mutantTimeout * 10 {
     if (baselineFactor.isNaN ||
@@ -86,6 +90,14 @@ class MutationTestRunner {
   /// code whose execution depends on timing or randomness, which one coverage
   /// pass can miss.
   ///
+  /// A selected command also gets its own budget. The first mutant that
+  /// needs one runs that command once against unmodified code, and the
+  /// budget is derived from that time the same way the full command's is
+  /// from the baseline — never more than the full command's budget. Without
+  /// it, a mutant that hangs a two-second selection waits out a budget sized
+  /// for the whole suite. When the selection does not pass unmodified (79,
+  /// no test ran), it keeps the full command's budget.
+  ///
   /// Needs a `dart test …` or `flutter test …` [testCommand] whose test
   /// files this package can list the same way the runner does. Anything
   /// else — see `collectCoverage` for every refusal — or a coverage pass that
@@ -95,6 +107,12 @@ class MutationTestRunner {
 
   /// Called with the reason coverage selection was asked for and not used.
   final void Function(String reason)? onSelectionFallback;
+
+  /// Called once, before the first mutant runs, with what the run holds.
+  final void Function(RunPlan plan)? onPlan;
+
+  /// Called after every mutant, in the order they run.
+  final void Function(MutantProgress progress)? onProgress;
 
   final List<MutationOperator> operators;
 
@@ -129,6 +147,13 @@ class MutationTestRunner {
   final Duration baselineTimeout;
 
   final MutatedFileRegistry _registry = MutatedFileRegistry();
+
+  /// A selected command's budget, keyed by [_keyOf] — see
+  /// [selectByCoverage].
+  final Map<String, Duration> _selectedBudgets = <String, Duration>{};
+
+  int _completed = 0;
+  int _planned = 0;
 
   /// See [TestCompilationCache]'s own doc for why this exists at all — in
   /// short, `dart test`'s incremental kernel cache does not reliably notice
@@ -201,14 +226,18 @@ class MutationTestRunner {
           baselineDuration: baseline,
         );
       }
-      final Duration derived = baseline * baselineFactor;
-      final Duration budget = derived > mutantTimeout ? derived : mutantTimeout;
+      final Duration budget = _budgetFrom(baseline);
 
+      // Every target is read and enumerated once, here, and the same lists
+      // are what runs — the plan's count is the count that runs.
+      final List<_PlannedFile> plan = <_PlannedFile>[];
       final Map<String, CompileSafetyGate> gates =
           <String, CompileSafetyGate>{};
       for (final String filePath in targets) {
         final String source = await File(filePath).readAsString();
-        if (_collectMutants(filePath, source).isEmpty) {
+        final List<Mutant> mutants = _collectMutants(filePath, source);
+        plan.add(_PlannedFile(filePath, source, mutants));
+        if (mutants.isEmpty) {
           gates[filePath] = compileSafetyGate;
           continue;
         }
@@ -232,10 +261,24 @@ class MutationTestRunner {
 
       final TestSelection? selection = await _selection();
 
+      _completed = 0;
+      _planned = plan.fold(
+        0,
+        (int sum, _PlannedFile file) => sum + file.mutants.length,
+      );
+      onPlan?.call(
+        RunPlan(
+          fileCount: targets.length,
+          mutantCount: _planned,
+          baseline: baseline,
+          budget: budget,
+        ),
+      );
+
       final List<FileMutationReport> fileReports = <FileMutationReport>[];
-      for (final String filePath in targets) {
+      for (final _PlannedFile file in plan) {
         fileReports.add(
-          await _runFile(filePath, gates[filePath]!, budget, selection),
+          await _runFile(file, gates[file.path]!, budget, selection),
         );
       }
       return MutationRunReport.completed(
@@ -291,14 +334,34 @@ class MutationTestRunner {
     );
   }
 
+  /// A budget derived from a run's wall time against unmodified code — see
+  /// [baselineFactor].
+  Duration _budgetFrom(Duration baseline) {
+    final Duration derived = baseline * baselineFactor;
+    return derived > mutantTimeout ? derived : mutantTimeout;
+  }
+
+  void _reportProgress(MutantResult result, Duration elapsed) {
+    _completed++;
+    onProgress?.call(
+      MutantProgress(
+        completed: _completed,
+        total: _planned,
+        result: result,
+        elapsed: elapsed,
+      ),
+    );
+  }
+
   Future<FileMutationReport> _runFile(
-    String filePath,
+    _PlannedFile file,
     CompileSafetyGate gate,
     Duration budget,
     TestSelection? selection,
   ) async {
-    final String originalSource = await File(filePath).readAsString();
-    final List<Mutant> mutants = _collectMutants(filePath, originalSource);
+    final String filePath = file.path;
+    final String originalSource = file.source;
+    final List<Mutant> mutants = file.mutants;
     // No parse, and so no scope, where the selection cannot speak for this
     // file — every mutant in it then runs the full command.
     final ParseStringResult? parsed =
@@ -315,6 +378,7 @@ class MutationTestRunner {
     final List<MutantResult> timedOutResults = <MutantResult>[];
 
     for (final Mutant mutant in mutants) {
+      final Stopwatch clock = Stopwatch()..start();
       final MutantResult result = await _runOne(
         mutant,
         originalSource,
@@ -322,6 +386,7 @@ class MutationTestRunner {
         budget,
         _commandFor(mutant, selection, parsed),
       );
+      _reportProgress(result, clock.elapsed);
       switch (result.verdict) {
         case MutantVerdict.invalid:
           invalid++;
@@ -401,8 +466,9 @@ class MutationTestRunner {
   static bool _isVerdict(int? exitCode) =>
       exitCode == null || exitCode == 0 || exitCode == 1;
 
-  /// Applies [mutant] to disk, checks compile-safety, runs [command] for at
-  /// most [budget] if it passed that gate, then restores the file before
+  /// Applies [mutant] to disk, checks compile-safety, runs [command] if it
+  /// passed that gate — for at most [budget], the full command's, or a
+  /// selected command's own (see [selectByCoverage]) — then restores the file before
   /// returning — regardless of which branch was taken, so a thrown exception
   /// here still leaves the file clean. A `null` [command] means no test
   /// reaches the mutant: it is scored undetected, and marked so, unrun.
@@ -417,7 +483,8 @@ class MutationTestRunner {
     ProcessCommand? command,
   ) async {
     _registry.track(mutant.filePath, originalSource);
-    await File(mutant.filePath).writeAsString(mutant.applyTo(originalSource));
+    final String mutatedSource = mutant.applyTo(originalSource);
+    await File(mutant.filePath).writeAsString(mutatedSource);
     try {
       if (!await gate.compiles(mutant.filePath)) {
         return MutantResult(mutant: mutant, verdict: MutantVerdict.invalid);
@@ -429,8 +496,17 @@ class MutationTestRunner {
           uncovered: true,
         );
       }
+      Duration ranAgainst = identical(command, testCommand)
+          ? budget
+          : await _selectedBudget(
+              command,
+              mutant.filePath,
+              originalSource,
+              mutatedSource,
+              budget,
+            );
       _testCache.clear();
-      int? exitCode = await command.run(timeout: budget);
+      int? exitCode = await command.run(timeout: ranAgainst);
       if (!identical(command, testCommand) && !_isVerdict(exitCode)) {
         // Neither a pass nor a failed test: 79 when the selected files ran
         // no test at all — a file that reaches the function while declaring
@@ -439,6 +515,7 @@ class MutationTestRunner {
         // reading one as `detected` would invent a detection the full command
         // does not make. Ask the full command.
         _testCache.clear();
+        ranAgainst = budget;
         exitCode = await testCommand.run(timeout: budget);
       }
       if (exitCode == null) {
@@ -451,16 +528,73 @@ class MutationTestRunner {
         // test that never actually ran to a real assertion. Kept as its own
         // bucket, excluded from the score like `invalid`, rather than
         // guessed into either side.
-        return MutantResult(mutant: mutant, verdict: MutantVerdict.timeout);
+        return MutantResult(
+          mutant: mutant,
+          verdict: MutantVerdict.timeout,
+          timeout: ranAgainst,
+        );
       }
       return MutantResult(
         mutant: mutant,
         verdict: exitCode == 0
             ? MutantVerdict.undetected
             : MutantVerdict.detected,
+        timeout: ranAgainst,
       );
     } finally {
       _registry.restore(mutant.filePath);
     }
   }
+
+  /// [command]'s budget — see [selectByCoverage]. Measured the first time a
+  /// mutant needs it, so a selection whose mutants are all `invalid` costs
+  /// nothing. [filePath] holds [mutatedSource] on entry and on return; the
+  /// measurement puts [originalSource] back for its duration, while the
+  /// registry still tracks the file.
+  Future<Duration> _selectedBudget(
+    ProcessCommand command,
+    String filePath,
+    String originalSource,
+    String mutatedSource,
+    Duration fullBudget,
+  ) async {
+    // Already the floor: no measurement could lower it.
+    if (fullBudget <= mutantTimeout) {
+      return fullBudget;
+    }
+    final String key = _keyOf(command);
+    final Duration? known = _selectedBudgets[key];
+    if (known != null) {
+      return known;
+    }
+    await File(filePath).writeAsString(originalSource);
+    try {
+      _testCache.clear();
+      final Stopwatch clock = Stopwatch()..start();
+      final int? exitCode = await command.run(timeout: fullBudget);
+      final Duration derived = _budgetFrom(clock.elapsed);
+      return _selectedBudgets[key] = exitCode == 0 && derived < fullBudget
+          ? derived
+          : fullBudget;
+    } finally {
+      await File(filePath).writeAsString(mutatedSource);
+    }
+  }
+
+  /// [ProcessCommand] has no value equality, and a selection builds a new
+  /// one for every mutant.
+  static String _keyOf(ProcessCommand command) => <String>[
+    command.workingDirectory ?? '',
+    command.executable,
+    ...command.arguments,
+  ].join(' ');
+}
+
+/// A target file as [MutationTestRunner.run] read and enumerated it, once.
+class _PlannedFile {
+  const _PlannedFile(this.path, this.source, this.mutants);
+
+  final String path;
+  final String source;
+  final List<Mutant> mutants;
 }
