@@ -1,5 +1,6 @@
 import 'package:dart_lints/src/config/dart_lints_config_exception.dart';
 import 'package:dart_lints/src/rules/core/interface_implementation_naming.dart';
+import 'package:dart_lints/src/rules/core/sealed_family_naming.dart';
 import 'package:test/test.dart';
 
 import '../naming_fixture.dart';
@@ -137,6 +138,69 @@ class SqliteReaderRepository implements ReaderRepository {
 
   test('[boundary] a file outside the package\'s lib is not checked', () async {
     expect(await _reported('impl', path: 'test/subject_test.dart'), isEmpty);
+  });
+
+  test('[decision] a direct subtype of a sealed base is left to '
+      'sealed_family_naming, and the name that rule asks for is accepted by '
+      'every style', () async {
+    const String source = r'''
+sealed class ConnectionFailure {}
+
+class ConnectionTimeoutFailure extends ConnectionFailure {}
+
+class ConnectionRefusedFailure implements ConnectionFailure {}
+''';
+    for (final String style in <String>[
+      'impl',
+      'tech_prefix',
+      'impl_or_prefix',
+    ]) {
+      expect(
+        await NamingFixture().resolved(
+          InterfaceImplementationNaming(style: style),
+          source,
+        ),
+        isEmpty,
+        reason: 'style $style still reports a sealed family member',
+      );
+    }
+    expect(
+      await NamingFixture().resolved(SealedFamilyNaming(), source),
+      isEmpty,
+      reason: 'the fixture names its members the way the family rule asks',
+    );
+  });
+
+  test('[boundary] only a direct subtype of the sealed base steps out: a '
+      'class under an ordinary interface further down is named here as any '
+      'other implementation is', () async {
+    const String source = r'''
+sealed class ConnectionFailure {}
+
+abstract class ConnectionRetryFailure extends ConnectionFailure {
+  Duration get delay;
+}
+
+class SlowConnectionRetryFailure extends ConnectionRetryFailure {
+  @override
+  Duration get delay => Duration.zero;
+}
+
+class ConnectionRetryBackoffFailure extends ConnectionRetryFailure {
+  @override
+  Duration get delay => Duration.zero;
+}
+''';
+    expect(
+      reportedNames(
+        await NamingFixture().resolved(
+          InterfaceImplementationNaming(style: 'tech_prefix'),
+          source,
+        ),
+        source,
+      ),
+      <String>{'ConnectionRetryBackoffFailure'},
+    );
   });
 
   test('[error] a style other than impl or tech_prefix is a configuration '
