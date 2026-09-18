@@ -1,3 +1,30 @@
+## 0.6.2
+
+`require_cubit_suffix` / `require_notifier_suffix` asked for the state name in
+three places where the holder did not choose it and could not change it. All
+three reported code whose only available fix was to make it worse.
+
+- **A state written as a `typedef` is now read under the name it is written
+  with.** The check compared the resolved element's name, which sees through
+  the alias, so a holder declared `extends SharedListCubit<Foo, FooState>` —
+  where `FooState` aliases a shared generic state — was told to name its state
+  `FooState`, which is what every call site already writes. The alias or its
+  target now satisfies it.
+- **A test double is exempt, and the exemption is now reachable.** The dartdoc
+  claimed a double implementing a holder was left alone, but a Dart double
+  must `extends Cubit<S>` to function, which put the base back in its
+  superclass chain and re-armed the check. The exemption now recognises the
+  real shape: extends the base *and* implements a subtype of it. Narrowing the
+  state instead is a compile error — a class cannot implement `StateStreamable`
+  at two different states.
+- **A subclass of a concrete holder is not asked for a state name.** `class
+  RetryingFooCubit extends FooCubit` writes no type argument at all; it holds
+  the `FooState` its parent named. The check now runs only where the class's
+  own `extends` clause writes the state type.
+
+Production code is unaffected: implementing a holder you are a sibling of, and
+inheriting a state you did not parameterise, are not shapes a holder takes.
+
 ## 0.6.1
 
 `avoid_vague_type_words` now checks only the **kind word** — the last one — so
