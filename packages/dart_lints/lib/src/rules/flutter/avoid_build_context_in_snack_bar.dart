@@ -23,15 +23,15 @@ import '../../lint_rule_base.dart';
 ///
 /// **Bad:**
 /// ```dart
-/// class BookImportSnackBar extends IconMessageSnackBar {
-///   BookImportSnackBar(BuildContext context) : ...;
+/// class DataImportSnackBar extends NoticeSnackBar {
+///   DataImportSnackBar(BuildContext context) : ...;
 /// }
 /// ```
 ///
 /// **Good:**
 /// ```dart
-/// class BookImportSnackBar extends IconMessageSnackBar {
-///   BookImportSnackBar(AppLocalizations l10n) : ...;
+/// class DataImportSnackBar extends NoticeSnackBar {
+///   DataImportSnackBar(AppLocalizations l10n) : ...;
 /// }
 /// ```
 class AvoidBuildContextInSnackBar extends ResolvedLintRule {

@@ -181,9 +181,9 @@ abstract final class DebounceKeys {
       () {
         expect(
           _lint('''
-abstract class UiFontManifestEntryDto with _\$UiFontManifestEntryDto {
-  const factory UiFontManifestEntryDto({required String family}) =
-      _UiFontManifestEntryDto;
+abstract class CatalogEntryDto with _\$CatalogEntryDto {
+  const factory CatalogEntryDto({required String family}) =
+      _CatalogEntryDto;
 
   static bool hasWellFormedEnvelope(Map<String, dynamic> json) =>
       json['family'] is String;
@@ -201,10 +201,10 @@ abstract class UiFontManifestEntryDto with _\$UiFontManifestEntryDto {
       () {
         expect(
           _lint('''
-class TrashNoticeSnackBar extends IconMessageSnackBar {
-  TrashNoticeSnackBar({super.key}) : super(margin: _readerMargin);
+class QuotaNoticeSnackBar extends NoticeSnackBar {
+  QuotaNoticeSnackBar({super.key}) : super(margin: _noticeMargin);
 
-  static const EdgeInsets _readerMargin = EdgeInsets.all(8);
+  static const EdgeInsets _noticeMargin = EdgeInsets.all(8);
 }
 '''),
           isEmpty,
@@ -220,15 +220,15 @@ class TrashNoticeSnackBar extends IconMessageSnackBar {
       () {
         expect(
           _lint('''
-sealed class FileAssociationStageResult {
-  const FileAssociationStageResult();
+sealed class ImportStageResult {
+  const ImportStageResult();
 
-  static FileAssociationStageResult fromChannelMap(Map<Object?, Object?>? r) =>
-      const FileAssociationStageStaged('');
+  static ImportStageResult fromChannelMap(Map<Object?, Object?>? r) =>
+      const ImportStageStaged('');
 }
 
-final class FileAssociationStageStaged extends FileAssociationStageResult {
-  const FileAssociationStageStaged(this.path);
+final class ImportStageStaged extends ImportStageResult {
+  const ImportStageStaged(this.path);
   final String path;
 }
 '''),
