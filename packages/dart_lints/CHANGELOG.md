@@ -1,3 +1,24 @@
+## 0.6.3
+
+`interface_implementation_naming` no longer checks a direct subtype of a
+`sealed` class. It and `sealed_family_naming` were asking the same declarations
+for opposite word orders, and no name satisfied both.
+
+A sealed base with no concrete member reads as one of this rule's interfaces,
+so its members were asked for `<Base>Impl` or `<Distinguisher><Base>` — the
+distinguishing word at an end. `sealed_family_naming` asks the same members for
+`<Category><Case><Kind>`, with the case in the middle. Under a base
+`ConnectionFailure`, the `ConnectionTimeoutFailure` the family rule asks for is
+exactly what this rule rejected, and the `TimeoutConnectionFailure` this rule
+accepted is what the family rule rejects. A project enabling both had members
+it could not name.
+
+A sealed base is closed, which makes it a family with members rather than an
+interface with implementations, so the family rule owns those names and this
+one steps back. Only the *direct* subtype steps out, which is the reach of
+`sealed_family_naming`: a class further down implements an ordinary interface
+of the family and is named here as any other implementation is.
+
 ## 0.6.2
 
 `require_cubit_suffix` / `require_notifier_suffix` asked for the state name in

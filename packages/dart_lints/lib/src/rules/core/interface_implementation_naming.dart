@@ -5,6 +5,7 @@ import 'package:analyzer/dart/element/type.dart';
 
 import '../../config/dart_lints_config_exception.dart';
 import '../../lint_rule_base.dart';
+import 'sealed_family_naming.dart';
 
 /// Requires every implementation of one of the package's own interfaces to be
 /// named in the one form the project chose.
@@ -31,6 +32,17 @@ import '../../lint_rule_base.dart';
 /// fits any of them. Abstract classes are sub-interfaces, not implementations,
 /// and are not checked. Only files of a package (a `package:` URI) are checked,
 /// against interfaces of that same package.
+///
+/// A direct subtype of a `sealed` class is not checked at all. A sealed base is
+/// closed, so it is a family with members rather than an interface with
+/// implementations, and [SealedFamilyNaming] already names those members:
+/// `<Category><Case><Kind>`, the case in the middle. Both forms here put the
+/// distinguishing word at an end instead — in front for `tech_prefix`, last
+/// for `impl` — so under a sealed base no name can satisfy both rules. For the
+/// base `ConnectionFailure`, the `ConnectionTimeoutFailure` the family rule
+/// asks for is exactly the name this one would reject, and the
+/// `TimeoutConnectionFailure` this one accepts is the one the family rule
+/// rejects. The family rule owns those members; this rule steps back.
 class InterfaceImplementationNaming extends ResolvedLintRule {
   InterfaceImplementationNaming({required this.style}) {
     if (!_styles.contains(style)) {
@@ -99,7 +111,7 @@ class _Visitor extends ResolvedLintVisitor {
 
   void _check(ClassDeclaration node, ClassElement element) {
     final String? package = _packageOf(element.library);
-    if (package == null) {
+    if (package == null || _isSealedFamilyMember(element)) {
       return;
     }
     final List<String> interfaces = <String>[
@@ -140,6 +152,22 @@ class _Visitor extends ResolvedLintVisitor {
           name.endsWith(interface) &&
           name.length > interface.length &&
           !name.endsWith('Impl'));
+
+  /// Whether [element] is a member of a sealed family, whom
+  /// [SealedFamilyNaming] names instead of this rule.
+  ///
+  /// Only a *direct* subtype, which is what that rule checks: a class further
+  /// down implements an ordinary interface of the family and is named here as
+  /// any other implementation is.
+  static bool _isSealedFamilyMember(ClassElement element) =>
+      <InterfaceType>[
+        ?element.supertype,
+        ...element.interfaces,
+        ...element.mixins,
+      ].any((InterfaceType t) {
+        final InterfaceElement base = t.element;
+        return base is ClassElement && base.isSealed;
+      });
 
   static bool _isOwnInterface(InterfaceElement element, String package) =>
       element is ClassElement &&
