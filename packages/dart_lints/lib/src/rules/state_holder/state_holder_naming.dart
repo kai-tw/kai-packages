@@ -20,9 +20,24 @@ import 'state_holder_role.dart';
 ///   holds a `ReaderSettingsState`.
 ///
 /// When suffixes overlap, the longest one a name ends in decides:
-/// `FooAsyncNotifier` claims `AsyncNotifier`, not `Notifier`. The state type is
-/// checked only on a class that extends the base, not one that merely
-/// implements it, so a test double implementing a cubit is left alone.
+/// `FooAsyncNotifier` claims `AsyncNotifier`, not `Notifier`.
+///
+/// The state name is asked only of the class that writes the state type
+/// argument, and only where that class is not a double. Three shapes hold a
+/// state they did not name, and none of them can rename it:
+///
+/// - a class that merely **implements** the base;
+/// - a **test double** — it extends the base and implements a subtype of it
+///   (`class _StubFooCubit extends Cubit<FooState> implements FooCubit`). The
+///   state is the real holder's, and narrowing it is a compile error, because
+///   a class cannot implement `StateStreamable` at two different states;
+/// - a **subclass of a concrete holder** (`class RetryingFooCubit extends
+///   FooCubit`), which writes no type argument at all.
+///
+/// An alias counts as the name it is written under: a holder declared
+/// `extends SharedListCubit<Foo, FooState>`, where `FooState` is a
+/// `typedef` for a shared generic state, satisfies the check — `FooState` is
+/// what every call site reads.
 ///
 /// One class serves two registered rules — `require_cubit_suffix` for the
 /// `bloc` bundle and `require_notifier_suffix` for `riverpod` — because the
@@ -79,7 +94,7 @@ class _Visitor extends ResolvedLintVisitor {
   void visitClassDeclaration(ClassDeclaration node) {
     final ClassElement? element = node.declaredFragment?.element;
     if (element != null) {
-      final String? problem = _problem(node.name.lexeme, element);
+      final String? problem = _problem(node, node.name.lexeme, element);
       if (problem != null) {
         report(ruleName: rule.name, message: problem, offset: node.name.offset);
       }
@@ -87,7 +102,7 @@ class _Visitor extends ResolvedLintVisitor {
     super.visitClassDeclaration(node);
   }
 
-  String? _problem(String name, ClassElement element) {
+  String? _problem(ClassDeclaration node, String name, ClassElement element) {
     // A base itself, or a generated framework class, is not a holder anyone
     // named.
     if (name.startsWith(r'$') ||
@@ -108,11 +123,40 @@ class _Visitor extends ResolvedLintVisitor {
           "'${byType.suffix}': the suffix announces the role at every call "
           'site, grep hit and stack frame.';
     }
-    return _stateProblem(name, element, byType);
+    return _stateProblem(node, name, element, byType);
   }
 
   String? _stateProblem(
+    ClassDeclaration node,
     String name,
+    ClassElement element,
+    StateHolderRole role,
+  ) {
+    final InterfaceType? state = _stateNamedHere(node, element, role);
+    if (state == null) {
+      return null;
+    }
+    final String concept = name
+        .substring(0, name.length - role.suffix.length)
+        .replaceFirst(RegExp(r'^_+'), '');
+    final String expected = '$concept${rule.stateSuffix}';
+    final List<String> written = <String?>[
+      state.alias?.element.name,
+      state.element.name,
+    ].nonNulls.map((String n) => n.replaceFirst(RegExp(r'^_+'), '')).toList();
+    return written.contains(expected)
+        ? null
+        : '$name holds a ${written.first}, so the state is named $expected — '
+              "the holder's concept, then '${rule.stateSuffix}'.";
+  }
+
+  /// The state type [node] is answerable for, or `null` when it is not
+  /// answerable for one — the role does not say which argument is the state,
+  /// the base is only implemented, the state is a type parameter or an SDK
+  /// type, or [node] holds a state it did not name (see [_namesTheState] and
+  /// [_isDoubleOf]).
+  static InterfaceType? _stateNamedHere(
+    ClassDeclaration node,
     ClassElement element,
     StateHolderRole role,
   ) {
@@ -121,23 +165,41 @@ class _Visitor extends ResolvedLintVisitor {
     if (index == null || base == null || index >= base.typeArguments.length) {
       return null;
     }
-    final DartType state = base.typeArguments[index];
-    if (state is! InterfaceType || state.element.library.isInSdk) {
+    if (!_namesTheState(node) || _isDoubleOf(element, role)) {
       return null;
     }
-    final String concept = name
-        .substring(0, name.length - role.suffix.length)
-        .replaceFirst(RegExp(r'^_+'), '');
-    final String expected = '$concept${rule.stateSuffix}';
-    final String actual = (state.element.name ?? '').replaceFirst(
-      RegExp(r'^_+'),
-      '',
-    );
-    return actual == expected
-        ? null
-        : '$name holds a $actual, so the state is named $expected — the '
-              "holder's concept, then '${rule.stateSuffix}'.";
+    final DartType state = base.typeArguments[index];
+    return state is InterfaceType && !state.element.library.isInSdk
+        ? state
+        : null;
   }
+
+  /// Whether [node]'s own `extends` clause writes the state type argument.
+  ///
+  /// A class that extends a *concrete* holder inherits the state type already
+  /// named for that holder — `class RetryingFooCubit extends FooCubit` holds a
+  /// `FooState` and has no type argument to write. Demanding a
+  /// `RetryingFooState` there asks for a state class the subclass does not
+  /// have and cannot supply, so only the class that writes the argument
+  /// answers for the name.
+  static bool _namesTheState(ClassDeclaration node) =>
+      node.extendsClause?.superclass.typeArguments != null;
+
+  /// Whether [element] is a test double of another holder: it extends the
+  /// role's base *and* implements a subtype of that base.
+  ///
+  /// That shape is a double and nothing else — production code does not
+  /// implement the holder it is a sibling of, and the double's state type is
+  /// the real holder's, named for the real holder. Implementing the base
+  /// alone does not count: a class doing that is a holder in its own right.
+  static bool _isDoubleOf(ClassElement element, StateHolderRole role) =>
+      element.interfaces.any(
+        (InterfaceType t) =>
+            t.element.name != role.base &&
+            t.element.allSupertypes.any(
+              (InterfaceType s) => s.element.name == role.base,
+            ),
+      );
 
   StateHolderRole? _roleOf(ClassElement element) {
     for (final StateHolderRole role in rule.roles) {

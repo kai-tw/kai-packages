@@ -162,6 +162,78 @@ class ReaderCubit extends Cubit<ReaderModel> {
     expect(await NamingFixture().resolved(rule, source), isEmpty);
   });
 
+  group('a state the holder did not name is not asked for', () {
+    const String source = r'''
+class Cubit<S> { Cubit(this.state); S state; }
+
+class SharedListState<T> {}
+class SharedListCubit<T, S extends SharedListState<T>> extends Cubit<S> {
+  SharedListCubit(super.state);
+}
+class Entry {}
+typedef EntryState = SharedListState<Entry>;
+class EntryCubit extends SharedListCubit<Entry, EntryState> {
+  EntryCubit() : super(EntryState());
+}
+typedef WrongState = SharedListState<Entry>;
+class OtherCubit extends SharedListCubit<Entry, WrongState> {
+  OtherCubit() : super(WrongState());
+}
+
+class StockState {}
+class StockCubit extends Cubit<StockState> {
+  StockCubit() : super(StockState());
+}
+class StubStockCubit extends Cubit<StockState> implements StockCubit {
+  StubStockCubit() : super(StockState());
+}
+class _FakeStockCubit extends Cubit<StockState> implements StockCubit {
+  _FakeStockCubit() : super(StockState());
+}
+class RetryingStockCubit extends StockCubit {}
+
+class LooseCubit extends Cubit<StockState> implements Comparable<Object> {
+  LooseCubit() : super(StockState());
+  @override
+  int compareTo(Object other) => 0;
+}
+''';
+
+    late Set<String> reported;
+
+    setUpAll(() async {
+      reported = reportedNames(
+        await NamingFixture().resolved(_blocRule(), source),
+        source,
+      );
+    });
+
+    test('[decision] a state written as a typedef counts as the name it is '
+        'written under, and the alias still has to be the right one', () {
+      expect(reported, isNot(contains('EntryCubit')));
+      expect(reported, contains('OtherCubit'));
+    });
+
+    test('[partition] a test double — extends the base, implements the real '
+        'holder — is not asked to rename a state it borrowed, public or '
+        'private', () {
+      expect(
+        reported,
+        isNot(anyOf(contains('StubStockCubit'), contains('_FakeStockCubit'))),
+      );
+    });
+
+    test('[boundary] a subclass of a concrete holder writes no type argument, '
+        'so it is not asked for one', () {
+      expect(reported, isNot(contains('RetryingStockCubit')));
+    });
+
+    test('[boundary] implementing something unrelated is not a double — the '
+        'holder still answers for its own state name', () {
+      expect(reported, contains('LooseCubit'));
+    });
+  });
+
   test('[partition] a role read from configuration', () {
     final StateHolderRole role = StateHolderRole.fromMap(<String, Object?>{
       'base': 'Bloc',
