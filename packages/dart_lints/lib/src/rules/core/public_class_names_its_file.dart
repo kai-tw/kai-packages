@@ -14,8 +14,8 @@ import '../../lint_rule_base.dart';
 /// find.
 ///
 /// It also catches the typo class of defect for free: a class whose name has
-/// drifted from its own feature (`DownloaderManagerTaskListItemIcon` in
-/// `download_manager_task_list_item_icon.dart`) reads as correct at every call
+/// drifted from its own feature (`UploaderQueueItemIcon` in
+/// `upload_queue_item_icon.dart`) reads as correct at every call
 /// site and is only visible against the filename.
 ///
 /// A `.design.dart` marker suffix names the class beneath it, not itself:
@@ -28,8 +28,8 @@ import '../../lint_rule_base.dart';
 ///
 /// Not flagged — a companion type has an owner, which is the thing the rule is
 /// actually protecting:
-/// - A class whose name **starts with** the primary's (`ReaderGotoUseCase` +
-///   `ReaderGotoUseCaseParam`): it is a part of the primary's contract and is
+/// - A class whose name **starts with** the primary's (`ArchiveSearchUseCase` +
+///   `ArchiveSearchUseCaseParam`): it is a part of the primary's contract and is
 ///   read at the primary's call site.
 /// - A **subtype** of the primary declared in the same library. Dart *requires*
 ///   this for a `sealed` hierarchy, so the alternative is not a stricter
@@ -304,8 +304,8 @@ class _Visitor extends LintVisitor {
         : file;
   }
 
-  /// `ReaderCoreWebView` -> `reader_core_webview` when `WebView` is an
-  /// acronym, `reader_core_web_view` when it is not.
+  /// `HelpCenterWebView` -> `help_center_webview` when `WebView` is an
+  /// acronym, `help_center_web_view` when it is not.
   String _snake(String name) {
     String working = name;
     for (final String acronym in acronyms) {

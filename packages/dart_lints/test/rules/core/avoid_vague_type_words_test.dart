@@ -9,14 +9,16 @@ mixin CacheHelper {}
 enum DateUtil { a }
 extension StringUtils on String {}
 extension on int {}
-typedef ParseHelperCallback = void Function();
-extension type ManagerId(int value) {}
-class HelperText {}
+typedef ParseHelper = void Function();
+extension type SessionUtil(int value) {}
 
 class SessionRepository {}
 class Helpers {}
 class Utility {}
 class Management {}
+class ManagerId {}
+class HelperText {}
+class TaskManagerPage {}
 ''';
 
 const String _services = r'''
@@ -25,7 +27,7 @@ abstract class BackgroundService {}
 class SyncService extends BackgroundService {}
 class DownloadService implements BackgroundService {}
 class LoginService {}
-mixin ServiceLocatorMixin {}
+mixin LocatorService {}
 class ServiceRequestData {}
 ''';
 
@@ -33,18 +35,20 @@ Future<Set<String>> _reported(AvoidVagueTypeWords rule, String source) async =>
     reportedNames(await NamingFixture().resolved(rule, source), source);
 
 void main() {
-  test('[partition] a listed word anywhere in any kind of type name is '
-      'reported; unlisted and partial words are not', () async {
-    expect(await _reported(AvoidVagueTypeWords(), _source), <String>{
-      'SessionManager',
-      'CacheHelper',
-      'DateUtil',
-      'StringUtils',
-      'ParseHelperCallback',
-      'ManagerId',
-      'HelperText',
-    });
-  });
+  test(
+    '[partition] a listed word as the last word of any kind of type name '
+    'is reported; the same word earlier, and partial words, are not',
+    () async {
+      expect(await _reported(AvoidVagueTypeWords(), _source), <String>{
+        'SessionManager',
+        'CacheHelper',
+        'DateUtil',
+        'StringUtils',
+        'ParseHelper',
+        'SessionUtil',
+      });
+    },
+  );
 
   test('[decision] a configured list replaces the default', () async {
     expect(
@@ -56,7 +60,8 @@ void main() {
     );
   });
 
-  test('[boundary] a name with two listed words is reported once', () async {
+  test('[boundary] a name whose last word is listed is reported once, even '
+      'with another listed word before it', () async {
     const String source = 'class ManagerHelper {}\n';
     expect(
       await NamingFixture().resolved(AvoidVagueTypeWords(), source),
@@ -77,8 +82,7 @@ void main() {
     );
     expect(await _reported(rule, _services), <String>{
       'LoginService',
-      'ServiceLocatorMixin',
-      'ServiceRequestData',
+      'LocatorService',
     });
   });
 
