@@ -41,9 +41,24 @@ import 'state_holder_role.dart';
 ///
 /// One class serves two registered rules — `require_cubit_suffix` for the
 /// `bloc` bundle and `require_notifier_suffix` for `riverpod` — because the
-/// check is the same and only the framework differs. Riverpod's code-generated
-/// notifiers (`class Todos extends _$Todos`) extend a generated base, not
-/// `Notifier`, so they are not state holders to this rule.
+/// check is the same and only the framework differs.
+///
+/// A **code-generated holder is not checked at all**, on either side. Riverpod's
+/// `Notifier<T>` *extends* the generated `$Notifier<T>`, so `class
+/// AccountNotifier extends _$Account`, whose chain reaches `$Notifier`, has no
+/// `Notifier` among its supertypes: no configured role matches, and the rule
+/// cannot tell what such a class holds. Asking the name alone would then be
+/// worse than silence — it would report every correctly suffixed generated
+/// holder for claiming a role, while checking nothing, since the role it would
+/// check against is the one it could not find. So a class whose superclass
+/// chain reaches a `$`- or `_$`-prefixed generated base, and which matches no
+/// role, is left alone.
+///
+/// This gives up on generated holders rather than guessing at them: a project
+/// naming them `Todos` (the generator's own convention, for a `todosProvider`)
+/// and one naming them `TodosNotifier` are both left as they are. A holder
+/// that extends a configured base is checked exactly as before, whatever else
+/// is in its chain.
 ///
 /// **Bad:**
 /// ```dart
@@ -105,14 +120,14 @@ class _Visitor extends ResolvedLintVisitor {
   String? _problem(ClassDeclaration node, String name, ClassElement element) {
     // A base itself, or a generated framework class, is not a holder anyone
     // named.
-    if (name.startsWith(r'$') ||
+    if (_isGeneratedName(name) ||
         rule.roles.any((StateHolderRole r) => r.base == name)) {
       return null;
     }
     final StateHolderRole? byType = _roleOf(element);
     final StateHolderRole? byName = _roleNamed(name);
     if (byType == null) {
-      return byName == null
+      return byName == null || _extendsGeneratedBase(element)
           ? null
           : "$name ends in '${byName.suffix}' but is not a ${byName.base}. "
                 'Make it one, or rename it so the name does not claim a role '
@@ -200,6 +215,37 @@ class _Visitor extends ResolvedLintVisitor {
               (InterfaceType s) => s.element.name == role.base,
             ),
       );
+
+  /// Whether [name] is a code generator's, not a name anyone chose: `$Notifier`
+  /// is a framework base, `_$Account` a generated intermediate.
+  static bool _isGeneratedName(String name) =>
+      name.startsWith(r'$') || name.startsWith(r'_$');
+
+  /// Whether [element] descends from a generated base, which makes it a
+  /// generator's class whose role this rule cannot see.
+  ///
+  /// A code-generated holder does not extend the framework base the roles
+  /// name. Riverpod's `Notifier<T>` *extends* the generated `$Notifier<T>`, so
+  /// `class AccountNotifier extends _$Account`, whose chain reaches
+  /// `$Notifier`, has no `Notifier` among its supertypes at all. Asked whether
+  /// such a class is a holder, this rule can only answer no — and then the
+  /// name check would call every correctly suffixed generated holder a liar,
+  /// while checking nothing, because the role it would check against is the
+  /// one it could not find.
+  ///
+  /// Only the name check steps back, and only where no role matched. A holder
+  /// that does extend a configured base is checked exactly as before, whatever
+  /// else is in its chain.
+  static bool _extendsGeneratedBase(ClassElement element) {
+    InterfaceElement? current = element.supertype?.element;
+    while (current != null) {
+      if (_isGeneratedName(current.name ?? '')) {
+        return true;
+      }
+      current = current.supertype?.element;
+    }
+    return false;
+  }
 
   StateHolderRole? _roleOf(ClassElement element) {
     for (final StateHolderRole role in rule.roles) {

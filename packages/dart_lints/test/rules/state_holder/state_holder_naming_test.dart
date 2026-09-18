@@ -234,6 +234,69 @@ class LooseCubit extends Cubit<StockState> implements Comparable<Object> {
     });
   });
 
+  group('a code-generated holder', () {
+    // Mirrors riverpod's real shape: the hand-written base extends the
+    // generated one, so a generated holder never has `Notifier` above it.
+    const String source = r'''
+class $Notifier<T> {}
+
+abstract class Notifier<T> extends $Notifier<T> {}
+
+abstract class _$Account extends $Notifier<int> {}
+
+class AccountNotifier extends _$Account {}
+
+abstract class _$Todos extends $Notifier<int> {}
+
+class Todos extends _$Todos {}
+
+class SettingsNotifier extends Notifier<int> {}
+
+class Settings extends Notifier<int> {}
+''';
+
+    late Set<String> reported;
+
+    setUp(() async {
+      reported = reportedNames(
+        await NamingFixture().resolved(
+          StateHolderNaming(
+            name: 'require_notifier_suffix',
+            roles: const <StateHolderRole>[
+              StateHolderRole(base: 'Notifier', suffix: 'Notifier'),
+            ],
+          ),
+          source,
+        ),
+        source,
+      );
+    });
+
+    test('[decision] is not reported for the suffix it carries: no role '
+        'matched, so the name claims nothing the rule can contradict', () {
+      expect(reported, isNot(contains('AccountNotifier')));
+    });
+
+    test('[partition] is not reported for the suffix it omits either — the '
+        "generator's own convention is left alone", () {
+      expect(reported, isNot(contains('Todos')));
+    });
+
+    test('[boundary] the generated classes themselves are nobody\'s naming '
+        'decision', () {
+      expect(
+        reported,
+        isNot(anyOf(contains(r'_$Account'), contains(r'_$Todos'))),
+      );
+    });
+
+    test('[boundary] a hand-written holder still answers for its name, both '
+        'ways round', () {
+      expect(reported, isNot(contains('SettingsNotifier')));
+      expect(reported, contains('Settings'));
+    });
+  });
+
   test('[partition] a role read from configuration', () {
     final StateHolderRole role = StateHolderRole.fromMap(<String, Object?>{
       'base': 'Bloc',
