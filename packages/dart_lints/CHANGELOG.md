@@ -54,6 +54,21 @@ Changed:
 - `avoid_reserved_widget_suffix` also reserves `Bloc`, `Notifier` and
   `Provider` by default. A bare `Widget` suffix stays allowed.
 
+**A project can bring its own rules, and the `novelglide` bundle is gone.**
+`DartLintsCli` is the whole command as a class, so a project writes a five-line
+`tool/lint.dart`, passes its own `RuleDescriptor`s, and runs
+`dart run tool/lint.dart` with the same arguments and the same
+`dart_lints.yaml`. From there its rules are rules like any other: enabled by
+bundle or by name, options declared and validated, names checked for typos.
+Dart links what it compiles, so this hand-in is the only way a rule outside
+this package can reach a run — there is no plugin loading to offer instead.
+
+**Breaking:** the four `novelglide_*` rules and their bundle are removed. They
+encode one application's conventions, which is exactly what a project now
+keeps for itself; that application takes the rule files from this package's
+0.5.3 tag into its own `tool/`. A project rule may not take a built-in rule's
+name, which throws rather than shadowing it.
+
 **Opt-in rules.** `RuleDescriptor.optIn` keeps a rule out of what its bundle
 enables, for a rule with no defensible default: in the bundle's list, its
 required option would stop every project using the bundle until each chose.

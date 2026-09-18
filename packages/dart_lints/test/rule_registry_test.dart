@@ -5,7 +5,7 @@ import 'package:test/test.dart';
 
 void main() {
   group('a rule with a required option', () {
-    const RuleRegistry registry = RuleRegistry();
+    final RuleRegistry registry = RuleRegistry();
 
     test(
       '[boundary] enabling it without the option throws a config error '
@@ -52,7 +52,7 @@ void main() {
   });
 
   group('an opt-in rule', () {
-    const RuleRegistry registry = RuleRegistry();
+    final RuleRegistry registry = RuleRegistry();
 
     test('[decision] is registered, but enabling its bundle leaves it off', () {
       expect(registry.byName('interface_implementation_naming'), isNotNull);
@@ -82,7 +82,7 @@ void main() {
   });
 
   group('the state-holder naming rules', () {
-    const RuleRegistry registry = RuleRegistry();
+    final RuleRegistry registry = RuleRegistry();
 
     test('[partition] one per framework bundle', () {
       expect(registry.bundleRules('bloc'), contains('require_cubit_suffix'));

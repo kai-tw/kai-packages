@@ -64,11 +64,13 @@ pure-Dart library without either inheriting the other's assumptions.
 | `riverpod` | 1 | `Notifier` / `AsyncNotifier` / `StreamNotifier` |
 | `getit` | 2 | a service locator |
 | `log_system` | 2 | the `log_system` package |
-| `novelglide` | 4 | one specific application — **do not enable elsewhere** |
 
 A Riverpod project enables `riverpod` and neither `bloc` nor `getit`: those
 rules resolve types it does not have, so they are dead weight rather than
 silent gaps.
+
+**A project's own rules** live in the project, not here: see *Rules a project
+owns* below.
 
 **Opt-in rules** sit in a bundle but are not switched on by it; only `enable:`
 turns one on. A rule is opt-in when it needs a choice only the project can
@@ -103,6 +105,45 @@ whole project — until the renames land, and enable it again.
 enabling `clean_arch` configures that option or disables the rule in an area.
 The silent alternative — unconfigured means allow everything — would let the
 rule pass while inert.
+
+### Rules a project owns
+
+A rule that only one application can possibly want belongs in that
+application, not here. Dart links what it compiles, so such a rule cannot be
+loaded into this package's binary at run time — the project runs **its own
+entry point** instead, and hands its rules in:
+
+```dart
+// tool/lint.dart, in the project
+import 'package:dart_lints/dart_lints.dart';
+
+import 'lint_rules/analytics_param_namespace.dart';
+
+Future<void> main(List<String> args) => DartLintsCli(
+  name: 'tool/lint.dart',
+  extraRules: <RuleDescriptor>[
+    RuleDescriptor(
+      name: 'analytics_param_namespace',
+      bundle: 'app',
+      create: (Map<String, Object?> options) => AnalyticsParamNamespace(),
+    ),
+  ],
+).run(args);
+```
+
+```yaml
+bundles: [core, flutter, app]   # `app` is the project's own
+```
+
+Run it as `dart run tool/lint.dart`, with the same arguments and the same
+`dart_lints.yaml`. From there a project rule is a rule like any other: enabled
+by bundle or by name, its options declared and validated, its name checked for
+typos, `--fix` applied if it offers one. Implement `LintRule`,
+`ResolvedLintRule` or `ProjectLintRule` — the same three this package's own
+rules implement.
+
+A project rule may not take the name of a built-in one: two rules answering to
+one name would make the config say one thing and mean another, so it throws.
 
 ### Validation fails closed
 

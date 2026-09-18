@@ -50,10 +50,6 @@ import 'rules/getit/avoid_get_it_dependency_cycle.dart';
 import 'rules/getit/restrict_sl_scope.dart';
 import 'rules/log_system/avoid_unsafe_log_interpolation.dart';
 import 'rules/log_system/log_error_requires_stacktrace.dart';
-import 'rules/novelglide/novelglide_analytics_param_namespace.dart';
-import 'rules/novelglide/novelglide_avoid_harness_support_imports_in_lib.dart';
-import 'rules/novelglide/novelglide_prefer_loading_state_code_over_bool.dart';
-import 'rules/novelglide/novelglide_require_design_mockup_guard.dart';
 import 'rules/state_holder/state_holder_naming.dart';
 import 'rules/state_holder/state_holder_role.dart';
 
@@ -69,9 +65,33 @@ import 'rules/state_holder/state_holder_role.dart';
 /// takes strings; an enum in between would be a second enumeration of one value
 /// set, kept in step by hand.
 class RuleRegistry {
-  const RuleRegistry();
+  /// [extraRules] are a project's own, added to the ones this package ships.
+  ///
+  /// Dart cannot load code a compiled binary did not link, so a project that
+  /// owns rules runs its own entry point (see [DartLintsCli]) and hands them
+  /// in here. From that point they are rules like any other: enabled by
+  /// bundle or by name, their options validated against what they declare,
+  /// their names checked for typos.
+  ///
+  /// A name already taken by a built-in rule throws, rather than shadowing
+  /// it: two rules answering to one name is the config saying one thing and
+  /// meaning another.
+  RuleRegistry({List<RuleDescriptor> extraRules = const <RuleDescriptor>[]})
+    : all = <RuleDescriptor>[..._builtIn, ...extraRules] {
+    final Set<String> builtInNames = _builtIn
+        .map((RuleDescriptor d) => d.name)
+        .toSet();
+    for (final RuleDescriptor extra in extraRules) {
+      if (builtInNames.contains(extra.name)) {
+        throw DartLintsConfigException(
+          'rule "${extra.name}" is already a rule of dart_lints — a project '
+          'rule needs a name of its own',
+        );
+      }
+    }
+  }
 
-  static final List<RuleDescriptor> _all = <RuleDescriptor>[
+  static final List<RuleDescriptor> _builtIn = <RuleDescriptor>[
     RuleDescriptor(
       name: 'avoid_bare_catch',
       bundle: 'core',
@@ -550,28 +570,6 @@ class RuleRegistry {
         levels: o['levels'] as List<String>?,
       ),
     ),
-    RuleDescriptor(
-      name: 'novelglide_analytics_param_namespace',
-      bundle: 'novelglide',
-      create: (Map<String, Object?> o) => NovelglideAnalyticsParamNamespace(),
-    ),
-    RuleDescriptor(
-      name: 'novelglide_avoid_harness_support_imports_in_lib',
-      bundle: 'novelglide',
-      create: (Map<String, Object?> o) =>
-          NovelglideAvoidHarnessSupportImportsInLib(),
-    ),
-    RuleDescriptor(
-      name: 'novelglide_prefer_loadingstatecode_over_bool',
-      bundle: 'novelglide',
-      create: (Map<String, Object?> o) =>
-          NovelglidePreferLoadingStateCodeOverBool(),
-    ),
-    RuleDescriptor(
-      name: 'novelglide_require_design_mockup_guard',
-      bundle: 'novelglide',
-      create: (Map<String, Object?> o) => NovelglideRequireDesignMockupGuard(),
-    ),
   ];
 
   /// The state-holder roles a naming rule checks: `stateHolders` when set;
@@ -601,22 +599,23 @@ class RuleRegistry {
     ];
   }
 
-  List<RuleDescriptor> get all => _all;
+  /// Every rule this run knows: the built-in ones, then the project's.
+  final List<RuleDescriptor> all;
 
-  Set<String> get ruleNames => _all.map((RuleDescriptor d) => d.name).toSet();
+  Set<String> get ruleNames => all.map((RuleDescriptor d) => d.name).toSet();
 
   Set<String> get bundleNames =>
-      _all.map((RuleDescriptor d) => d.bundle).toSet();
+      all.map((RuleDescriptor d) => d.bundle).toSet();
 
   /// The rules enabling [bundle] turns on — every rule in it but the
   /// [RuleDescriptor.optIn] ones.
-  Set<String> bundleRules(String bundle) => _all
+  Set<String> bundleRules(String bundle) => all
       .where((RuleDescriptor d) => d.bundle == bundle && !d.optIn)
       .map((RuleDescriptor d) => d.name)
       .toSet();
 
   RuleDescriptor? byName(String name) =>
-      _all.where((RuleDescriptor d) => d.name == name).firstOrNull;
+      all.where((RuleDescriptor d) => d.name == name).firstOrNull;
 
   /// Builds the rules in [names], each with the options [optionsFor] supplies,
   /// split by the pass that runs them.
@@ -628,7 +627,7 @@ class RuleRegistry {
     final List<ResolvedLintRule> resolved = <ResolvedLintRule>[];
     final List<ProjectLintRule> project = <ProjectLintRule>[];
 
-    for (final RuleDescriptor descriptor in _all) {
+    for (final RuleDescriptor descriptor in all) {
       if (!names.contains(descriptor.name)) {
         continue;
       }
