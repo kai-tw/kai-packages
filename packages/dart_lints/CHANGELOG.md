@@ -1,3 +1,29 @@
+## 0.6.4
+
+`require_cubit_suffix` / `require_notifier_suffix` no longer check a
+code-generated holder at all. On a `@riverpod` codebase the rule was reporting
+every *correctly* named notifier while checking nothing.
+
+Riverpod's `Notifier<T>` **extends** the generated `$Notifier<T>`, not the other
+way round. So `class AccountNotifier extends _$Account`, whose chain reaches
+`$Notifier`, has no `Notifier` among its supertypes, no configured role matched
+it, and the rule fell through to the name check — which reported
+`AccountNotifier ends in 'Notifier' but is not a Notifier`. The name was right;
+the rule simply could not see the type. No rename could satisfy it, since every
+other `…Notifier` name reproduced it, and the dartdoc's promise that generated
+notifiers are not state holders to this rule held on the type side only.
+
+A class whose superclass chain reaches a `$`- or `_$`-prefixed generated base,
+and which matches no role, is now left alone — and so are the generated
+intermediates themselves, which the `$` guard did not cover under their usual
+`_$Name` spelling. The rule gives up on generated holders rather than guessing
+at them: a project naming them `Todos`, the generator's own convention for a
+`todosProvider`, and one naming them `TodosNotifier` are both left as they are.
+
+A holder that extends a configured base is checked exactly as before, whatever
+else is in its chain, both ways round — a hand-written `SettingsNotifier`
+passes and a hand-written `Settings` is still reported.
+
 ## 0.6.3
 
 `interface_implementation_naming` no longer checks a direct subtype of a
