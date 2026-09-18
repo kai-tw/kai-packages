@@ -158,10 +158,10 @@ void main() {
     final String configPath = p.join(root.path, 'dart_lints.yaml');
     File(configPath).writeAsStringSync(_config);
 
-    const RuleRegistry registry = RuleRegistry();
-    final DartLintsConfig config = const DartLintsConfigLoader(
+    final RuleRegistry registry = RuleRegistry();
+    final DartLintsConfig config = DartLintsConfigLoader(
       registry,
-      SystemFileSystemProbe(),
+      const SystemFileSystemProbe(),
     ).load(configPath);
 
     final StringBuffer sink = StringBuffer();

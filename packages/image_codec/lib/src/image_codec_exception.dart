@@ -43,11 +43,11 @@ sealed class ImageCodecException implements Exception {
 /// expected answer for a cover picked by a user or extracted from an EPUB.
 /// This is thrown only where a caller asked for a result that cannot exist
 /// without a successful decode.
-final class ImageDecodeException extends ImageCodecException {
-  const ImageDecodeException(super.message, {super.cause});
+final class ImageCodecDecodeException extends ImageCodecException {
+  const ImageCodecDecodeException(super.message, {super.cause});
 }
 
 /// The image could not be re-encoded into the requested format.
-final class ImageEncodeException extends ImageCodecException {
-  const ImageEncodeException(super.message, {super.cause});
+final class ImageCodecEncodeException extends ImageCodecException {
+  const ImageCodecEncodeException(super.message, {super.cause});
 }

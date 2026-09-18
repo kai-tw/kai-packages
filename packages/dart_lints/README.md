@@ -57,22 +57,93 @@ pure-Dart library without either inheriting the other's assumptions.
 
 | Bundle | Rules | Looks up |
 |---|---|---|
-| `core` | 16 | nothing but Dart |
+| `core` | 24 (one opt-in) | nothing but Dart |
 | `flutter` | 8 | Flutter / Material types |
-| `clean_arch` | 6 | a layered directory layout |
-| `bloc` | 6 | `Cubit` / `BlocBase` |
+| `clean_arch` | 7 | a layered directory layout |
+| `bloc` | 6 | `Cubit` / `Bloc` |
+| `riverpod` | 1 | `Notifier` / `AsyncNotifier` / `StreamNotifier` |
 | `getit` | 2 | a service locator |
 | `log_system` | 2 | the `log_system` package |
-| `novelglide` | 4 | one specific application — **do not enable elsewhere** |
 
-A Riverpod project enables neither `bloc` nor `getit`: those rules resolve types
-it does not have, so they are dead weight rather than silent gaps.
+A Riverpod project enables `riverpod` and neither `bloc` nor `getit`: those
+rules resolve types it does not have, so they are dead weight rather than
+silent gaps.
+
+**A project's own rules** live in the project, not here: see *Rules a project
+owns* below.
+
+**Opt-in rules** sit in a bundle but are not switched on by it; only `enable:`
+turns one on. A rule is opt-in when it needs a choice only the project can
+make, which it declares as a required option — in the bundle's list it would
+stop every project using the bundle until each made that choice.
+
+### Naming rules
+
+These enforce what a type's name claims: its family, its kind and its
+category. A name is read as `<category words><kind word>`, split at case
+changes, with an acronym kept as one word (`HTTPClientError` is `HTTP`,
+`Client`, `Error`).
+
+| Rule | Bundle | Checks |
+|---|---|---|
+| `sealed_family_naming` | `core` | a direct subtype of a `sealed` class starts with its category words and ends with its kind: `ConnectionFailure` → `ConnectionTimeoutFailure` |
+| `failure_type_naming` | `core` | an `Error` subtype ends in `Error` and a class ending in `Error` is one; an `Exception` implementation ends in `failureWord` (`Exception`, the default, or `Failure`) and a class ending in it, or in `Exception`, is one. `exemptSubtypesOf` lists types whose subtypes are named by another scheme |
+| `avoid_vague_type_words` | `core` | no `Manager`, `Helper`, `Util`, `Utils` in a type name (`forbiddenWords` replaces the list); `scopedWords` forbids a word except on subtypes of listed types, e.g. `{word: Service, unlessExtends: [BackgroundService]}` |
+| `interface_implementation_naming` | `core`, **opt-in** | an implementation of one of the package's own interfaces is named in the project's `style`, which is required: `impl` (`<Interface>Impl`), `tech_prefix` (`<Technology><Interface>`) or `impl_or_prefix` (either) |
+| `avoid_reserved_widget_suffix` | `flutter` | a public widget does not end in `State`, `Cubit`, `Bloc`, `Notifier`, `Provider` or bare `Sheet`. A bare `Widget` is allowed; a project that forbids it lists it |
+| `require_cubit_suffix` | `bloc` | a `Cubit` / `Bloc` ends in `Cubit` / `Bloc`, a class with either suffix is one, and its state type is `<Concept>State` (`stateSuffix`). `stateHolders` configures the roles |
+| `require_notifier_suffix` | `riverpod` | the same for `Notifier`, `AsyncNotifier` and `StreamNotifier`, without the state-type check. Code-generated notifiers extend a generated base and are not checked |
+| `domain_entity_suffix` | `clean_arch` | a public class in `<feature>/domain/entities/` ends in `Entity`; enums are not checked. `entityDirectory`, `suffix` and `forbiddenWords` (say `[Data]`) are the project's |
+
+⚠️ These are on by default in their bundles, so upgrading reports what an
+existing codebase already has. Nothing here has a warning level or a baseline:
+to adopt a rule over existing violations, disable it — in one area, or for the
+whole project — until the renames land, and enable it again.
 
 ⚠️ `avoid_shared_preferences_outside_owner` reports **every**
 `shared_preferences` import until its `ownerPaths` is set, so a repository
 enabling `clean_arch` configures that option or disables the rule in an area.
 The silent alternative — unconfigured means allow everything — would let the
 rule pass while inert.
+
+### Rules a project owns
+
+A rule that only one application can possibly want belongs in that
+application, not here. Dart links what it compiles, so such a rule cannot be
+loaded into this package's binary at run time — the project runs **its own
+entry point** instead, and hands its rules in:
+
+```dart
+// tool/lint.dart, in the project
+import 'package:dart_lints/dart_lints.dart';
+
+import 'lint_rules/analytics_param_namespace.dart';
+
+Future<void> main(List<String> args) => DartLintsCli(
+  name: 'tool/lint.dart',
+  extraRules: <RuleDescriptor>[
+    RuleDescriptor(
+      name: 'analytics_param_namespace',
+      bundle: 'app',
+      create: (Map<String, Object?> options) => AnalyticsParamNamespace(),
+    ),
+  ],
+).run(args);
+```
+
+```yaml
+bundles: [core, flutter, app]   # `app` is the project's own
+```
+
+Run it as `dart run tool/lint.dart`, with the same arguments and the same
+`dart_lints.yaml`. From there a project rule is a rule like any other: enabled
+by bundle or by name, its options declared and validated, its name checked for
+typos, `--fix` applied if it offers one. Implement `LintRule`,
+`ResolvedLintRule` or `ProjectLintRule` — the same three this package's own
+rules implement.
+
+A project rule may not take the name of a built-in one: two rules answering to
+one name would make the config say one thing and mean another, so it throws.
 
 ### Validation fails closed
 

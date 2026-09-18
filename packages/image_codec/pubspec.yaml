@@ -4,7 +4,7 @@ description: >-
   behind one exception type. Wraps the engine's header reader, package:image and
   flutter_image_compress so a consumer never has to know which of the three
   failed, or that they fail in three different shapes.
-version: 0.1.2
+version: 0.2.0
 repository: https://github.com/kai-tw/kai-packages/tree/main/packages/image_codec
 publish_to: none
 

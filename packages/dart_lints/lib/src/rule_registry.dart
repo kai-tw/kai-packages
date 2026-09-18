@@ -6,12 +6,12 @@ import 'rules/bloc/avoid_emit_after_await.dart';
 import 'rules/bloc/avoid_repository_provider.dart';
 import 'rules/bloc/prefer_cubit_over_bloc.dart';
 import 'rules/bloc/prefer_named_subscription_callbacks.dart';
-import 'rules/bloc/require_cubit_suffix.dart';
 import 'rules/bloc/state_provides_copy_with.dart';
 import 'rules/clean_arch/avoid_freezed_in_domain.dart';
 import 'rules/clean_arch/avoid_layer_violation.dart';
 import 'rules/clean_arch/avoid_shared_preferences_outside_owner.dart';
 import 'rules/clean_arch/avoid_tool_imports_in_lib.dart';
+import 'rules/clean_arch/domain_entity_suffix.dart';
 import 'rules/clean_arch/domain_exception_extends_app_exception.dart';
 import 'rules/clean_arch/domain_pure_dart_imports.dart';
 import 'rules/core/avoid_bare_catch.dart';
@@ -31,9 +31,13 @@ import 'rules/core/avoid_throwing_generic_exception.dart';
 import 'rules/core/avoid_top_level_identifiers.dart';
 import 'rules/core/avoid_unawaited_catch_error.dart';
 import 'rules/core/avoid_unnecessary_rethrow.dart';
+import 'rules/core/avoid_vague_type_words.dart';
 import 'rules/core/avoid_void_async.dart';
 import 'rules/core/avoid_while_true.dart';
+import 'rules/core/failure_type_naming.dart';
+import 'rules/core/interface_implementation_naming.dart';
 import 'rules/core/public_class_names_its_file.dart';
+import 'rules/core/sealed_family_naming.dart';
 import 'rules/flutter/avoid_badge_wrapping_button.dart';
 import 'rules/flutter/avoid_build_context_in_snack_bar.dart';
 import 'rules/flutter/avoid_debug_only_api.dart';
@@ -46,10 +50,8 @@ import 'rules/getit/avoid_get_it_dependency_cycle.dart';
 import 'rules/getit/restrict_sl_scope.dart';
 import 'rules/log_system/avoid_unsafe_log_interpolation.dart';
 import 'rules/log_system/log_error_requires_stacktrace.dart';
-import 'rules/novelglide/novelglide_analytics_param_namespace.dart';
-import 'rules/novelglide/novelglide_avoid_harness_support_imports_in_lib.dart';
-import 'rules/novelglide/novelglide_prefer_loading_state_code_over_bool.dart';
-import 'rules/novelglide/novelglide_require_design_mockup_guard.dart';
+import 'rules/state_holder/state_holder_naming.dart';
+import 'rules/state_holder/state_holder_role.dart';
 
 /// Every rule this package ships, grouped into bundles.
 ///
@@ -63,9 +65,33 @@ import 'rules/novelglide/novelglide_require_design_mockup_guard.dart';
 /// takes strings; an enum in between would be a second enumeration of one value
 /// set, kept in step by hand.
 class RuleRegistry {
-  const RuleRegistry();
+  /// [extraRules] are a project's own, added to the ones this package ships.
+  ///
+  /// Dart cannot load code a compiled binary did not link, so a project that
+  /// owns rules runs its own entry point (see [DartLintsCli]) and hands them
+  /// in here. From that point they are rules like any other: enabled by
+  /// bundle or by name, their options validated against what they declare,
+  /// their names checked for typos.
+  ///
+  /// A name already taken by a built-in rule throws, rather than shadowing
+  /// it: two rules answering to one name is the config saying one thing and
+  /// meaning another.
+  RuleRegistry({List<RuleDescriptor> extraRules = const <RuleDescriptor>[]})
+    : all = <RuleDescriptor>[..._builtIn, ...extraRules] {
+    final Set<String> builtInNames = _builtIn
+        .map((RuleDescriptor d) => d.name)
+        .toSet();
+    for (final RuleDescriptor extra in extraRules) {
+      if (builtInNames.contains(extra.name)) {
+        throw DartLintsConfigException(
+          'rule "${extra.name}" is already a rule of dart_lints — a project '
+          'rule needs a name of its own',
+        );
+      }
+    }
+  }
 
-  static final List<RuleDescriptor> _all = <RuleDescriptor>[
+  static final List<RuleDescriptor> _builtIn = <RuleDescriptor>[
     RuleDescriptor(
       name: 'avoid_bare_catch',
       bundle: 'core',
@@ -190,9 +216,42 @@ class RuleRegistry {
       create: (Map<String, Object?> o) => AvoidVoidAsync(),
     ),
     RuleDescriptor(
+      name: 'avoid_vague_type_words',
+      bundle: 'core',
+      options: <String, OptionKind>{
+        'forbiddenWords': OptionKind.stringList,
+        'scopedWords': OptionKind.mapList,
+      },
+      create: (Map<String, Object?> o) => AvoidVagueTypeWords(
+        forbiddenWords: o['forbiddenWords'] as List<String>?,
+        scopedWords: o['scopedWords'] as List<Map<String, Object?>>?,
+      ),
+    ),
+    RuleDescriptor(
       name: 'avoid_while_true',
       bundle: 'core',
       create: (Map<String, Object?> o) => AvoidWhileTrue(),
+    ),
+    RuleDescriptor(
+      name: 'failure_type_naming',
+      bundle: 'core',
+      options: <String, OptionKind>{
+        'failureWord': OptionKind.string,
+        'exemptSubtypesOf': OptionKind.stringList,
+      },
+      create: (Map<String, Object?> o) => FailureTypeNaming(
+        failureWord: o['failureWord'] as String?,
+        exemptSubtypesOf: o['exemptSubtypesOf'] as List<String>?,
+      ),
+    ),
+    RuleDescriptor(
+      name: 'interface_implementation_naming',
+      bundle: 'core',
+      optIn: true,
+      options: <String, OptionKind>{'style': OptionKind.string},
+      requiredOptions: <String>{'style'},
+      create: (Map<String, Object?> o) =>
+          InterfaceImplementationNaming(style: o['style'] as String),
     ),
     RuleDescriptor(
       name: 'public_class_names_its_file',
@@ -207,6 +266,11 @@ class RuleRegistry {
         exemptFiles: o['exemptFiles'] as List<String>?,
         familyFileSuffixes: o['familyFileSuffixes'] as List<String>?,
       ),
+    ),
+    RuleDescriptor(
+      name: 'sealed_family_naming',
+      bundle: 'core',
+      create: (Map<String, Object?> o) => SealedFamilyNaming(),
     ),
     RuleDescriptor(
       name: 'avoid_badge_wrapping_button',
@@ -318,6 +382,26 @@ class RuleRegistry {
       ),
     ),
     RuleDescriptor(
+      name: 'domain_entity_suffix',
+      bundle: 'clean_arch',
+      options: <String, OptionKind>{
+        'featureRoots': OptionKind.stringList,
+        'layers': OptionKind.stringList,
+        'domainLayer': OptionKind.string,
+        'entityDirectory': OptionKind.string,
+        'suffix': OptionKind.string,
+        'forbiddenWords': OptionKind.stringList,
+      },
+      create: (Map<String, Object?> o) => DomainEntitySuffix(
+        featureRoots: o['featureRoots'] as List<String>?,
+        layers: o['layers'] as List<String>?,
+        domainLayer: o['domainLayer'] as String?,
+        entityDirectory: o['entityDirectory'] as String?,
+        suffix: o['suffix'] as String?,
+        forbiddenWords: o['forbiddenWords'] as List<String>?,
+      ),
+    ),
+    RuleDescriptor(
       name: 'domain_exception_extends_app_exception',
       bundle: 'clean_arch',
       options: <String, OptionKind>{
@@ -386,10 +470,43 @@ class RuleRegistry {
       options: <String, OptionKind>{
         'stateHolderBase': OptionKind.string,
         'requiredSuffix': OptionKind.string,
+        'stateHolders': OptionKind.mapList,
+        'stateSuffix': OptionKind.string,
       },
-      create: (Map<String, Object?> o) => RequireCubitSuffix(
-        stateHolderBase: o['stateHolderBase'] as String?,
-        requiredSuffix: o['requiredSuffix'] as String?,
+      create: (Map<String, Object?> o) => StateHolderNaming(
+        name: 'require_cubit_suffix',
+        roles: _roles(
+          o,
+          defaults: const <StateHolderRole>[
+            StateHolderRole(
+              base: 'Cubit',
+              suffix: 'Cubit',
+              stateTypeArgument: 0,
+            ),
+            StateHolderRole(base: 'Bloc', suffix: 'Bloc', stateTypeArgument: 1),
+          ],
+        ),
+        stateSuffix: o['stateSuffix'] as String?,
+      ),
+    ),
+    RuleDescriptor(
+      name: 'require_notifier_suffix',
+      bundle: 'riverpod',
+      options: <String, OptionKind>{
+        'stateHolders': OptionKind.mapList,
+        'stateSuffix': OptionKind.string,
+      },
+      create: (Map<String, Object?> o) => StateHolderNaming(
+        name: 'require_notifier_suffix',
+        roles: _roles(
+          o,
+          defaults: const <StateHolderRole>[
+            StateHolderRole(base: 'Notifier', suffix: 'Notifier'),
+            StateHolderRole(base: 'AsyncNotifier', suffix: 'AsyncNotifier'),
+            StateHolderRole(base: 'StreamNotifier', suffix: 'StreamNotifier'),
+          ],
+        ),
+        stateSuffix: o['stateSuffix'] as String?,
       ),
     ),
     RuleDescriptor(
@@ -453,44 +570,52 @@ class RuleRegistry {
         levels: o['levels'] as List<String>?,
       ),
     ),
-    RuleDescriptor(
-      name: 'novelglide_analytics_param_namespace',
-      bundle: 'novelglide',
-      create: (Map<String, Object?> o) => NovelglideAnalyticsParamNamespace(),
-    ),
-    RuleDescriptor(
-      name: 'novelglide_avoid_harness_support_imports_in_lib',
-      bundle: 'novelglide',
-      create: (Map<String, Object?> o) =>
-          NovelglideAvoidHarnessSupportImportsInLib(),
-    ),
-    RuleDescriptor(
-      name: 'novelglide_prefer_loadingstatecode_over_bool',
-      bundle: 'novelglide',
-      create: (Map<String, Object?> o) =>
-          NovelglidePreferLoadingStateCodeOverBool(),
-    ),
-    RuleDescriptor(
-      name: 'novelglide_require_design_mockup_guard',
-      bundle: 'novelglide',
-      create: (Map<String, Object?> o) => NovelglideRequireDesignMockupGuard(),
-    ),
   ];
 
-  List<RuleDescriptor> get all => _all;
+  /// The state-holder roles a naming rule checks: `stateHolders` when set;
+  /// otherwise the single base named by `require_cubit_suffix`'s older
+  /// `stateHolderBase` / `requiredSuffix` options, when either is set;
+  /// otherwise [defaults].
+  static List<StateHolderRole> _roles(
+    Map<String, Object?> options, {
+    required List<StateHolderRole> defaults,
+  }) {
+    final List<Map<String, Object?>>? configured =
+        options['stateHolders'] as List<Map<String, Object?>>?;
+    if (configured != null) {
+      return configured.map(StateHolderRole.fromMap).toList();
+    }
+    final String? base = options['stateHolderBase'] as String?;
+    final String? suffix = options['requiredSuffix'] as String?;
+    if (base == null && suffix == null) {
+      return defaults;
+    }
+    return <StateHolderRole>[
+      StateHolderRole(
+        base: base ?? 'Cubit',
+        suffix: suffix ?? 'Cubit',
+        stateTypeArgument: 0,
+      ),
+    ];
+  }
 
-  Set<String> get ruleNames => _all.map((RuleDescriptor d) => d.name).toSet();
+  /// Every rule this run knows: the built-in ones, then the project's.
+  final List<RuleDescriptor> all;
+
+  Set<String> get ruleNames => all.map((RuleDescriptor d) => d.name).toSet();
 
   Set<String> get bundleNames =>
-      _all.map((RuleDescriptor d) => d.bundle).toSet();
+      all.map((RuleDescriptor d) => d.bundle).toSet();
 
-  Set<String> bundleRules(String bundle) => _all
-      .where((RuleDescriptor d) => d.bundle == bundle)
+  /// The rules enabling [bundle] turns on — every rule in it but the
+  /// [RuleDescriptor.optIn] ones.
+  Set<String> bundleRules(String bundle) => all
+      .where((RuleDescriptor d) => d.bundle == bundle && !d.optIn)
       .map((RuleDescriptor d) => d.name)
       .toSet();
 
   RuleDescriptor? byName(String name) =>
-      _all.where((RuleDescriptor d) => d.name == name).firstOrNull;
+      all.where((RuleDescriptor d) => d.name == name).firstOrNull;
 
   /// Builds the rules in [names], each with the options [optionsFor] supplies,
   /// split by the pass that runs them.
@@ -502,7 +627,7 @@ class RuleRegistry {
     final List<ResolvedLintRule> resolved = <ResolvedLintRule>[];
     final List<ProjectLintRule> project = <ProjectLintRule>[];
 
-    for (final RuleDescriptor descriptor in _all) {
+    for (final RuleDescriptor descriptor in all) {
       if (!names.contains(descriptor.name)) {
         continue;
       }

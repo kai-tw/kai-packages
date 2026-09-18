@@ -35,10 +35,20 @@ class RuleDescriptor {
     required this.create,
     this.options = const <String, OptionKind>{},
     this.requiredOptions = const <String>{},
+    this.optIn = false,
   });
 
   final String name;
   final String bundle;
+
+  /// Whether enabling [bundle] leaves this rule off, so that only `enable:`
+  /// turns it on.
+  ///
+  /// For a rule that has no defensible default — it needs a choice only the
+  /// project can make, and says so through [requiredOptions]. In the bundle's
+  /// list it would stop every project using the bundle until each made that
+  /// choice.
+  final bool optIn;
   final Map<String, OptionKind> options;
 
   /// Keys in [options] that must be present in the merged view — after area

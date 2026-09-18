@@ -56,7 +56,7 @@ void main() {
       final _RecordingProcessRunner process = _RecordingProcessRunner();
       final LintRunner runner = LintRunner(
         config: config,
-        registry: const RuleRegistry(),
+        registry: RuleRegistry(),
         resolver: AreaResolver(
           config.areas,
           rootDirectory: config.rootDirectory,

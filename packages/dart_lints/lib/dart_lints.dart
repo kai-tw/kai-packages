@@ -14,6 +14,7 @@ export 'src/config/dart_lints_config.dart';
 export 'src/config/dart_lints_config_exception.dart';
 export 'src/config/dart_lints_config_loader.dart';
 export 'src/config/file_system_probe.dart';
+export 'src/dart_lints_cli.dart';
 export 'src/lint_rule_base.dart';
 export 'src/lint_run_result.dart';
 export 'src/lint_runner.dart';

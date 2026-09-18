@@ -64,10 +64,10 @@ areas:
       final String configPath = p.join(root.path, 'dart_lints.yaml');
       File(configPath).writeAsStringSync(config);
 
-      const RuleRegistry registry = RuleRegistry();
-      final DartLintsConfig loadedConfig = const DartLintsConfigLoader(
+      final RuleRegistry registry = RuleRegistry();
+      final DartLintsConfig loadedConfig = DartLintsConfigLoader(
         registry,
-        SystemFileSystemProbe(),
+        const SystemFileSystemProbe(),
       ).load(configPath);
 
       final StringBuffer sink = StringBuffer();
@@ -121,10 +121,10 @@ areas:
       final String configPath = p.join(root.path, 'dart_lints.yaml');
       File(configPath).writeAsStringSync(config);
 
-      const RuleRegistry registry = RuleRegistry();
-      final DartLintsConfig loadedConfig = const DartLintsConfigLoader(
+      final RuleRegistry registry = RuleRegistry();
+      final DartLintsConfig loadedConfig = DartLintsConfigLoader(
         registry,
-        SystemFileSystemProbe(),
+        const SystemFileSystemProbe(),
       ).load(configPath);
 
       final StringBuffer sink = StringBuffer();
@@ -179,11 +179,11 @@ areas:
       final String configPath = p.join(root.path, 'dart_lints.yaml');
       File(configPath).writeAsStringSync(config);
 
-      const RuleRegistry registry = RuleRegistry();
+      final RuleRegistry registry = RuleRegistry();
       expect(
-        () => const DartLintsConfigLoader(
+        () => DartLintsConfigLoader(
           registry,
-          SystemFileSystemProbe(),
+          const SystemFileSystemProbe(),
         ).load(configPath),
         throwsA(
           isA<DartLintsConfigException>().having(

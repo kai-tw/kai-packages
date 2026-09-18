@@ -1,3 +1,16 @@
+## 0.2.0
+
+**Breaking:** `ImageDecodeException` is now `ImageCodecDecodeException`, and
+`ImageEncodeException` is now `ImageCodecEncodeException`. Rename every
+reference; nothing else changed. There are no aliases for the old names.
+
+The two are the members of the sealed `ImageCodecException`, and a member of
+a sealed family now carries the family's whole name — its category words in
+front, its kind word at the end — so that one met in a `switch` arm, a log
+line or a stack frame can be traced to its family. `dart_lints`'s new
+`sealed_family_naming` rule enforces that, and these two were the only
+members in this repository that did not.
+
 ## 0.1.2
 
 Relaxes `image` from `^4.5.0` to `>=4.3.0 <5.0.0`, which unblocks any consumer

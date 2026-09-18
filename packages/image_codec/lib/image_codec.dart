@@ -12,6 +12,9 @@ library;
 export 'src/engine_image_boundary.dart' show EngineImageBoundary;
 export 'src/image_codec.dart' show ImageCodec;
 export 'src/image_codec_exception.dart'
-    show ImageCodecException, ImageDecodeException, ImageEncodeException;
+    show
+        ImageCodecException,
+        ImageCodecDecodeException,
+        ImageCodecEncodeException;
 export 'src/image_size.dart' show ImageSize;
 export 'src/webp_encoder.dart' show WebpEncoder;

@@ -26,7 +26,7 @@ class _RecordingCrashlyticsClient implements FirebaseCrashlyticsClient {
 
   final Map<String, Object> customKeys = <String, Object>{};
 
-  final List<_RecordedError> recordedErrors = <_RecordedError>[];
+  final List<_RecordedErrorReport> recordedErrors = <_RecordedErrorReport>[];
 
   @override
   Future<void> setCrashlyticsCollectionEnabled(bool enabled) async {
@@ -54,7 +54,7 @@ class _RecordingCrashlyticsClient implements FirebaseCrashlyticsClient {
   }) async {
     calls.add('recordError:$reason');
     recordedErrors.add(
-      _RecordedError(
+      _RecordedErrorReport(
         exception: exception,
         stackTrace: stackTrace,
         reason: reason,
@@ -65,8 +65,8 @@ class _RecordingCrashlyticsClient implements FirebaseCrashlyticsClient {
   }
 }
 
-class _RecordedError {
-  const _RecordedError({
+class _RecordedErrorReport {
+  const _RecordedErrorReport({
     required this.exception,
     required this.stackTrace,
     required this.reason,
@@ -299,7 +299,7 @@ void main() {
 
         await adapter.error('load failed', error: error, stackTrace: stack);
 
-        final _RecordedError recorded = client.recordedErrors.single;
+        final _RecordedErrorReport recorded = client.recordedErrors.single;
         expect(recorded.exception.toString(), 'FileSystemException errno=-');
         expect(recorded.exception.toString(), isNot(contains('private-book')));
         expect(recorded.stackTrace, same(stack));
@@ -319,7 +319,7 @@ void main() {
     test('fatal records the SAME shape, with fatal: true', () async {
       await adapter.fatal('f', error: StateError('x'));
 
-      final _RecordedError recorded = client.recordedErrors.single;
+      final _RecordedErrorReport recorded = client.recordedErrors.single;
       expect(recorded.reason, 'f');
       expect(recorded.printDetails, isFalse);
       expect(recorded.fatal, isTrue);
@@ -329,7 +329,7 @@ void main() {
         'message', () async {
       await adapter.error('message only');
 
-      final _RecordedError recorded = client.recordedErrors.single;
+      final _RecordedErrorReport recorded = client.recordedErrors.single;
       expect(recorded.exception.toString(), '<no error object>');
       expect(recorded.stackTrace, isNull);
     });

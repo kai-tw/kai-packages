@@ -53,13 +53,16 @@ abstract final class LogErrorRedactor {
     // `"null"`, and every message-only call site in the app would group under
     // it.
     if (error == null) {
-      return const _RedactedError('<no error object>');
+      return const _RedactedErrorSurrogate('<no error object>');
     }
 
     final String type = error.runtimeType.toString();
 
     // Host describer first, so an app can also override a built-in arm.
-    final _RedactedError? describerResult = _redactViaDescriber(error, type);
+    final _RedactedErrorSurrogate? describerResult = _redactViaDescriber(
+      error,
+      type,
+    );
     if (describerResult != null) {
       return describerResult;
     }
@@ -80,12 +83,15 @@ abstract final class LogErrorRedactor {
       return _redactLoggableException(error, type);
     }
 
-    return _RedactedError(type);
+    return _RedactedErrorSurrogate(type);
   }
 
   /// Applies the host-supplied [describeExtra], if set. Returns null to fall
   /// through to the built-in arms.
-  static _RedactedError? _redactViaDescriber(Object error, String type) {
+  static _RedactedErrorSurrogate? _redactViaDescriber(
+    Object error,
+    String type,
+  ) {
     final String? Function(Object)? describer = describeExtra;
     if (describer != null) {
       final String? extra = describer(error);
@@ -93,7 +99,7 @@ abstract final class LogErrorRedactor {
         // Still gated: a describer that returns a path or a sentence is a
         // mistake this boundary must absorb rather than forward, because the
         // whole point is that no code outside can widen the egress.
-        return _RedactedError(
+        return _RedactedErrorSurrogate(
           _describerLooksFreeForm(extra) ? type : '$type $extra',
         );
       }
@@ -101,7 +107,7 @@ abstract final class LogErrorRedactor {
     return null;
   }
 
-  static _RedactedError _redactPlatformException(
+  static _RedactedErrorSurrogate _redactPlatformException(
     PlatformException error,
     String type,
   ) {
@@ -112,31 +118,37 @@ abstract final class LogErrorRedactor {
     // shape of an opaque token — a plugin smuggling a path or a sentence
     // into it degrades to type-name-only.
     final String code = error.code;
-    return _RedactedError(_looksFreeForm(code) ? type : '$type code=$code');
+    return _RedactedErrorSurrogate(
+      _looksFreeForm(code) ? type : '$type code=$code',
+    );
   }
 
-  static _RedactedError _redactFileSystemException(
+  static _RedactedErrorSurrogate _redactFileSystemException(
     FileSystemException error,
     String type,
   ) {
     // errno separates ENOSPC / EACCES / ENOENT. path/message are PII.
-    return _RedactedError('$type errno=${error.osError?.errorCode ?? '-'}');
+    return _RedactedErrorSurrogate(
+      '$type errno=${error.osError?.errorCode ?? '-'}',
+    );
   }
 
-  static _RedactedError _redactSocketException(
+  static _RedactedErrorSurrogate _redactSocketException(
     SocketException error,
     String type,
   ) {
     // errno separates connection-refused / host-unreachable. address dropped.
-    return _RedactedError('$type errno=${error.osError?.errorCode ?? '-'}');
+    return _RedactedErrorSurrogate(
+      '$type errno=${error.osError?.errorCode ?? '-'}',
+    );
   }
 
-  static _RedactedError _redactOSError(OSError error, String type) {
+  static _RedactedErrorSurrogate _redactOSError(OSError error, String type) {
     // errno is the discriminator; the OS message string is dropped.
-    return _RedactedError('$type errno=${error.errorCode}');
+    return _RedactedErrorSurrogate('$type errno=${error.errorCode}');
   }
 
-  static _RedactedError _redactLoggableException(
+  static _RedactedErrorSurrogate _redactLoggableException(
     LoggableException error,
     String type,
   ) {
@@ -147,9 +159,9 @@ abstract final class LogErrorRedactor {
     // egress.
     final int? code = error.diagnosticCode;
     if (code == null) {
-      return _RedactedError('$type code=-');
+      return _RedactedErrorSurrogate('$type code=-');
     }
-    return _RedactedError(
+    return _RedactedErrorSurrogate(
       (code < 0 || code > 65535) ? type : '$type code=$code',
     );
   }
@@ -209,8 +221,8 @@ abstract final class LogErrorRedactor {
 /// Non-identifying surrogate forwarded in place of the raw error. Its
 /// [toString] is the only thing the sink surfaces, and it leads with the
 /// original runtime type name to preserve issue grouping.
-class _RedactedError {
-  const _RedactedError(this._description);
+class _RedactedErrorSurrogate {
+  const _RedactedErrorSurrogate(this._description);
 
   final String _description;
 

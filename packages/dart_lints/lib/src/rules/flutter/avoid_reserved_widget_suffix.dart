@@ -29,8 +29,13 @@ class AvoidReservedWidgetSuffix extends ResolvedLintRule {
   ///
   /// `State` and `Sheet` are Flutter's own: `State` is the framework's state
   /// object and `Sheet` is the Material component whose full spelling is
-  /// `BottomSheet`. `Cubit` names a state-holder role; in a codebase with no
-  /// Cubits nothing ends in it, so carrying it costs such a project nothing.
+  /// `BottomSheet`. `Cubit`, `Bloc`, `Notifier` and `Provider` name
+  /// state-management roles; in a codebase without one of them nothing ends in
+  /// it, so carrying it costs such a project nothing.
+  ///
+  /// `Widget` is not reserved: a name ending in it still says the type is a
+  /// widget, which is its kind. A project that wants the bare word gone lists
+  /// it.
   static const List<ReservedSuffix> _defaultReservedSuffixes = <ReservedSuffix>[
     ReservedSuffix(
       suffix: 'State',
@@ -43,6 +48,24 @@ class AvoidReservedWidgetSuffix extends ResolvedLintRule {
       hint:
           'Rename to a descriptive widget role — Cubit is reserved for '
           'state holders.',
+    ),
+    ReservedSuffix(
+      suffix: 'Bloc',
+      hint:
+          'Rename to a descriptive widget role — Bloc is reserved for state '
+          'holders.',
+    ),
+    ReservedSuffix(
+      suffix: 'Notifier',
+      hint:
+          'Rename to a descriptive widget role — Notifier is reserved for '
+          'state holders.',
+    ),
+    ReservedSuffix(
+      suffix: 'Provider',
+      hint:
+          'Rename to a descriptive widget role — Provider is reserved for '
+          'dependency and state providers.',
     ),
     ReservedSuffix(
       suffix: 'Sheet',
