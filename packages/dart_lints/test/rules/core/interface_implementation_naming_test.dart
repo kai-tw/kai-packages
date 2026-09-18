@@ -91,6 +91,41 @@ void main() {
     },
   );
 
+  test('[partition] impl_or_prefix: both forms pass, and neither a bare name '
+      'nor a prefixed Impl does', () async {
+    expect(await _reported('impl_or_prefix'), <String>{
+      'ReaderRepositorySqliteImpl',
+      'FileReader',
+    });
+  });
+
+  test('[state] impl_or_prefix leaves an existing <Interface>Impl alone when '
+      'a second implementation arrives — no count, so no file turns red for '
+      'a change elsewhere', () async {
+    const String source = r'''
+abstract interface class ReaderRepository {
+  String read();
+}
+
+class ReaderRepositoryImpl implements ReaderRepository {
+  @override
+  String read() => '';
+}
+
+class SqliteReaderRepository implements ReaderRepository {
+  @override
+  String read() => '';
+}
+''';
+    expect(
+      await NamingFixture().resolved(
+        InterfaceImplementationNaming(style: 'impl_or_prefix'),
+        source,
+      ),
+      isEmpty,
+    );
+  });
+
   test('[decision] a class with a concrete member is not an interface, an '
       'abstract implementation is not an implementation, and an SDK interface '
       'is not the package\'s', () async {

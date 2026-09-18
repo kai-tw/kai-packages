@@ -9,14 +9,21 @@ import '../../lint_rule_base.dart';
 /// Requires every implementation of one of the package's own interfaces to be
 /// named in the one form the project chose.
 ///
-/// Two forms are in use, and a project picks one ([style]):
+/// Three [style]s, and a project picks one:
 ///
 /// - `impl` — `<Interface>Impl`: `ReaderRepositoryImpl`.
 /// - `tech_prefix` — `<Technology><Interface>`: `SqliteReaderRepository`. The
 ///   name must add at least one word, and must not end in `Impl`.
+/// - `impl_or_prefix` — either, for a project where an interface with one
+///   implementation names it `<Interface>Impl` and one with several gives each
+///   a distinguishing word. That reading needs no count of the
+///   implementations: two classes cannot share the `<Interface>Impl` name, so
+///   the second implementation has to distinguish itself, and the first is
+///   never made wrong by the second arriving — which counting them would do,
+///   turning a file nobody touched red.
 ///
-/// Mixing the two in one codebase gives a kind two names (S2.9), so there is
-/// no default: a project that enables this rule says which.
+/// Mixing forms freely gives a kind two names (S2.9), so there is no default:
+/// a project that enables this rule says which.
 ///
 /// An interface here is a class of this package, declared `interface`, or
 /// `abstract` with no concrete member. A concrete class is checked against each
@@ -34,31 +41,52 @@ class InterfaceImplementationNaming extends ResolvedLintRule {
     }
   }
 
-  static const List<String> _styles = <String>['impl', 'tech_prefix'];
+  static const List<String> _styles = <String>[
+    'impl',
+    'tech_prefix',
+    'impl_or_prefix',
+  ];
 
-  /// `impl` or `tech_prefix`.
+  /// `impl`, `tech_prefix` or `impl_or_prefix`.
   final String style;
 
   @override
   String get name => 'interface_implementation_naming';
 
   @override
-  String get description => style == 'impl'
-      ? 'An implementation of a package interface is named <Interface>Impl.'
-      : 'An implementation of a package interface is named '
-            '<Technology><Interface>.';
+  String get description => switch (style) {
+    'impl' =>
+      'An implementation of a package interface is named <Interface>Impl.',
+    'tech_prefix' =>
+      'An implementation of a package interface is named '
+          '<Technology><Interface>.',
+    _ =>
+      'An implementation of a package interface is named <Interface>Impl or '
+          '<Distinguisher><Interface>.',
+  };
 
   @override
   ResolvedLintVisitor createResolvedVisitor(
     String filePath,
     ResolvedUnitResult resolvedUnit,
-  ) => _Visitor(filePath, resolvedUnit, implSuffix: style == 'impl');
+  ) => _Visitor(
+    filePath,
+    resolvedUnit,
+    acceptsImpl: style != 'tech_prefix',
+    acceptsPrefix: style != 'impl',
+  );
 }
 
 class _Visitor extends ResolvedLintVisitor {
-  _Visitor(super.filePath, super.resolvedUnit, {required this.implSuffix});
+  _Visitor(
+    super.filePath,
+    super.resolvedUnit, {
+    required this.acceptsImpl,
+    required this.acceptsPrefix,
+  });
 
-  final bool implSuffix;
+  final bool acceptsImpl;
+  final bool acceptsPrefix;
 
   @override
   void visitClassDeclaration(ClassDeclaration node) {
@@ -88,21 +116,30 @@ class _Visitor extends ResolvedLintVisitor {
     final String interface = interfaces.first;
     report(
       ruleName: 'interface_implementation_naming',
-      message: implSuffix
-          ? '$name implements $interface, so it is named ${interface}Impl — '
-                "this project's form for an implementation."
-          : '$name implements $interface, so it is named '
-                '<Technology>$interface — the technology it is built on, then '
-                "the interface: this project's form for an implementation.",
+      message:
+          '$name implements $interface, so it is named ${_form(interface)} — '
+          "this project's form for an implementation.",
       offset: node.name.offset,
     );
   }
 
-  bool _fits(String name, String interface) => implSuffix
-      ? name == '${interface}Impl'
-      : name.endsWith(interface) &&
-            name.length > interface.length &&
-            !name.endsWith('Impl');
+  /// What the name should look like, as the style allows.
+  String _form(String interface) {
+    if (!acceptsPrefix) {
+      return '${interface}Impl';
+    }
+    final String prefixed =
+        '<Distinguisher>$interface — the word that tells this implementation '
+        'from another of the same interface, then the interface';
+    return acceptsImpl ? '${interface}Impl or $prefixed' : prefixed;
+  }
+
+  bool _fits(String name, String interface) =>
+      (acceptsImpl && name == '${interface}Impl') ||
+      (acceptsPrefix &&
+          name.endsWith(interface) &&
+          name.length > interface.length &&
+          !name.endsWith('Impl'));
 
   static bool _isOwnInterface(InterfaceElement element, String package) =>
       element is ClassElement &&

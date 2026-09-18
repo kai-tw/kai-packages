@@ -24,10 +24,16 @@ New:
   `forbiddenWords` replaces the list; `scopedWords` forbids a word except on a
   class that is, or extends or implements, one of the listed types.
 - `interface_implementation_naming` (`core`, **opt-in**): an implementation of
-  one of the package's own interfaces is named `<Interface>Impl` or
-  `<Technology><Interface>`, as the required `style` option says (`impl` /
-  `tech_prefix`). An interface is a class declared `interface`, or abstract
-  with no concrete instance member; `extends` counts as well as `implements`.
+  one of the package's own interfaces is named as the required `style` option
+  says: `impl` (`<Interface>Impl`), `tech_prefix`
+  (`<Technology><Interface>`) or `impl_or_prefix`, which accepts either — for
+  a project that names a lone implementation `<Interface>Impl` and gives each
+  of several a distinguishing word. `impl_or_prefix` deliberately does not
+  count the implementations: two classes cannot share the `<Interface>Impl`
+  name, so a second implementation must distinguish itself anyway, and
+  counting would turn the first one red for a change in another file. An
+  interface is a class declared `interface`, or abstract with no concrete
+  instance member; `extends` counts as well as `implements`.
 - `require_notifier_suffix` (new `riverpod` bundle): a `Notifier`,
   `AsyncNotifier` or `StreamNotifier` ends in that word, and a class ending in
   one is that type. The longest suffix a name ends in decides. Riverpod's
