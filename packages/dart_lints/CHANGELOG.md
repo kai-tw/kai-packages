@@ -1,3 +1,18 @@
+## 0.6.1
+
+`avoid_vague_type_words` now checks only the **kind word** — the last one — so
+a forbidden word earlier in a name passes. `SessionManager` is still reported;
+`TaskManagerPage` and `ManagerId` are not.
+
+The rule reads a name as `<category words><kind word>` like the other naming
+rules, and only the kind word has to name a kind. Earlier words say *which*
+thing, and there a word like `Manager` is often a feature's own name — a
+`TaskManager` screen is a `TaskManagerPage`, a `Page`. Reporting it asked for
+a rename that made the name worse.
+
+Doc-comment examples in `public_class_names_its_file` are now invented names
+rather than ones that read as a particular application's. No behaviour change.
+
 ## 0.6.0
 
 **Naming rules.** A type's name should still say, away from its declaration,

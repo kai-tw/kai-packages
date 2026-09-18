@@ -8,14 +8,18 @@ import '../../lint_rule_base.dart';
 import 'name_words.dart';
 import 'scoped_word.dart';
 
-/// Forbids words that name no kind in a type's name — `Manager`, `Helper`,
-/// `Util` by default.
+/// Forbids words that name no kind as a type's kind word — `Manager`,
+/// `Helper`, `Util` by default.
 ///
 /// A type's last word says what kind of thing it is. These words say only
 /// that it does something, somewhere, so a `ReaderManager` could be a
-/// repository, a controller or a cache, and tends to become all three. The
-/// check is by whole word (see [NameWords]): `HelperText` is reported,
-/// `Helpers` and `Utility` are not unless listed.
+/// repository, a controller or a cache, and tends to become all three.
+///
+/// Only the kind word is checked (see [NameWords]), because that is the word
+/// that has to name a kind. Earlier words say *which* thing, and there a
+/// forbidden word is often a feature's own name: a `TaskManager` screen
+/// is a `TaskManagerPage`, a `Page`. The check is by whole word:
+/// `Helpers` and `Utility` are not `Helper` or `Util` unless listed.
 ///
 /// Some words are vague only for most types. [scopedWords] forbids a word
 /// except on a class that extends or implements one of the listed types — a
@@ -61,7 +65,7 @@ class AvoidVagueTypeWords extends ResolvedLintRule {
 
   @override
   String get description =>
-      'Type names must not contain '
+      'Type names must not end in '
       '${words.map((ScopedWord w) => w.word).join(' / ')}: words that name no '
       'kind.';
 
@@ -124,15 +128,15 @@ class _Visitor extends ResolvedLintVisitor {
 
   /// [element] is the declared class, when the declaration is one.
   void _check(Token name, InterfaceElement? element) {
-    final NameWords nameWords = NameWords(name.lexeme);
+    final String kind = NameWords(name.lexeme).kind;
     for (final ScopedWord scoped in words) {
-      if (!nameWords.contains(scoped.word) || _excused(scoped, element)) {
+      if (kind != scoped.word || _excused(scoped, element)) {
         continue;
       }
       report(
         ruleName: 'avoid_vague_type_words',
         message:
-            "${name.lexeme} contains '${scoped.word}', which names no kind of "
+            "${name.lexeme} ends in '${scoped.word}', which names no kind of "
             'thing here. Name what the type is — a repository, a controller, '
             'a formatter — so its last word says it.',
         offset: name.offset,
