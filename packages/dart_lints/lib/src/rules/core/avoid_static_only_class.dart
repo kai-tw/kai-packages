@@ -15,9 +15,9 @@ import '../../lint_rule_base.dart';
 /// one such member and every one of them is `static`.
 ///
 /// **A bare `abstract` class with no constructor at all is exempt**, not
-/// caught. `abstract final class CustomerFields { static const id = 'id';
+/// caught. `abstract final class ColumnKeys { static const id = 'id';
 /// }` is Effective Dart's own idiom for a non-instantiable namespace — the
-/// language already refuses `CustomerFields()`, so there is no workaround to
+/// language already refuses `ColumnKeys()`, so there is no workaround to
 /// close. The gap this rule closes is specifically the *redundant*
 /// workaround: a constructor written to block instantiation on a class that
 /// either could have been `abstract` instead, or already is and gained a

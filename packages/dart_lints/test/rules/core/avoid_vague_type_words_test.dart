@@ -28,7 +28,7 @@ class SyncService extends BackgroundService {}
 class DownloadService implements BackgroundService {}
 class LoginService {}
 mixin LocatorService {}
-class ServiceRequestData {}
+class ServiceLookupData {}
 ''';
 
 Future<Set<String>> _reported(AvoidVagueTypeWords rule, String source) async =>
@@ -94,6 +94,6 @@ void main() {
         <String, Object?>{'word': 'Data'},
       ],
     );
-    expect(await _reported(rule, _services), <String>{'ServiceRequestData'});
+    expect(await _reported(rule, _services), <String>{'ServiceLookupData'});
   });
 }

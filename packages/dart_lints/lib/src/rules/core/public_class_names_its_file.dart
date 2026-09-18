@@ -206,7 +206,7 @@ class _Visitor extends LintVisitor {
   }
 
   /// A family file holds one family: every public class must descend from the
-  /// same base, whether that base is declared here (`BookmarkException` and its
+  /// same base, whether that base is declared here (`CatalogException` and its
   /// subtypes) or imported (five siblings that all extend `AppException`).
   void _checkFamily(List<ClassDeclaration> classes) {
     final Set<String> declaredHere = classes
@@ -255,8 +255,8 @@ class _Visitor extends LintVisitor {
   /// this same file.
   ///
   /// The walk has to be transitive, not one hop. A `sealed` hierarchy nests —
-  /// `AppNotificationEvent` ← `BookImportNotificationEvent` ←
-  /// `BookImportSucceededNotificationEvent` — and Dart requires **every**
+  /// `AppNotificationEvent` ← `DataImportNotificationEvent` ←
+  /// `DataImportSucceededNotificationEvent` — and Dart requires **every**
   /// descendant to sit in the base's library, not just the direct children.
   /// A one-hop check therefore reports grandchildren as unowned siblings and
   /// tells the reader to move a class the compiler will not let them move.

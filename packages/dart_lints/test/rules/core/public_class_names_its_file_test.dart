@@ -35,8 +35,8 @@ void main() {
     test('[boundary] multi-word names snake-case at every word', () {
       expect(
         _lint(
-          'class ReaderGotoUseCase {}',
-          path: 'lib/reader_goto_use_case.dart',
+          'class ArchiveSearchUseCase {}',
+          path: 'lib/archive_search_use_case.dart',
         ),
         isEmpty,
       );
@@ -70,8 +70,8 @@ void main() {
       () {
         expect(
           _lint(
-            'class DownloaderManagerTaskListItemIcon {}',
-            path: 'lib/download_manager_task_list_item_icon.dart',
+            'class UploaderQueueItemIcon {}',
+            path: 'lib/upload_queue_item_icon.dart',
           ),
           hasLength(1),
         );
@@ -92,8 +92,8 @@ void main() {
     test('[partition] a name-prefixed companion is part of the contract', () {
       expect(
         _lint(
-          'class ReaderGotoUseCase {}\nclass ReaderGotoUseCaseParam {}',
-          path: 'lib/reader_goto_use_case.dart',
+          'class ArchiveSearchUseCase {}\nclass ArchiveSearchUseCaseParam {}',
+          path: 'lib/archive_search_use_case.dart',
         ),
         isEmpty,
       );
@@ -104,8 +104,8 @@ void main() {
       () {
         expect(
           _lint(
-            'sealed class Face {}\nclass PlaybackFace extends Face {}',
-            path: 'lib/face.dart',
+            'sealed class Shape {}\nclass RoundedShape extends Shape {}',
+            path: 'lib/shape.dart',
           ),
           isEmpty,
         );
@@ -119,9 +119,9 @@ void main() {
         expect(
           _lint('''
 sealed class AppNotificationEvent {}
-sealed class BookImportNotificationEvent extends AppNotificationEvent {}
-final class BookImportSucceededNotificationEvent
-    extends BookImportNotificationEvent {}
+sealed class DataImportNotificationEvent extends AppNotificationEvent {}
+final class DataImportSucceededNotificationEvent
+    extends DataImportNotificationEvent {}
 ''', path: 'lib/app_notification_event.dart'),
           isEmpty,
         );
@@ -134,11 +134,11 @@ final class BookImportSucceededNotificationEvent
       () {
         final List<LintViolation> found = _lint('''
 sealed class AppNotificationEvent {}
-sealed class BookImportNotificationEvent extends AppNotificationEvent {}
-final class TrashNoticeTarget extends Equatable {}
+sealed class DataImportNotificationEvent extends AppNotificationEvent {}
+final class QuotaNoticeTarget extends Equatable {}
 ''', path: 'lib/app_notification_event.dart');
         expect(found, hasLength(1));
-        expect(found.single.message, contains('TrashNoticeTarget'));
+        expect(found.single.message, contains('QuotaNoticeTarget'));
       },
     );
 
@@ -187,8 +187,8 @@ final class TrashNoticeTarget extends Equatable {}
     test('[partition] without the allowlist, WebView splits', () {
       expect(
         _lint(
-          'class ReaderCoreWebView {}',
-          path: 'lib/reader_core_webview.dart',
+          'class HelpCenterWebView {}',
+          path: 'lib/help_center_webview.dart',
         ),
         hasLength(1),
       );
@@ -197,8 +197,8 @@ final class TrashNoticeTarget extends Equatable {}
     test('[partition] with it, the compressed filename is the correct one', () {
       expect(
         _lint(
-          'class ReaderCoreWebView {}',
-          path: 'lib/reader_core_webview.dart',
+          'class HelpCenterWebView {}',
+          path: 'lib/help_center_webview.dart',
           acronyms: <String>['WebView'],
         ),
         isEmpty,
@@ -208,8 +208,8 @@ final class TrashNoticeTarget extends Equatable {}
     test('[boundary] the allowlist does not leak into unrelated names', () {
       expect(
         _lint(
-          'class ReaderCoreWebView {}',
-          path: 'lib/reader_core_web_view.dart',
+          'class HelpCenterWebView {}',
+          path: 'lib/help_center_web_view.dart',
           acronyms: <String>['WebView'],
         ),
         hasLength(1),
@@ -222,11 +222,11 @@ final class TrashNoticeTarget extends Equatable {}
       expect(
         _lint(
           '''
-abstract class BookmarkException extends AppException {}
-class BookmarkEntryNotFoundException extends BookmarkException {}
-class HighlightEntryNotFoundException extends BookmarkException {}
+abstract class CatalogException extends AppException {}
+class CatalogEntryNotFoundException extends CatalogException {}
+class CatalogLockedException extends CatalogException {}
 ''',
-          path: 'lib/bookmark_exceptions.dart',
+          path: 'lib/catalog_exceptions.dart',
           familyFileSuffixes: <String>['_exceptions'],
         ),
         isEmpty,
@@ -237,10 +237,10 @@ class HighlightEntryNotFoundException extends BookmarkException {}
       expect(
         _lint(
           '''
-class BookShareException extends AppException {}
-class BookDownloadException extends AppException {}
+class ReportShareException extends AppException {}
+class ReportExportException extends AppException {}
 ''',
-          path: 'lib/book_exceptions.dart',
+          path: 'lib/report_exceptions.dart',
           familyFileSuffixes: <String>['_exceptions'],
         ),
         isEmpty,
@@ -250,10 +250,10 @@ class BookDownloadException extends AppException {}
     test('[boundary] two unrelated families in one file still report', () {
       final List<LintViolation> found = _lint(
         '''
-class BookShareException extends AppException {}
+class ReportShareException extends AppException {}
 class WidgetGoneException extends FlutterError {}
 ''',
-        path: 'lib/book_exceptions.dart',
+        path: 'lib/report_exceptions.dart',
         familyFileSuffixes: <String>['_exceptions'],
       );
       expect(found, hasLength(1));
@@ -265,8 +265,8 @@ class WidgetGoneException extends FlutterError {}
       () {
         expect(
           _lint(
-            'class BookShareException extends AppException {}',
-            path: 'lib/book_exceptions.dart',
+            'class ReportShareException extends AppException {}',
+            path: 'lib/report_exceptions.dart',
           ),
           hasLength(1),
         );
