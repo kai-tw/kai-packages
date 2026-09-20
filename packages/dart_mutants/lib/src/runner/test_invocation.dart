@@ -145,12 +145,12 @@ class TestInvocation {
     for (final String arg in _command.arguments.skip(1)) {
       if (valueExpected || arg.startsWith('-')) {
         flags.add(arg);
-      } else if (FileSystemEntity.typeSync(p.join(root, arg)) !=
+      } else if (FileSystemEntity.typeSync(p.join(root, arg)) ==
           FileSystemEntityType.notFound) {
-        paths.add(arg);
-      } else {
         flags.add(arg);
         unrecognised.add(arg);
+      } else {
+        paths.add(arg);
       }
       valueExpected =
           !valueExpected && !arg.contains('=') && _valueOptions.contains(arg);

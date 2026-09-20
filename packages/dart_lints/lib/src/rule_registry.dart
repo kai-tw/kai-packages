@@ -36,6 +36,7 @@ import 'rules/core/avoid_void_async.dart';
 import 'rules/core/avoid_while_true.dart';
 import 'rules/core/failure_type_naming.dart';
 import 'rules/core/interface_implementation_naming.dart';
+import 'rules/core/prefer_positive_condition.dart';
 import 'rules/core/public_class_names_its_file.dart';
 import 'rules/core/sealed_family_naming.dart';
 import 'rules/flutter/avoid_badge_wrapping_button.dart';
@@ -252,6 +253,11 @@ class RuleRegistry {
       requiredOptions: <String>{'style'},
       create: (Map<String, Object?> o) =>
           InterfaceImplementationNaming(style: o['style'] as String),
+    ),
+    RuleDescriptor(
+      name: 'prefer_positive_condition',
+      bundle: 'core',
+      create: (Map<String, Object?> o) => PreferPositiveCondition(),
     ),
     RuleDescriptor(
       name: 'public_class_names_its_file',

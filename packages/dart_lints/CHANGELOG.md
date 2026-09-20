@@ -1,3 +1,22 @@
+## 0.7.0
+
+New rule: `prefer_positive_condition` (core bundle, on by default).
+
+A branch with **two** arms and a negated condition — `a != b ? x : y`, or an
+`if` with an `else` block — makes the reader hold an inversion across both arms,
+and the arm they attach to the comparison as written is the wrong one. Inverting
+the condition and swapping the arms costs nothing and removes the inversion.
+
+Three shapes it deliberately leaves alone. A single-armed guard
+(`if (!ready) return;`) has no second arm to mis-attach. `!= null` stays: it is
+the ordinary spelling of a null check, and `== null` with the arms swapped reads
+worse than what it replaced. An `else if` chain is a sequence rather than a
+pair, so a chain is reported only where one of its links genuinely has two arms.
+
+Run against this workspace it found one site — the argument splitter in
+`dart_mutants`, whose "not found" test carried both arms. It now tests
+`== FileSystemEntityType.notFound` and reads forward; behaviour is unchanged.
+
 ## 0.6.4
 
 `require_cubit_suffix` / `require_notifier_suffix` no longer check a
