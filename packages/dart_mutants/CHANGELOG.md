@@ -1,3 +1,30 @@
+## 0.3.0
+
+**How long the run will take, before and during it.** The plan line now
+reads as time too: every mutant at one baseline, divided over the workers.
+It is an upper bound — a mutant the compile-safety gate rejects runs no
+test, and a selected command runs a fraction of the suite — so every
+progress line carries a measured `left` beside its own elapsed time: the
+pace held since the first mutant, over the mutants still to come. `RunPlan`
+gains `workers`, `estimate` and `floor`; `MutantProgress` gains
+`projectedRemaining`; `MutationTestRunner` gains `runBudget`.
+
+**`--max-minutes <n>` stops a run that will not fit, scoring nothing.** A
+plan whose floor — every worker busy, nothing rejected, no selection — is
+already over the limit is refused before a file is written. Past that the
+measured pace is compared against it, once enough mutants have finished for
+that pace to mean anything — eight per worker, by `RunBudget`, which holds
+both the limit and that threshold and decides all of this on numbers alone.
+The run then stops between mutants with the tree restored. The new abort kind
+is `over-budget`.
+
+There is no dry-run mode to estimate against instead: the count and the
+pace both need the baseline, which is the run's own first step, so a
+counting pass would run the suite an extra time to learn what the run
+learns on the way past. The limit covers the mutants alone — the baseline,
+the coverage pass and the sandbox check are what make the estimate
+possible.
+
 ## 0.2.9
 
 **Under `--select-by-coverage`, a selected run gets a budget measured

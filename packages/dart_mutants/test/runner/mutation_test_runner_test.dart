@@ -11,6 +11,7 @@ import 'package:dart_mutants/src/runner/mutant_verdict.dart';
 import 'package:dart_mutants/src/runner/mutation_run_report.dart';
 import 'package:dart_mutants/src/runner/mutation_test_runner.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
+import 'package:dart_mutants/src/runner/run_budget.dart';
 import 'package:dart_mutants/src/runner/run_plan.dart';
 import 'package:dart_mutants/src/runner/run_stats.dart';
 import 'package:dart_mutants/src/runner/temp_space.dart';
@@ -1269,6 +1270,18 @@ void main() {
         expect(plan!.mutantCount, 4);
         expect(plan!.baseline, report.baselineDuration);
         expect(plan!.budget, report.mutantTimeout);
+        // One worker, so the estimate and the floor are one number: four
+        // mutants at a baseline each, with nothing running in parallel. It
+        // is an upper bound — these four ran selected, well under the full
+        // suite — which is why no verdict is taken from it.
+        expect(plan!.workers, 1);
+        expect(plan!.estimate, plan!.baseline * 4);
+        expect(plan!.floor, plan!.estimate);
+        // The projection covers the mutants still to come, so the last one
+        // has nothing left to project — a `~0s left` printed beside a
+        // finished run reads as one still going.
+        expect(progress.first.projectedRemaining, greaterThan(Duration.zero));
+        expect(progress.last.projectedRemaining, Duration.zero);
         expect(
           progress.map((MutantProgress m) => (m.completed, m.total)),
           <(int, int)>[(1, 4), (2, 4), (3, 4), (4, 4)],
@@ -1807,6 +1820,118 @@ void main() {
       },
     );
   });
+
+  group('maxRunTime', () {
+    // Ten mutants whose tests are cheap unmodified and a second each once
+    // mutated: the plan's floor (ten baselines) fits inside the limit, and
+    // the pace the run actually holds does not. That gap is the whole point
+    // — a floor is what nothing can beat, not what a run costs.
+    const int mutants = 4;
+    late Directory dir;
+    late Directory temps;
+
+    setUpAll(() async {
+      dir = await _fixturePackage();
+      temps = Directory.systemTemp.createTempSync('runner_temps_');
+      final StringBuffer lib = StringBuffer();
+      final StringBuffer checks = StringBuffer();
+      for (int i = 0; i < mutants; i++) {
+        lib.writeln("String pick$i(bool a) => a ? 'y$i' : 'n$i';");
+        // Each mutant's own run sleeps; the unmodified suite does not. So
+        // the plan's floor stays small while a mutant costs minutes, which
+        // is the gap the pace check exists to see. `sleep`, not
+        // `Future.delayed`: the cost has to land in the test process's wall
+        // time whatever the runner does with the isolate.
+        checks.writeln(
+          "  if (pick$i(true) != 'y$i') sleep(const Duration(seconds: 90));",
+        );
+      }
+      File(p.join(dir.path, 'lib', 'slow.dart')).writeAsStringSync('$lib');
+      File(p.join(dir.path, 'test', 'slow_test.dart')).writeAsStringSync('''
+import 'dart:io';
+
+import 'package:fixture/slow.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('every pick', () {
+$checks
+    expect(pick0(true), 'y0');
+  });
+}
+''');
+    });
+
+    tearDownAll(() {
+      dir.deleteSync(recursive: true);
+      temps.deleteSync(recursive: true);
+    });
+
+    Future<MutationRunReport> runWith(RunBudget budget) => MutationTestRunner(
+      testCommand: ProcessCommand('dart', <String>[
+        'test',
+      ], workingDirectory: dir.path),
+      compileSafetyGate: _realGate(dir),
+      operators: <MutationOperator>[TernarySwap()],
+      mutantTimeout: const Duration(seconds: 180),
+      baselineTimeout: const Duration(seconds: 180),
+      runBudget: budget,
+      tempSpace: TempSpace(root: temps),
+    ).run(<String>[p.join(dir.path, 'lib', 'slow.dart')]);
+
+    test(
+      '[decision] a plan whose floor is already over the limit is refused '
+      'before a single file is written',
+      () async {
+        final File target = File(p.join(dir.path, 'lib', 'slow.dart'));
+        final String source = target.readAsStringSync();
+
+        // Under any baseline any machine can produce, so this test takes
+        // the floor branch wherever it runs.
+        final MutationRunReport report = await runWith(
+          const RunBudget(Duration(milliseconds: 1)),
+        );
+
+        expect(report.abortKind, AbortKind.overBudget);
+        expect(report.abortReason, contains('Nothing was mutated'));
+        expect(report.files, isEmpty);
+        expect(target.readAsStringSync(), source);
+        // The baseline still ran — it is what the floor is measured from,
+        // and it is not counted against the limit.
+        expect(report.baselineDuration, isNotNull);
+      },
+      timeout: const Timeout(Duration(seconds: 180)),
+    );
+
+    test(
+      '[decision] a run the measured pace says will not fit stops between '
+      'mutants, scores none of them, and leaves the file as it was',
+      () async {
+        final File target = File(p.join(dir.path, 'lib', 'slow.dart'));
+        final String source = target.readAsStringSync();
+
+        // The limit is a minute: four green baselines fit inside it on any
+        // machine that can run this suite at all, so the floor check passes
+        // — and the first mutant alone sleeps past it, so the pace check is
+        // the only one that can stop this. Trusting the pace after one
+        // mutant keeps the test to that one sleep; `RunBudget`'s own tests
+        // cover what the shipped threshold does.
+        final MutationRunReport report = await runWith(
+          const RunBudget(Duration(minutes: 1), paceAfterPerWorker: 1),
+        );
+
+        expect(report.abortKind, AbortKind.overBudget);
+        expect(report.abortReason, contains('at the pace of its first'));
+        expect(report.files, isEmpty);
+        expect(target.readAsStringSync(), source);
+        // Stopped short: fewer mutants ran than the plan held, and the ones
+        // that did are in the statistics rather than in a score.
+        expect(report.stats!.mutants, hasLength(lessThan(mutants)));
+        expect(report.stats!.mutants, isNotEmpty);
+      },
+      timeout: const Timeout(Duration(seconds: 300)),
+    );
+  }, timeout: const Timeout(Duration(seconds: 600)));
 }
 
 /// A real in-process gate over [dir], closed when the current test ends.

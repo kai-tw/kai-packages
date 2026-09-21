@@ -21,12 +21,14 @@ import 'mutant_verdict.dart';
 import 'mutated_file_registry.dart';
 import 'mutation_run_report.dart';
 import 'process_command.dart';
+import 'run_budget.dart';
 import 'run_plan.dart';
 import 'run_stats.dart';
 import 'temp_space.dart';
 import 'test_compilation_cache.dart';
 import 'test_invocation.dart';
 import 'test_selection.dart';
+import 'wait_span.dart';
 import 'worker_sandbox.dart';
 
 /// Runs every operator's mutants against [testCommand], one at a time, and
@@ -54,6 +56,7 @@ class MutationTestRunner {
     TempSpace? tempSpace,
     this.workers = 1,
     this.onWorkersFallback,
+    this.runBudget,
   }) : tempSpace = tempSpace ?? TempSpace(),
        operators = operators ?? defaultOperators(),
        baselineTimeout = baselineTimeout ?? mutantTimeout * 10 {
@@ -152,6 +155,22 @@ class MutationTestRunner {
   /// with one, in place.
   final void Function(String reason)? onWorkersFallback;
 
+  /// How long the mutants may take, after which the run stops without
+  /// scoring anything. `null`, the default, lets a run take as long as it
+  /// takes.
+  ///
+  /// Two checks, because only one of them can be made before the cost is
+  /// paid. [RunPlan.floor] — every worker busy, nothing rejected, no
+  /// selection — is a bound nothing can beat, so a plan already over the
+  /// limit is refused before a single file is written. Past that the only
+  /// honest reading is the pace the run is holding, which [RunBudget]
+  /// decides when to trust; a run that will not fit stops between mutants.
+  ///
+  /// It buys what a dry run would and costs less: the count and the pace
+  /// both need the baseline, which is the run's own first step, so
+  /// measuring them separately would mean running the suite twice over.
+  final RunBudget? runBudget;
+
   /// The least time a mutant's test run gets before it is killed and scored
   /// as [MutantVerdict.timeout] instead of waited on forever. A slow suite
   /// gets more — see [baselineFactor].
@@ -192,6 +211,15 @@ class MutationTestRunner {
 
   int _completed = 0;
   int _planned = 0;
+
+  /// Wall time over the mutants alone — started when the first one does, so
+  /// the baseline, the coverage pass and the sandbox check stay out of the
+  /// pace they are used to project. See [runBudget].
+  final Stopwatch _mutantClock = Stopwatch();
+
+  /// Why the run stopped between mutants, once [runBudget] says the pace
+  /// will not fit it. Non-null means no lane takes another job.
+  String? _overBudget;
 
   /// The current run's — see [run].
   late RunStats _stats;
@@ -328,26 +356,26 @@ class MutationTestRunner {
         0,
         (int sum, _PlannedFile file) => sum + file.mutants.length,
       );
-      onPlan?.call(
-        RunPlan(
-          fileCount: targets.length,
-          mutantCount: _planned,
-          baseline: baseline,
-          budget: budget,
-        ),
+      // The lanes first, so the plan says how many workers the run actually
+      // got rather than how many were asked for — a run that fell back to
+      // one is a run that will take as long as one, and the plan is where
+      // anyone waiting reads that.
+      final List<_Lane> lanes = await _lanes(plan);
+      final RunPlan runPlan = RunPlan(
+        fileCount: targets.length,
+        mutantCount: _planned,
+        baseline: baseline,
+        budget: budget,
+        workers: lanes.length,
       );
-
-      final List<MutantResult> results = await _execute(
-        _jobsFor(plan, gates, selection),
-        await _lanes(plan),
-        budget,
-      );
-      return MutationRunReport.completed(
-        _fileReports(plan, results),
-        baselineDuration: baseline,
-        mutantTimeout: budget,
-        selectedByCoverage: selection != null,
-        stats: await _finished(stats),
+      onPlan?.call(runPlan);
+      return await _scoreOrRefuse(
+        plan: plan,
+        gates: gates,
+        selection: selection,
+        lanes: lanes,
+        runPlan: runPlan,
+        stats: stats,
       );
     } finally {
       // A safety net, not the primary mechanism — _runOne already restores
@@ -358,6 +386,58 @@ class MutationTestRunner {
       tempSpace.deleteAll();
       await _registry.disarm();
     }
+  }
+
+  /// Runs [runPlan]'s mutants and scores them — or, where [runBudget] says
+  /// the run will not fit, returns the refusal instead.
+  ///
+  /// Both refusals score nothing at all, and that is deliberate: part of a
+  /// file's mutants is not that file's score, and a number that looks like
+  /// one would be read as one.
+  Future<MutationRunReport> _scoreOrRefuse({
+    required List<_PlannedFile> plan,
+    required Map<String, CompileSafetyGate> gates,
+    required TestSelection? selection,
+    required List<_Lane> lanes,
+    required RunPlan runPlan,
+    required RunStats stats,
+  }) async {
+    if (runBudget case final RunBudget b when runPlan.floor > b.limit) {
+      return MutationRunReport.aborted(
+        stats: await _finished(stats),
+        AbortKind.overBudget,
+        'this run needs at least ${formatWait(runPlan.floor)} — '
+        '${runPlan.mutantCount} mutants at a ${runPlan.baseline.inSeconds}s '
+        'baseline across ${lanes.length} worker(s), and nothing makes it '
+        'faster than that — against a --max-minutes of '
+        '${formatWait(b.limit)}. '
+        'Nothing was mutated. Narrow the files, add workers, select by '
+        'coverage, or raise the limit.',
+        baselineDuration: runPlan.baseline,
+        mutantTimeout: runPlan.budget,
+      );
+    }
+    final List<MutantResult> results = await _execute(
+      _jobsFor(plan, gates, selection),
+      lanes,
+      runPlan.budget,
+    );
+    if (_overBudget case final String reason) {
+      return MutationRunReport.aborted(
+        stats: await _finished(stats),
+        AbortKind.overBudget,
+        reason,
+        baselineDuration: runPlan.baseline,
+        mutantTimeout: runPlan.budget,
+      );
+    }
+    return MutationRunReport.completed(
+      _fileReports(plan, results),
+      baselineDuration: runPlan.baseline,
+      mutantTimeout: runPlan.budget,
+      selectedByCoverage: selection != null,
+      stats: await _finished(stats),
+    );
   }
 
   /// The gate that can judge [filePath], asked while the file is still
@@ -573,6 +653,10 @@ class MutationTestRunner {
     Duration budget,
   ) async {
     _stats.workers = lanes.length;
+    _overBudget = null;
+    _mutantClock
+      ..reset()
+      ..start();
     final List<MutantResult?> results = List<MutantResult?>.filled(
       jobs.length,
       null,
@@ -580,7 +664,7 @@ class MutationTestRunner {
     int next = 0;
     bool stopping = false;
     Future<void> drain(_Lane lane) async {
-      while (!stopping && next < jobs.length) {
+      while (!stopping && _overBudget == null && next < jobs.length) {
         final int index = next++;
         results[index] = await _runTimed(jobs[index], lane, budget);
       }
@@ -612,15 +696,51 @@ class MutationTestRunner {
     final Duration elapsed = clock.elapsed;
     _stats.mutants.add(timing.build(result, elapsed));
     _completed++;
+    final Duration remaining = _projectedRemaining();
     onProgress?.call(
       MutantProgress(
         completed: _completed,
         total: _planned,
         result: result,
         elapsed: elapsed,
+        projectedRemaining: remaining,
       ),
     );
+    _checkPace(remaining);
     return result;
+  }
+
+  /// What the mutants still to come cost at the pace held so far — see
+  /// [MutantProgress.projectedRemaining].
+  Duration _projectedRemaining() => RunBudget.projectedRemaining(
+    elapsed: _mutantClock.elapsed,
+    completed: _completed,
+    planned: _planned,
+  );
+
+  /// Stops the run when [runBudget] cannot hold what is left of it — see
+  /// [RunBudget.exceeded] for when a pace is trusted at all.
+  void _checkPace(Duration remaining) {
+    if (runBudget case final RunBudget b when _overBudget == null) {
+      final Duration elapsed = _mutantClock.elapsed;
+      if (!b.exceeded(
+        elapsed: elapsed,
+        completed: _completed,
+        planned: _planned,
+        // What the run got, not what it asked for: a run that fell back to
+        // one worker sets its pace like one.
+        workers: _stats.workers ?? workers,
+      )) {
+        return;
+      }
+      _overBudget =
+          'at the pace of its first $_completed mutants this run needs about '
+          '${formatWait(elapsed + remaining)}, against a --max-minutes of '
+          '${formatWait(b.limit)}. It stopped after $_completed of '
+          '$_planned mutants and scored none of them: a score over part of a '
+          'file is not that file\'s score. Narrow the files, add workers, '
+          'select by coverage, or raise the limit.';
+    }
   }
 
   /// One report per file of [plan], from [results] in the same order the

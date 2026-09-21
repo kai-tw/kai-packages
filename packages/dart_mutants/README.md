@@ -25,14 +25,51 @@ mutant as it finishes, then the text report:
 
 ```text
 3 mutants in 1 file — baseline 4.1s, each mutant given at most 16.4s
-[1/3] detected lib/foo.dart:12:10 ternary_swap (3.9s)
-[2/3] invalid lib/foo.dart:18:5 statement_deletion (0.0s)
+at one baseline per mutant across 1 worker that is about 12s — an upper
+bound; the per-mutant `left` below measures the real pace
+[1/3] detected lib/foo.dart:12:10 ternary_swap (3.9s, ~8s left)
+[2/3] invalid lib/foo.dart:18:5 statement_deletion (0.0s, ~3s left)
 [3/3] undetected lib/foo.dart:30:12 condition_negation (4.2s)
 ```
 
 `--output` writes the JSON report to a file and leaves stdout to those lines.
 `--json` prints the JSON report to stdout instead, with no progress lines, so
 stdout parses as a whole.
+
+## How long it will take
+
+Two numbers, and the difference between them is the point.
+
+The plan's is arithmetic: every mutant costing one baseline, divided over
+the workers. It is an upper bound and usually a loose one — a mutant the
+compile-safety gate rejects runs no test at all, and `--select-by-coverage`
+runs a fraction of the suite per mutant. Nothing before the first mutant
+knows how much of either this run will get.
+
+The `left` on each progress line is measured: the wall time since the first
+mutant started, over the mutants finished in it, times the ones to come. It
+carries what the arithmetic cannot — what parallel workers actually win (two
+workers measured 17% faster, not twice as fast), what a selected command
+costs against the full one, how many candidates are rejected for free — and
+it moves as the run does.
+
+### `--max-minutes`: stop rather than find out
+
+`--max-minutes <n>` ends a run that will not fit, scoring nothing. The
+plan's floor — every worker busy, nothing rejected, no selection — is a
+figure nothing can beat, so a run already over it is refused before a file
+is written. Past that the measured pace is compared against the limit, once
+enough mutants have finished for it to mean anything — eight per worker, so
+that a stretch of free rejections cannot pass for the pace of the rest — and
+a run that will not fit stops between mutants with the tree restored.
+
+There is no dry-run mode, and this is why: both numbers need the baseline,
+which is the run's own first step. A separate counting pass would run the
+suite an extra time to learn what the run itself learns on the way past.
+
+The limit is on the mutants. The baseline, the coverage pass and the worker
+sandbox check come before the first one and are not counted against it —
+they are what makes any estimate possible.
 
 ## What it mutates
 
