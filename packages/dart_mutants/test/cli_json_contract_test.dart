@@ -339,6 +339,17 @@ void main() {
         lines[1],
         matches(
           RegExp(
+            r'^at one baseline per mutant across 1 worker that is about '
+            r'\d+[smh].* upper bound',
+          ),
+        ),
+      );
+      // The last mutant carries no `left`: nothing is left, and a `~0s left`
+      // on the final line reads as a run still going.
+      expect(
+        lines[2],
+        matches(
+          RegExp(
             r'^\[1/1\] undetected lib/uncovered\.dart:1:\d+ ternary_swap '
             r'\(\d+\.\ds\)$',
           ),
@@ -373,6 +384,60 @@ void main() {
           jsonDecode(File(out).readAsStringSync()) as Map<String, Object?>;
       expect(json['abortKind'], 'baseline-failed');
       expect(result.stdout, startsWith('aborted: '));
+    },
+  );
+
+  test(
+    '[decision] --max-minutes smaller than the plan stops the run before '
+    'anything is mutated, and says so in the report',
+    () async {
+      final Directory dir = await _fixtureWithOneUndetectedMutant();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final File target = File(p.join(dir.path, 'lib', 'uncovered.dart'));
+      final String source = target.readAsStringSync();
+      final String out = p.join(dir.path, 'mutation.json');
+
+      final ProcessResult result = await Process.run('dart', <String>[
+        'run',
+        _binPath,
+        '--test-command',
+        'dart test',
+        // Smaller than any real baseline, so the floor is over it whatever
+        // the machine is doing.
+        '--max-minutes',
+        '0.001',
+        '--output',
+        out,
+        'lib/uncovered.dart',
+      ], workingDirectory: dir.path);
+
+      expect(result.exitCode, 1);
+      final Map<String, Object?> json =
+          jsonDecode(File(out).readAsStringSync()) as Map<String, Object?>;
+      expect(json['abortKind'], 'over-budget');
+      expect(json['abortReason'], contains('Nothing was mutated'));
+      // A refusal that leaves a mutant behind would be the worst of both.
+      expect(target.readAsStringSync(), source);
+    },
+    timeout: const Timeout(Duration(seconds: 90)),
+  );
+
+  test(
+    '[error] --max-minutes that is not a positive number is a usage error, '
+    'exit 64, before anything runs',
+    () async {
+      final ProcessResult result = await Process.run('dart', <String>[
+        'run',
+        _binPath,
+        '--test-command',
+        'dart test',
+        '--max-minutes',
+        '0',
+        'lib/anything.dart',
+      ]);
+
+      expect(result.exitCode, 64);
+      expect(result.stderr, contains('--max-minutes must be a positive'));
     },
   );
 

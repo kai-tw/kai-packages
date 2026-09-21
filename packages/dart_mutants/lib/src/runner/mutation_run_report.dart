@@ -22,7 +22,13 @@ enum AbortKind {
   /// before it was mutated. The gate cannot read the file, or its own
   /// configuration rejects code that compiles, or the file does not compile
   /// and no test loads it; the run cannot tell which.
-  gateRejectsUnmodified('gate-rejects-unmodified');
+  gateRejectsUnmodified('gate-rejects-unmodified'),
+
+  /// The run would take longer than `MutationTestRunner.maxRunTime`, which
+  /// the caller set. Refused before the first mutant when the plan alone
+  /// says so, and otherwise stopped as soon as the pace the run held over
+  /// the mutants that did finish says so. Nothing is scored either way.
+  overBudget('over-budget');
 
   const AbortKind(this.wireName);
 

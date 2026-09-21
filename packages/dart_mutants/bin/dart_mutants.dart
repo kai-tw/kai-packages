@@ -10,6 +10,7 @@ import 'package:dart_mutants/src/runner/mutation_run_report.dart';
 import 'package:dart_mutants/src/runner/mutation_test_runner.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
 import 'package:dart_mutants/src/runner/run_plan.dart';
+import 'package:dart_mutants/src/runner/wait_span.dart';
 
 /// The CLI contract: a file list and a test command in, per-file
 /// total/undetected out. Which files to pass and what to do with the report
@@ -76,6 +77,17 @@ Future<void> main(List<String> arguments) async {
           'of the package made of links, a few megabytes each plus what the '
           'test command builds, and the package itself is never written to. '
           'Memory is the usual limit: each worker runs its own test command.',
+    )
+    ..addOption(
+      'max-minutes',
+      valueHelp: 'minutes',
+      help:
+          'Stop without scoring anything if the mutants would take longer '
+          'than this. Refused before the first one is written when the plan '
+          'alone is already over; otherwise stopped as soon as the pace the '
+          'run is holding says it will not fit. The baseline and the '
+          'coverage pass are what measure that pace, so they do not count '
+          'against it.',
     )
     ..addOption(
       'output',
@@ -147,6 +159,7 @@ Future<void> main(List<String> arguments) async {
       'mutant runs the full test command.',
     ),
     workers: int.parse(args['workers'] as String),
+    maxRunTime: _optionalMinutes(args['max-minutes'] as String?),
     onWorkersFallback: (String reason) => stderr.writeln(
       'note: --workers was not applied ($reason), so mutants run one at a '
       'time in the package itself.',
@@ -217,6 +230,7 @@ ArgResults? _parseAndValidate(List<String> arguments, ArgParser parser) {
 
   final String? optionError =
       _timeoutOptionError(args) ??
+      _maxMinutesOptionError(args) ??
       _outputOptionError(args) ??
       _workersOptionError(args);
   if (optionError != null) {
@@ -244,6 +258,16 @@ String? _timeoutOptionError(ArgResults args) {
     return '--baseline-factor must be a number, 0 or more';
   }
   return null;
+}
+
+/// What is wrong with --max-minutes, or `null`. Its own check rather than a
+/// fourth branch of [_timeoutOptionError]: those three bound one command
+/// each, this one bounds the whole run.
+String? _maxMinutesOptionError(ArgResults args) {
+  final String? maxMinutes = args['max-minutes'] as String?;
+  return maxMinutes != null && !_isPositiveNumber(maxMinutes)
+      ? '--max-minutes must be a positive number of minutes'
+      : null;
 }
 
 /// What is wrong with --output or --history that can be seen before the
@@ -326,8 +350,19 @@ bool _isPositiveSeconds(String value) {
   return seconds != null && seconds > 0;
 }
 
+/// Minutes take a fraction — half an hour of mutants is a plausible cap,
+/// and `--max-minutes 0.5` should mean it rather than be a usage error.
+bool _isPositiveNumber(String value) {
+  final double? number = double.tryParse(value);
+  return number != null && number.isFinite && number > 0;
+}
+
 Duration? _optionalSeconds(String? value) =>
     value == null ? null : Duration(seconds: int.parse(value));
+
+Duration? _optionalMinutes(String? value) => value == null
+    ? null
+    : Duration(milliseconds: (double.parse(value) * 60000).round());
 
 /// `4`, not `4.0`, in `--help`.
 String _formatFactor(double factor) => factor == factor.truncateToDouble()
@@ -358,6 +393,21 @@ void _printPlan(RunPlan plan) {
     '${_count(plan.fileCount, 'file')} — baseline '
     '${_formatSeconds(plan.baseline)}, ${_budgetPhrase(plan.budget)}',
   );
+  // Both ends, because one number alone would be read as the answer and
+  // neither is: the floor assumes every worker busy on a mutant that costs
+  // a full baseline, the top assumes one worker doing all of them. What the
+  // run actually costs depends on how many candidates the gate rejects for
+  // free and how much a selected command saves, and nothing knows that
+  // until mutants have run — which the `left` on each progress line then
+  // reports from measurement rather than assumption.
+  final String span = plan.workers > 1
+      ? '${formatWait(plan.floor)} to ${formatWait(plan.estimate)}'
+      : 'about ${formatWait(plan.estimate)}';
+  stdout.writeln(
+    'at one baseline per mutant across ${_count(plan.workers, 'worker')} '
+    'that is $span — an upper bound; the per-mutant `left` below measures '
+    'the real pace',
+  );
 }
 
 /// Nothing when [quiet]: under --json, stdout is the report's alone.
@@ -370,14 +420,17 @@ void Function(MutantProgress)? _progressPrinter({required bool quiet}) =>
 String _count(int n, String noun) => '$n $noun${n == 1 ? '' : 's'}';
 
 /// One line per mutant, `[completed/total] verdict path:line:column
-/// operator (elapsed)`, written as it finishes.
+/// operator (elapsed, ~left)`, written as it finishes.
 void _printProgress(MutantProgress progress) {
   final MutantResult r = progress.result;
   final String verdict = r.uncovered ? 'uncovered' : r.verdict.name;
+  final String left = progress.completed == progress.total
+      ? ''
+      : ', ~${formatWait(progress.projectedRemaining)} left';
   stdout.writeln(
     '[${progress.completed}/${progress.total}] $verdict '
     '${r.mutant.filePath}:${r.mutant.line}:${r.mutant.column} '
-    '${r.mutant.operatorName} (${_formatSeconds(progress.elapsed)})',
+    '${r.mutant.operatorName} (${_formatSeconds(progress.elapsed)}$left)',
   );
 }
 
