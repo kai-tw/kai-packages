@@ -1,6 +1,7 @@
 {
   "enabledPlugins": {
     "flutter-toolkit@kai-tw": true,
-    "reclaim-space@kai-tw": true
+    "reclaim-space@kai-tw": true,
+    "mother-tongue@kai-tw": true
   }
 }
