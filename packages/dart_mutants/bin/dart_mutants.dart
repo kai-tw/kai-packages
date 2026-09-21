@@ -9,6 +9,7 @@ import 'package:dart_mutants/src/runner/mutant_result.dart';
 import 'package:dart_mutants/src/runner/mutation_run_report.dart';
 import 'package:dart_mutants/src/runner/mutation_test_runner.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
+import 'package:dart_mutants/src/runner/run_budget.dart';
 import 'package:dart_mutants/src/runner/run_plan.dart';
 import 'package:dart_mutants/src/runner/wait_span.dart';
 
@@ -159,7 +160,7 @@ Future<void> main(List<String> arguments) async {
       'mutant runs the full test command.',
     ),
     workers: int.parse(args['workers'] as String),
-    maxRunTime: _optionalMinutes(args['max-minutes'] as String?),
+    runBudget: _optionalBudget(args['max-minutes'] as String?),
     onWorkersFallback: (String reason) => stderr.writeln(
       'note: --workers was not applied ($reason), so mutants run one at a '
       'time in the package itself.',
@@ -360,9 +361,11 @@ bool _isPositiveNumber(String value) {
 Duration? _optionalSeconds(String? value) =>
     value == null ? null : Duration(seconds: int.parse(value));
 
-Duration? _optionalMinutes(String? value) => value == null
+RunBudget? _optionalBudget(String? value) => value == null
     ? null
-    : Duration(milliseconds: (double.parse(value) * 60000).round());
+    : RunBudget(
+        Duration(milliseconds: (double.parse(value) * 60000).round()),
+      );
 
 /// `4`, not `4.0`, in `--help`.
 String _formatFactor(double factor) => factor == factor.truncateToDouble()

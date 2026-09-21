@@ -59,8 +59,9 @@ it moves as the run does.
 plan's floor — every worker busy, nothing rejected, no selection — is a
 figure nothing can beat, so a run already over it is refused before a file
 is written. Past that the measured pace is compared against the limit, once
-enough mutants have finished for it to mean anything, and a run that will
-not fit stops between mutants with the tree restored.
+enough mutants have finished for it to mean anything — eight per worker, so
+that a stretch of free rejections cannot pass for the pace of the rest — and
+a run that will not fit stops between mutants with the tree restored.
 
 There is no dry-run mode, and this is why: both numbers need the baseline,
 which is the run's own first step. A separate counting pass would run the

@@ -11,6 +11,7 @@ import 'package:dart_mutants/src/runner/mutant_verdict.dart';
 import 'package:dart_mutants/src/runner/mutation_run_report.dart';
 import 'package:dart_mutants/src/runner/mutation_test_runner.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
+import 'package:dart_mutants/src/runner/run_budget.dart';
 import 'package:dart_mutants/src/runner/run_plan.dart';
 import 'package:dart_mutants/src/runner/run_stats.dart';
 import 'package:dart_mutants/src/runner/temp_space.dart';
@@ -1825,15 +1826,9 @@ void main() {
     // mutated: the plan's floor (ten baselines) fits inside the limit, and
     // the pace the run actually holds does not. That gap is the whole point
     // — a floor is what nothing can beat, not what a run costs.
-    const int mutants = 10;
+    const int mutants = 4;
     late Directory dir;
     late Directory temps;
-
-    /// The fixture's own green suite, timed here so the limits below can be
-    /// placed relative to it. A limit written as a constant would sit above
-    /// the floor on one machine and below it on a slower one, and the test
-    /// would then pass through the branch it was not written for.
-    late Duration baseline;
 
     setUpAll(() async {
       dir = await _fixturePackage();
@@ -1842,10 +1837,13 @@ void main() {
       final StringBuffer checks = StringBuffer();
       for (int i = 0; i < mutants; i++) {
         lib.writeln("String pick$i(bool a) => a ? 'y$i' : 'n$i';");
-        // sleep, not Future.delayed: the cost has to land in the test
-        // process's wall time whatever the runner does with the isolate.
+        // Each mutant's own run sleeps; the unmodified suite does not. So
+        // the plan's floor stays small while a mutant costs minutes, which
+        // is the gap the pace check exists to see. `sleep`, not
+        // `Future.delayed`: the cost has to land in the test process's wall
+        // time whatever the runner does with the isolate.
         checks.writeln(
-          "  if (pick$i(true) != 'y$i') sleep(const Duration(seconds: 6));",
+          "  if (pick$i(true) != 'y$i') sleep(const Duration(seconds: 90));",
         );
       }
       File(p.join(dir.path, 'lib', 'slow.dart')).writeAsStringSync('$lib');
@@ -1862,11 +1860,6 @@ $checks
   });
 }
 ''');
-      final Stopwatch clock = Stopwatch()..start();
-      await Process.run('dart', <String>[
-        'test',
-      ], workingDirectory: dir.path);
-      baseline = clock.elapsed;
     });
 
     tearDownAll(() {
@@ -1874,15 +1867,15 @@ $checks
       temps.deleteSync(recursive: true);
     });
 
-    Future<MutationRunReport> runWith(Duration limit) => MutationTestRunner(
+    Future<MutationRunReport> runWith(RunBudget budget) => MutationTestRunner(
       testCommand: ProcessCommand('dart', <String>[
         'test',
       ], workingDirectory: dir.path),
       compileSafetyGate: _realGate(dir),
       operators: <MutationOperator>[TernarySwap()],
-      mutantTimeout: const Duration(seconds: 60),
-      baselineTimeout: const Duration(seconds: 120),
-      maxRunTime: limit,
+      mutantTimeout: const Duration(seconds: 180),
+      baselineTimeout: const Duration(seconds: 180),
+      runBudget: budget,
       tempSpace: TempSpace(root: temps),
     ).run(<String>[p.join(dir.path, 'lib', 'slow.dart')]);
 
@@ -1893,8 +1886,10 @@ $checks
         final File target = File(p.join(dir.path, 'lib', 'slow.dart'));
         final String source = target.readAsStringSync();
 
+        // Under any baseline any machine can produce, so this test takes
+        // the floor branch wherever it runs.
         final MutationRunReport report = await runWith(
-          const Duration(milliseconds: 1),
+          const RunBudget(Duration(milliseconds: 1)),
         );
 
         expect(report.abortKind, AbortKind.overBudget);
@@ -1905,7 +1900,7 @@ $checks
         // and it is not counted against the limit.
         expect(report.baselineDuration, isNotNull);
       },
-      timeout: const Timeout(Duration(seconds: 120)),
+      timeout: const Timeout(Duration(seconds: 180)),
     );
 
     test(
@@ -1915,10 +1910,15 @@ $checks
         final File target = File(p.join(dir.path, 'lib', 'slow.dart'));
         final String source = target.readAsStringSync();
 
-        // Above the floor — ten baselines — and below what ten mutants
-        // costing a baseline plus six seconds each come to, so the floor
-        // check cannot catch this one and only the pace can.
-        final MutationRunReport report = await runWith(baseline * 12);
+        // The limit is a minute: four green baselines fit inside it on any
+        // machine that can run this suite at all, so the floor check passes
+        // — and the first mutant alone sleeps past it, so the pace check is
+        // the only one that can stop this. Trusting the pace after one
+        // mutant keeps the test to that one sleep; `RunBudget`'s own tests
+        // cover what the shipped threshold does.
+        final MutationRunReport report = await runWith(
+          const RunBudget(Duration(minutes: 1), paceAfterPerWorker: 1),
+        );
 
         expect(report.abortKind, AbortKind.overBudget);
         expect(report.abortReason, contains('at the pace of its first'));
@@ -1929,9 +1929,9 @@ $checks
         expect(report.stats!.mutants, hasLength(lessThan(mutants)));
         expect(report.stats!.mutants, isNotEmpty);
       },
-      timeout: const Timeout(Duration(seconds: 180)),
+      timeout: const Timeout(Duration(seconds: 300)),
     );
-  }, timeout: const Timeout(Duration(seconds: 300)));
+  }, timeout: const Timeout(Duration(seconds: 600)));
 }
 
 /// A real in-process gate over [dir], closed when the current test ends.
