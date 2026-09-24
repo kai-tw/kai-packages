@@ -73,9 +73,13 @@ class TestSelection {
 /// on. `dart test` reports per test file from a single run; `flutter test`
 /// writes one combined report per run, so it gets one run per test file.
 ///
+/// A run that fails is run once more before the pass gives up: under
+/// `flutter test` the pass is one run per test file, so one file that fails
+/// once — and passes when run again — would otherwise refuse the whole
+/// selection after hours of pass.
+///
 /// Returns `null`, with the reason passed to [onFailure], when the pass
-/// cannot give a trustworthy answer — the caller then runs every mutant
-/// against the full command, which is always sound, only slower.
+/// cannot give a trustworthy answer.
 ///
 /// The reports go to a directory from [temps], deleted before this returns;
 /// the runner passes its own, so an interrupt deletes it too.
@@ -239,21 +243,28 @@ Future<String?> _collectDart(
   CoverageMapBuilder builder,
   Duration timeout,
 ) async {
-  final bool scoped = !_importsLibByPath(invocation.root, testFiles);
-  int? exit = await invocation
-      .withTestFiles(
-        testFiles,
-        extra: <String>[
-          '--coverage=${out.path}',
-          if (scoped) '--coverage-package=^$packageName\$',
-        ],
-      )
-      .run(timeout: timeout);
-  if (scoped && exit == 64) {
-    exit = await invocation
-        .withTestFiles(testFiles, extra: <String>['--coverage=${out.path}'])
+  bool scoped = !_importsLibByPath(invocation.root, testFiles);
+  Future<int?> attempt() async {
+    final int? exit = await invocation
+        .withTestFiles(
+          testFiles,
+          extra: <String>[
+            '--coverage=${out.path}',
+            if (scoped) '--coverage-package=^$packageName\$',
+          ],
+        )
         .run(timeout: timeout);
+    if (scoped && exit == 64) {
+      scoped = false;
+      return attempt();
+    }
+    return exit;
   }
+
+  final int? exit = await _retriedOnce(
+    attempt,
+    failed: (int? exit) => exit != 0,
+  );
   if (exit != 0) {
     return _failed(exit, 'dart test --coverage');
   }
@@ -290,12 +301,16 @@ Future<String?> _collectFlutter(
 ) async {
   for (int i = 0; i < testFiles.length; i++) {
     final File lcov = File(p.join(out.path, '$i.info'));
-    final int? exit = await invocation
-        .withTestFiles(
-          <String>[testFiles[i]],
-          extra: <String>['--coverage', '--coverage-path=${lcov.path}'],
-        )
-        .run(timeout: timeout);
+    final int? exit = await _retriedOnce(
+      () => invocation
+          .withTestFiles(
+            <String>[testFiles[i]],
+            extra: <String>['--coverage', '--coverage-path=${lcov.path}'],
+          )
+          .run(timeout: timeout),
+      failed: (int? exit) =>
+          exit != _noTestsRan && (exit != 0 || !lcov.existsSync()),
+    );
     if (exit == _noTestsRan) {
       // Declares no test, or none the command's filters keep: it cannot
       // fail a test in the full command either, so it reaches nothing.
@@ -312,10 +327,20 @@ Future<String?> _collectFlutter(
 /// `dart test` and `flutter test` both exit with this when no test ran.
 const int _noTestsRan = 79;
 
+/// [run], and [run] again when [failed] says the first one failed.
+Future<int?> _retriedOnce(
+  Future<int?> Function() run, {
+  required bool Function(int? exit) failed,
+}) async {
+  final int? exit = await run();
+  return failed(exit) ? run() : exit;
+}
+
+/// Why a run failed twice — see [_retriedOnce].
 String _failed(int? exit, String what) => exit == null
-    ? '$what did not finish within the baseline timeout — raise '
+    ? '$what did not finish within the baseline timeout, twice — raise '
           '--baseline-timeout if the suite is merely slow with coverage on'
-    : '$what exited $exit';
+    : '$what failed twice (exit $exit)';
 
 String? _packageName(String root) {
   final File pubspec = File(p.join(root, 'pubspec.yaml'));

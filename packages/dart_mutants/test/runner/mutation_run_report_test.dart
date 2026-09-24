@@ -67,6 +67,7 @@ void main() {
             'baselineFailed': 'baseline-failed',
             'gateRejectsUnmodified': 'gate-rejects-unmodified',
             'overBudget': 'over-budget',
+            'selectionUnavailable': 'selection-unavailable',
           },
         );
       },

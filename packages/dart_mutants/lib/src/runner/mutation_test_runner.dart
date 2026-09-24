@@ -50,7 +50,6 @@ class MutationTestRunner {
     this.baselineFactor = defaultBaselineFactor,
     Duration? baselineTimeout,
     this.selectByCoverage = false,
-    this.onSelectionFallback,
     this.onPlan,
     this.onProgress,
     TempSpace? tempSpace,
@@ -118,12 +117,9 @@ class MutationTestRunner {
   /// Needs a `dart test …` or `flutter test …` [testCommand] whose test
   /// files this package can list the same way the runner does. Anything
   /// else — see `collectCoverage` for every refusal — or a coverage pass that
-  /// fails, runs every mutant against the full command and says so through
-  /// [onSelectionFallback].
+  /// fails aborts the run as [AbortKind.selectionUnavailable], before the
+  /// first mutant.
   final bool selectByCoverage;
-
-  /// Called with the reason coverage selection was asked for and not used.
-  final void Function(String reason)? onSelectionFallback;
 
   /// Called once, before the first mutant runs, with what the run holds.
   final void Function(RunPlan plan)? onPlan;
@@ -220,6 +216,10 @@ class MutationTestRunner {
   /// Why the run stopped between mutants, once [runBudget] says the pace
   /// will not fit it. Non-null means no lane takes another job.
   String? _overBudget;
+
+  /// Why [selectByCoverage] could not be applied, once the coverage pass
+  /// says so. Non-null means the run aborts before the first mutant.
+  String? _selectionUnavailable;
 
   /// The current run's — see [run].
   late RunStats _stats;
@@ -350,6 +350,18 @@ class MutationTestRunner {
       stats.gateCheck = gateClock.elapsed;
 
       final TestSelection? selection = await _selection();
+      if (_selectionUnavailable case final String unavailable) {
+        return MutationRunReport.aborted(
+          stats: await _finished(stats),
+          AbortKind.selectionUnavailable,
+          '--select-by-coverage cannot be applied: $unavailable. No mutant '
+          'has run. Fix that, or run without --select-by-coverage to score '
+          'every mutant against the full test command — one baseline per '
+          'mutant.',
+          baselineDuration: baseline,
+          mutantTimeout: budget,
+        );
+      }
 
       _completed = 0;
       _planned = plan.fold(
@@ -455,10 +467,11 @@ class MutationTestRunner {
   }
 
   /// The coverage pass, run once after the baseline when [selectByCoverage]
-  /// asks for it. `null` when it does not, and — with the reason reported —
-  /// when the test command cannot be taken apart or the pass fails; every
-  /// mutant then runs the full command.
+  /// asks for it. `null` when it does not, and when the test command cannot
+  /// be taken apart or the pass fails — those two with the reason in
+  /// [_selectionUnavailable].
   Future<TestSelection?> _selection() async {
+    _selectionUnavailable = null;
     if (!selectByCoverage) {
       return null;
     }
@@ -473,16 +486,15 @@ class MutationTestRunner {
   Future<TestSelection?> _collectSelection() async {
     final TestInvocation? invocation = TestInvocation.parse(testCommand);
     if (invocation == null) {
-      onSelectionFallback?.call(
-        'the test command is not `dart test …` or `flutter test …`',
-      );
+      _selectionUnavailable =
+          'the test command is not `dart test …` or `flutter test …`';
       return null;
     }
     _testCache.clear();
     return collectCoverage(
       invocation,
       timeout: baselineTimeout,
-      onFailure: (String reason) => onSelectionFallback?.call(reason),
+      onFailure: (String reason) => _selectionUnavailable = reason,
       temps: tempSpace,
     );
   }
