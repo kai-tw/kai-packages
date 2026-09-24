@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'temp_space.dart';
+
 /// One external command this package shells out to — the project's own test
 /// command (`flutter test test/foo_test.dart`) or its analyzer
 /// (`dart analyze` / `flutter analyze`). Neither is fixed: a Flutter package
@@ -33,6 +35,10 @@ class ProcessCommand {
   /// is the only thing outside this class that ever needs to act on it.
   static Set<int> trackedPidsForTest() => Set<int>.of(_running);
 
+  /// Where [run] makes each child's own temporary directory. Replaceable so
+  /// a test can point it somewhere it can inspect.
+  static TempSpace temps = TempSpace();
+
   /// Runs the command to completion and returns its exit code, or `null` if
   /// it did not finish within [timeout].
   ///
@@ -48,11 +54,33 @@ class ProcessCommand {
   ///
   /// The kill goes to the whole process **tree**, not the child — see
   /// [killTree] for the leak that taught this.
+  ///
+  /// The child gets a temporary directory of its own (`TMPDIR`, `TMP` and
+  /// `TEMP`), deleted when it exits or is killed. `flutter test` makes a
+  /// `flutter_tools.*` directory there on every invocation and does not
+  /// always remove it, and a run makes one invocation per mutant — measured
+  /// on one host, 111 left behind at about 270 MB each, which filled the disk
+  /// before the run could write its report. Whatever the child leaves, this
+  /// directory takes with it.
   Future<int?> run({Duration? timeout}) async {
+    final Directory tmp = temps.create('child');
+    try {
+      return await _runIn(tmp, timeout);
+    } finally {
+      temps.delete(tmp);
+    }
+  }
+
+  Future<int?> _runIn(Directory tmp, Duration? timeout) async {
     final Process process = await Process.start(
       executable,
       arguments,
       workingDirectory: workingDirectory,
+      environment: <String, String>{
+        'TMPDIR': tmp.path,
+        'TMP': tmp.path,
+        'TEMP': tmp.path,
+      },
     );
     _running.add(process.pid);
     // The child's own output is not this package's concern, and an unread
@@ -162,7 +190,8 @@ class ProcessCommand {
     }
   }
 
-  /// `SIGKILL`s the tree under every child still running.
+  /// `SIGKILL`s the tree under every child still running, then deletes their
+  /// temporary directories.
   ///
   /// Synchronous on purpose: its caller is a signal handler that ends in
   /// `exit()`, and `exit()` does not wait for pending futures — an async
@@ -173,6 +202,7 @@ class ProcessCommand {
       killTree(pid);
     }
     _running.clear();
+    temps.deleteAll();
   }
 
   /// Every pid descended from [rootPid], breadth-first — so the result lists
