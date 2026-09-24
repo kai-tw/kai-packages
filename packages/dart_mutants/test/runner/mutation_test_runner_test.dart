@@ -853,7 +853,6 @@ void main() {
   group('selecting tests by coverage', () {
     late Directory dir;
     late MutationRunReport report;
-    final List<String> fallbacks = <String>[];
 
     tearDownAll(() => dir.deleteSync(recursive: true));
 
@@ -871,7 +870,6 @@ void main() {
             mutantTimeout: const Duration(seconds: 10),
             baselineFactor: 0,
             selectByCoverage: true,
-            onSelectionFallback: fallbacks.add,
           ).run(<String>[
             p.join(dir.path, 'lib', 'detected.dart'),
             p.join(dir.path, 'lib', 'undetected.dart'),
@@ -882,7 +880,7 @@ void main() {
     });
 
     test('[partition] is applied, and says so in the report', () {
-      expect(fallbacks, isEmpty);
+      expect(report.abortKind, isNull);
       expect(report.selectedByCoverage, isTrue);
     });
 
@@ -1523,39 +1521,34 @@ void main() {
 
   group('selecting tests by coverage, when it cannot be done', () {
     test(
-      '[error] a test command that is not dart test or flutter test runs '
-      'every mutant in full, reports why, and says so in the report',
+      '[error] a test command that is not dart test or flutter test aborts '
+      'the run before any mutant, rather than run every mutant in full',
       () async {
         final Directory dir = await _fixturePackage();
         addTearDown(() => dir.deleteSync(recursive: true));
-        final List<String> fallbacks = <String>[];
-
-        final MutationRunReport report =
-            await MutationTestRunner(
-              testCommand: ProcessCommand('sh', <String>[
-                '-c',
-                'dart test',
-              ], workingDirectory: dir.path),
-              compileSafetyGate: _realGate(dir),
-              mutantTimeout: const Duration(seconds: 10),
-              baselineFactor: 0,
-              selectByCoverage: true,
-              onSelectionFallback: fallbacks.add,
-            ).run(<String>[
-              p.join(dir.path, 'lib', 'detected_and_undetected.dart'),
-            ]);
-
-        expect(report.selectedByCoverage, isFalse);
-        expect(fallbacks.single, contains('not `dart test'));
-        final FileMutationReport f = _reportFor(
-          report,
+        final String target = p.join(
+          dir.path,
+          'lib',
           'detected_and_undetected.dart',
         );
-        expect(
-          <int>[f.detected, f.undetected, f.uncovered],
-          <int>[1, 1, 0],
-          reason: 'same verdicts as a selected run, none of them uncovered',
-        );
+        final String before = File(target).readAsStringSync();
+
+        final MutationRunReport report = await MutationTestRunner(
+          testCommand: ProcessCommand('sh', <String>[
+            '-c',
+            'dart test',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: _realGate(dir),
+          mutantTimeout: const Duration(seconds: 10),
+          baselineFactor: 0,
+          selectByCoverage: true,
+        ).run(<String>[target]);
+
+        expect(report.abortKind, AbortKind.selectionUnavailable);
+        expect(report.abortReason, contains('not `dart test'));
+        expect(report.files, isEmpty);
+        expect(report.stats!.mutants, isEmpty, reason: 'no mutant ran');
+        expect(File(target).readAsStringSync(), before);
       },
     );
   });

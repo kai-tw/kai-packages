@@ -28,7 +28,14 @@ enum AbortKind {
   /// the caller set. Refused before the first mutant when the plan alone
   /// says so, and otherwise stopped as soon as the pace the run held over
   /// the mutants that did finish says so. Nothing is scored either way.
-  overBudget('over-budget');
+  overBudget('over-budget'),
+
+  /// `MutationTestRunner.selectByCoverage` was asked for and cannot be
+  /// honoured: the test command is one the coverage pass refuses, or the
+  /// pass itself failed. Refused after the coverage pass, before the first
+  /// mutant — every mutant against the full command instead would be a run
+  /// the caller did not ask for, many times longer than the one they did.
+  selectionUnavailable('selection-unavailable');
 
   const AbortKind(this.wireName);
 
@@ -59,9 +66,8 @@ class MutationRunReport {
        abortReason = null;
 
   /// Whether each mutant ran only the test files that cover it. `false` on a
-  /// completed run that ran the full test command for every mutant — which
-  /// includes a run that asked for coverage selection and fell back, so a
-  /// caller can tell the two apart. `null` on an aborted run.
+  /// completed run that did not ask for coverage selection; a run that asked
+  /// and could not have it aborts instead. `null` on an aborted run.
   final bool? selectedByCoverage;
 
   /// How long the test command took against unmodified code, or `null` when

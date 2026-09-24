@@ -1,3 +1,21 @@
+## 0.4.0
+
+**`--select-by-coverage` that cannot be applied stops the run.** A test
+command the coverage pass refuses, or a pass that fails, used to send every
+mutant through the full test command and go on, with one note on stderr. On
+a large suite that is a run many times longer than the one asked for —
+measured, 41 of 831 mutants in over four hours. The run now aborts after the
+coverage pass, before the first mutant, with the new abort kind
+`selection-unavailable` and the reason. `onSelectionFallback` is removed:
+there is no fallback left to report.
+
+**A coverage run that fails is run once more.** Under `flutter test` the
+pass is one run per test file; on one suite of 926 files, two passes each
+failed on a different file, and each of those files passed three times out
+of three when run again on its own. One failure in hundreds of runs no
+longer refuses the whole selection. A file that fails twice still does, and
+the reason says so.
+
 ## 0.3.1
 
 **Every child process gets a temporary directory of its own, deleted when

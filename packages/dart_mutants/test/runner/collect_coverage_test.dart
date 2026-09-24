@@ -244,6 +244,64 @@ exit 0
         });
       },
     );
+
+    // A flutter test that fails b_test.dart its first [failures] times, and
+    // otherwise writes one lcov for whatever file it was given. The count is
+    // kept in the package: every child gets a temp dir of its own.
+    String flutterFailingB(int failures) => _fake('flutter', '''
+out=""; file=""
+for a in "\$@"; do
+  case "\$a" in
+    --coverage-path=*) out="\${a#--coverage-path=}" ;;
+    test/*) file="\$a" ;;
+  esac
+done
+if [ "\$file" = "test/b_test.dart" ]; then
+  n=\$(cat "${root.path}/.b_runs" 2>/dev/null || echo 0)
+  echo \$((n + 1)) > "${root.path}/.b_runs"
+  [ "\$n" -lt $failures ] && exit 1
+fi
+printf 'SF:lib/pkg.dart\\nDA:1,3\\nend_of_record\\n' > "\$out"
+exit 0
+''');
+
+    test(
+      '[boundary] a test file that fails once and passes when run again is '
+      'kept, rather than refusing the whole selection',
+      () async {
+        final (TestSelection? selection, List<String> reasons) = await _collect(
+          root,
+          flutterFailingB(1),
+          <String>['test'],
+        );
+
+        expect(reasons, isEmpty);
+        expect(selection!.map.testsFor('lib/pkg.dart', 1, 1), <String>{
+          'test/a_test.dart',
+          'test/b_test.dart',
+        });
+      },
+    );
+
+    test(
+      '[boundary] a test file that fails twice refuses the selection, and '
+      'says it was tried twice',
+      () async {
+        final (TestSelection? selection, List<String> reasons) = await _collect(
+          root,
+          flutterFailingB(2),
+          <String>['test'],
+        );
+
+        expect(selection, isNull);
+        expect(reasons.single, contains('test/b_test.dart failed twice'));
+        expect(
+          File(p.join(root.path, '.b_runs')).readAsStringSync().trim(),
+          '2',
+          reason: 'retried once, not more',
+        );
+      },
+    );
   });
 
   test(

@@ -66,8 +66,9 @@ Future<void> main(List<String> arguments) async {
           'only the test files that enter the function it is in, and score a '
           'mutant in a function no test enters as undetected (marked '
           'uncovered) without running anything. Needs a "dart test ..." or '
-          '"flutter test ..." --test-command; otherwise every mutant runs the '
-          'full command.',
+          '"flutter test ..." --test-command; a command the coverage pass '
+          'refuses, or a pass that fails, aborts the run before the first '
+          'mutant (abortKind selection-unavailable).',
     )
     ..addOption(
       'workers',
@@ -155,10 +156,6 @@ Future<void> main(List<String> arguments) async {
     baselineFactor: double.parse(args['baseline-factor'] as String),
     baselineTimeout: _optionalSeconds(args['baseline-timeout'] as String?),
     selectByCoverage: args['select-by-coverage'] as bool,
-    onSelectionFallback: (String reason) => stderr.writeln(
-      'note: --select-by-coverage was not applied ($reason), so every '
-      'mutant runs the full test command.',
-    ),
     workers: int.parse(args['workers'] as String),
     runBudget: _optionalBudget(args['max-minutes'] as String?),
     onWorkersFallback: (String reason) => stderr.writeln(

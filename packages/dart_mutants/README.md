@@ -344,9 +344,12 @@ other than the VM, or carries an argument it cannot place (such as
 those could make the coverage pass see different tests than the full
 command runs. `flutter test` is also refused when a test imports `lib/` by
 relative path, since its coverage drops that copy of the file; `dart test`
-handles it by collecting coverage unfiltered. A refusal, or a pass that
-fails, runs every mutant against the full command, with a note on stderr,
-and the report says `selectedByCoverage: false`. Under `flutter test`, a
+handles it by collecting coverage unfiltered. A run in the pass that fails
+is run once more before the pass gives up. A refusal, or a pass that still
+fails, aborts the run before the first mutant, as `selection-unavailable`,
+rather than run every mutant against the full command: on a large suite
+that is a run many times longer than the one asked for — measured, 41 of
+831 mutants in over four hours. Under `flutter test`, a
 file containing `coverage:ignore` comments also runs its mutants in full:
 those comments delete lines from the report, and can delete a function's
 entry.
@@ -547,7 +550,8 @@ real CLI binary, not just the internal report types:
   only behaviour that lets a caller use its own paths as lookup keys without
   this package deciding what a path should look like.
 - **An aborted run says which kind of abort it was, in `abortKind`** —
-  `baseline-timeout`, `baseline-failed` or `gate-rejects-unmodified`. Branch
+  `baseline-timeout`, `baseline-failed`, `gate-rejects-unmodified`,
+  `over-budget` or `selection-unavailable`. Branch
   on that, never on `abortReason`, whose wording is for people and is free
   to change. The kinds call for opposite responses — a red suite needs
   fixing, a slow one needs a bigger `--baseline-timeout`, a rejected file needs a look at
@@ -570,8 +574,8 @@ real CLI binary, not just the internal report types:
   an undetected mutant in a function no test enters carries
   `uncovered: true`, and each file counts them in `uncovered`, a subset of
   `undetected` — the score is unchanged. `selectedByCoverage` on every
-  completed run says whether selection actually happened, so a run that
-  asked for it and fell back cannot pass for one that did.
+  completed run says whether selection happened; a run that asked for it
+  and could not have it aborts instead of completing without it.
 
 ## Known limitations
 
