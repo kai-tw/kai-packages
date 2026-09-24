@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dart_mutants/src/runner/process_command.dart';
+import 'package:dart_mutants/src/runner/temp_space.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -496,6 +497,64 @@ void main() {
       expect(table, isEmpty);
       expect(err.text.toString(), contains('no `ps` on this platform'));
     });
+  });
+
+  group('each child gets a temporary directory that goes when it does', () {
+    // The defect these guard: `flutter test` leaves a `flutter_tools.*`
+    // directory in the system temp dir, one run makes an invocation per
+    // mutant, and 111 of them at ~270 MB each filled a host's disk.
+    late Directory root;
+    late Directory out;
+    final TempSpace original = ProcessCommand.temps;
+
+    setUp(() {
+      root = Directory.systemTemp.createTempSync('pc_tmp_root_');
+      out = Directory.systemTemp.createTempSync('pc_tmp_out_');
+      ProcessCommand.temps = TempSpace(root: root);
+    });
+    tearDown(() {
+      ProcessCommand.temps = original;
+      root.deleteSync(recursive: true);
+      out.deleteSync(recursive: true);
+    });
+
+    // Records the child's TMPDIR, then leaves a directory in it the way
+    // `flutter test` does.
+    String leaveBehind(String record) =>
+        'echo "\$TMPDIR" > "$record"; mkdir "\$TMPDIR/flutter_tools.x"';
+
+    test(
+      '[partition] a child that exits normally leaves nothing behind',
+      () async {
+        final String record = p.join(out.path, 'tmpdir');
+        final ProcessCommand command = ProcessCommand('sh', <String>[
+          '-c',
+          leaveBehind(record),
+        ]);
+
+        expect(await command.run(), 0);
+
+        final String seen = File(record).readAsStringSync().trim();
+        expect(p.isWithin(root.path, seen), isTrue, reason: seen);
+        expect(root.listSync(), isEmpty);
+      },
+    );
+
+    test(
+      '[boundary] a child killed on timeout leaves nothing behind',
+      () async {
+        final String record = p.join(out.path, 'tmpdir');
+        final ProcessCommand command = ProcessCommand('sh', <String>[
+          '-c',
+          '${leaveBehind(record)}; sleep 30',
+        ]);
+
+        expect(await command.run(timeout: const Duration(seconds: 2)), isNull);
+
+        expect(File(record).existsSync(), isTrue);
+        expect(root.listSync(), isEmpty);
+      },
+    );
   });
 }
 

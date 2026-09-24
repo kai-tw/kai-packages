@@ -1,3 +1,15 @@
+## 0.3.1
+
+**Every child process gets a temporary directory of its own, deleted when
+it exits or is killed.** `flutter test` makes a `flutter_tools.*` directory
+in the system temp dir on every invocation and does not always remove it,
+and a run makes one invocation per mutant: one host was left with 111 of
+them at about 270 MB each, which filled the disk before the run could write
+its report. `ProcessCommand.run` now points `TMPDIR`, `TMP` and `TEMP` at a
+`TempSpace` directory and deletes it afterwards, so whatever a child leaves
+goes with it; an interrupt deletes them too, and a run killed outright has
+them swept by the next one.
+
 ## 0.3.0
 
 **How long the run will take, before and during it.** The plan line now
