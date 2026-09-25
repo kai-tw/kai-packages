@@ -13,14 +13,19 @@ class RunPlan {
     required this.baseline,
     required this.budget,
     required this.workers,
+    this.reused = 0,
   });
 
   /// Target files, after generated files are dropped.
   final int fileCount;
 
-  /// Every mutant the run will score, `invalid` ones included — the `total`
-  /// a [MutantProgress] counts towards.
+  /// Every mutant the run will run, `invalid` ones included — the `total`
+  /// a [MutantProgress] counts towards. Not the [reused] ones.
   final int mutantCount;
+
+  /// Mutants whose result a journal already holds, scored without running
+  /// — see `MutationTestRunner.journalPath`.
+  final int reused;
 
   /// The full test command's wall time against unmodified code.
   final Duration baseline;

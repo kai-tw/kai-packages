@@ -1,3 +1,17 @@
+## 0.5.0
+
+**`--journal <path>`: a stopped run resumes instead of starting over.** Each
+mutant's result is appended to a JSON Lines file as it finishes, and a later
+start with the same file reuses every recorded result and runs only the
+rest. A result is reused only while the engine version, test command,
+operators, gate, `--select-by-coverage` and the content of `pubspec.yaml`,
+`pubspec.lock`, `lib/`, `test/` and the target files are unchanged; any
+change starts the file over and says why on stderr. A recorded timeout is
+always run again. `MutationTestRunner` gains `journalPath` and
+`onJournalDiscarded`; `RunPlan` gains `reused`, and `mutantCount` now counts
+only the mutants that will run; the report gains `reusedMutants` when a
+journal is given.
+
 ## 0.4.0
 
 **`--select-by-coverage` that cannot be applied stops the run.** A test

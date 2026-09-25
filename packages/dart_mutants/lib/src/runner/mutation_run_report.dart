@@ -54,16 +54,22 @@ class MutationRunReport {
     this.mutantTimeout,
     this.stats,
   }) : files = const <FileMutationReport>[],
-       selectedByCoverage = null;
+       selectedByCoverage = null,
+       reusedMutants = null;
 
   const MutationRunReport.completed(
     this.files, {
     this.baselineDuration,
     this.mutantTimeout,
     this.selectedByCoverage = false,
+    this.reusedMutants,
     this.stats,
   }) : abortKind = null,
        abortReason = null;
+
+  /// How many mutants were scored from a journal instead of run, or `null`
+  /// when the run kept none — see `MutationTestRunner.journalPath`.
+  final int? reusedMutants;
 
   /// Whether each mutant ran only the test files that cover it. `false` on a
   /// completed run that did not ask for coverage selection; a run that asked
@@ -105,11 +111,17 @@ class MutationRunReport {
     if (baselineDuration != null)
       'baselineSeconds': _seconds(baselineDuration!),
     if (mutantTimeout != null) 'mutantTimeoutSeconds': _seconds(mutantTimeout!),
-    if (selectedByCoverage != null) 'selectedByCoverage': selectedByCoverage,
+    ..._howScored(),
     'files': <String, Object?>{
       for (final FileMutationReport f in files) f.filePath: f.toJson(),
     },
     if (stats != null) 'stats': stats!.toJson(),
+  };
+
+  /// How a completed run got its scores — empty on an aborted one.
+  Map<String, Object?> _howScored() => <String, Object?>{
+    if (selectedByCoverage != null) 'selectedByCoverage': selectedByCoverage,
+    if (reusedMutants != null) 'reusedMutants': reusedMutants,
   };
 
   /// Millisecond precision — finer than a wall-clock test run means anything.

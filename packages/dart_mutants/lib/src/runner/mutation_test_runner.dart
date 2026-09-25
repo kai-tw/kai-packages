@@ -22,6 +22,7 @@ import 'mutated_file_registry.dart';
 import 'mutation_run_report.dart';
 import 'process_command.dart';
 import 'run_budget.dart';
+import 'run_journal.dart';
 import 'run_plan.dart';
 import 'run_stats.dart';
 import 'temp_space.dart';
@@ -56,6 +57,8 @@ class MutationTestRunner {
     this.workers = 1,
     this.onWorkersFallback,
     this.runBudget,
+    this.journalPath,
+    this.onJournalDiscarded,
   }) : tempSpace = tempSpace ?? TempSpace(),
        operators = operators ?? defaultOperators(),
        baselineTimeout = baselineTimeout ?? mutantTimeout * 10 {
@@ -166,6 +169,21 @@ class MutationTestRunner {
   /// both need the baseline, which is the run's own first step, so
   /// measuring them separately would mean running the suite twice over.
   final RunBudget? runBudget;
+
+  /// Where to record each mutant's result as it finishes, and to reuse the
+  /// results a stopped run already has — see [RunJournal] for when a result
+  /// is reused. `null`, the default, records nothing.
+  ///
+  /// The baseline, the gate checks and any coverage pass still run on every
+  /// start: they are what says the suite is still green and what each
+  /// mutant's budget is. What is saved is the mutants, which are the run.
+  final String? journalPath;
+
+  /// Called with the reason a journal already at [journalPath] was started
+  /// over rather than reused.
+  final void Function(String reason)? onJournalDiscarded;
+
+  RunJournal? _journal;
 
   /// The least time a mutant's test run gets before it is killed and scored
   /// as [MutantVerdict.timeout] instead of waited on forever. A slow suite
@@ -284,6 +302,9 @@ class MutationTestRunner {
       loadAtStart: await HostLoad.read(),
     );
     try {
+      // Before the baseline, so the fingerprint is taken while every target
+      // is still the code it starts from.
+      _journal = _openJournal(targets);
       _testCache.clear();
       final Stopwatch baselineClock = Stopwatch()..start();
       final int? baselineExitCode = await testCommand.run(
@@ -363,11 +384,10 @@ class MutationTestRunner {
         );
       }
 
+      final List<_Job> jobs = _jobsFor(plan, gates, selection);
+      final List<MutantResult?> recalled = _recall(jobs);
       _completed = 0;
-      _planned = plan.fold(
-        0,
-        (int sum, _PlannedFile file) => sum + file.mutants.length,
-      );
+      _planned = recalled.where((MutantResult? r) => r == null).length;
       // The lanes first, so the plan says how many workers the run actually
       // got rather than how many were asked for — a run that fell back to
       // one is a run that will take as long as one, and the plan is where
@@ -376,6 +396,7 @@ class MutationTestRunner {
       final RunPlan runPlan = RunPlan(
         fileCount: targets.length,
         mutantCount: _planned,
+        reused: jobs.length - _planned,
         baseline: baseline,
         budget: budget,
         workers: lanes.length,
@@ -383,8 +404,9 @@ class MutationTestRunner {
       onPlan?.call(runPlan);
       return await _scoreOrRefuse(
         plan: plan,
-        gates: gates,
-        selection: selection,
+        jobs: jobs,
+        recalled: recalled,
+        selected: selection != null,
         lanes: lanes,
         runPlan: runPlan,
         stats: stats,
@@ -408,8 +430,9 @@ class MutationTestRunner {
   /// one would be read as one.
   Future<MutationRunReport> _scoreOrRefuse({
     required List<_PlannedFile> plan,
-    required Map<String, CompileSafetyGate> gates,
-    required TestSelection? selection,
+    required List<_Job> jobs,
+    required List<MutantResult?> recalled,
+    required bool selected,
     required List<_Lane> lanes,
     required RunPlan runPlan,
     required RunStats stats,
@@ -429,8 +452,8 @@ class MutationTestRunner {
         mutantTimeout: runPlan.budget,
       );
     }
-    final List<MutantResult> results = await _execute(
-      _jobsFor(plan, gates, selection),
+    final List<MutantResult> ran = await _execute(
+      _pending(jobs, recalled),
       lanes,
       runPlan.budget,
     );
@@ -444,12 +467,62 @@ class MutationTestRunner {
       );
     }
     return MutationRunReport.completed(
-      _fileReports(plan, results),
+      _fileReports(plan, _merge(recalled, ran)),
       baselineDuration: runPlan.baseline,
       mutantTimeout: runPlan.budget,
-      selectedByCoverage: selection != null,
+      selectedByCoverage: selected,
+      reusedMutants: _journal == null ? null : runPlan.reused,
       stats: await _finished(stats),
     );
+  }
+
+  /// Each job's result from the journal, or `null` where it has to run.
+  List<MutantResult?> _recall(List<_Job> jobs) => <MutantResult?>[
+    for (final _Job job in jobs) _journal?.recall(job.mutant),
+  ];
+
+  static List<_Job> _pending(List<_Job> jobs, List<MutantResult?> recalled) =>
+      <_Job>[
+        for (int i = 0; i < jobs.length; i++)
+          if (recalled[i] == null) jobs[i],
+      ];
+
+  /// [recalled] with each gap filled by the next of [ran] — which [_execute]
+  /// returns in the order it was given the [_pending] jobs.
+  static List<MutantResult> _merge(
+    List<MutantResult?> recalled,
+    List<MutantResult> ran,
+  ) {
+    final Iterator<MutantResult> next = ran.iterator;
+    return <MutantResult>[
+      for (final MutantResult? r in recalled) r ?? (next..moveNext()).current,
+    ];
+  }
+
+  /// The journal at [journalPath], opened for this run — `null` without one.
+  RunJournal? _openJournal(List<String> targets) {
+    final String? path = journalPath;
+    if (path == null) {
+      return null;
+    }
+    final CompileSafetyGate gate = compileSafetyGate;
+    final RunJournal journal = RunJournal.open(path, <String, Object?>{
+      'dartMutantsVersion': packageVersion,
+      'testCommand': testCommand.toString(),
+      'operators': operators.map((MutationOperator o) => o.name).toList(),
+      'gate': gate is AnalyzerProcessGate
+          ? gate.analyzeCommand.toString()
+          : gate.runtimeType.toString(),
+      'selectByCoverage': selectByCoverage,
+      'fingerprint': RunJournal.fingerprint(
+        testCommand.workingDirectory ?? Directory.current.path,
+        targets,
+      ),
+    });
+    if (journal.discarded case final String reason) {
+      onJournalDiscarded?.call(reason);
+    }
+    return journal;
   }
 
   /// The gate that can judge [filePath], asked while the file is still
@@ -539,7 +612,8 @@ class MutationTestRunner {
   /// through [onWorkersFallback] and runs with one worker in place.
   Future<List<_Lane>> _lanes(List<_PlannedFile> plan) async {
     final _Lane inPlace = _Lane(testCommand, null, flutter: false);
-    if (workers <= 1) {
+    // No sandboxes to build when the journal already holds every mutant.
+    if (workers <= 1 || _planned == 0) {
       return <_Lane>[inPlace];
     }
     final List<_Lane>? lanes = await _sandboxLanes(plan);
@@ -705,6 +779,7 @@ class MutationTestRunner {
     final Stopwatch clock = Stopwatch()..start();
     final _Timing timing = _Timing(lane.id);
     final MutantResult result = await _runOne(job, lane, budget, timing);
+    _journal?.record(result);
     final Duration elapsed = clock.elapsed;
     _stats.mutants.add(timing.build(result, elapsed));
     _completed++;

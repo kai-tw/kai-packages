@@ -71,6 +71,34 @@ The limit is on the mutants. The baseline, the coverage pass and the worker
 sandbox check come before the first one and are not counted against it —
 they are what makes any estimate possible.
 
+### `--journal`: stop now, finish later
+
+`--journal <path>` writes each mutant's result to a JSON Lines file as it
+finishes. Start the same run again with the same file and every recorded
+result is reused; only the rest run. So a run can be stopped — Ctrl-C,
+`kill`, `--max-minutes`, a crash — and resumed, and a finished run started
+again costs one baseline.
+
+```bash
+dart run dart_mutants --journal .mutation/journal.jsonl \
+  --test-command "flutter test test/foo" lib/foo.dart
+```
+
+A recorded result is reused only when nothing it depends on has changed:
+the engine version, the test command, the operators, the compile-safety
+gate, `--select-by-coverage`, and the content of `pubspec.yaml`,
+`pubspec.lock`, everything under `lib/` and `test/`, and the files given.
+Any change starts the file over, with a note on stderr saying which — an
+edit anywhere can change any verdict, so none is guessed at. A file a test
+reads from outside `test/` is not covered; delete the journal after
+changing one. A recorded timeout is always asked again: the budget decided
+it, and the next start may have a larger one.
+
+What a start still does every time: the baseline, the gate checks and any
+coverage pass — they say the suite is still green and set each mutant's
+budget. The plan line counts the mutants that will run and names how many
+more were reused, and the report's `reusedMutants` says the same.
+
 ## What it mutates
 
 The operators fall into two groups that ask different questions, and a pool
