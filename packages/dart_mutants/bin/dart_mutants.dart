@@ -101,6 +101,17 @@ Future<void> main(List<String> arguments) async {
           'the text report.',
     )
     ..addOption(
+      'journal',
+      valueHelp: 'path',
+      help:
+          'Record each mutant\'s result in this file as it finishes. A run '
+          'started again with the same file reuses every recorded result, '
+          'except timeouts, and runs only the rest — as long as the engine '
+          'version, test command, gate, operators, --select-by-coverage and '
+          'the content of pubspec.yaml, pubspec.lock, lib/, test/ and the '
+          'files given are unchanged; otherwise the file is started over.',
+    )
+    ..addOption(
       'history',
       valueHelp: 'path',
       help:
@@ -158,6 +169,11 @@ Future<void> main(List<String> arguments) async {
     selectByCoverage: args['select-by-coverage'] as bool,
     workers: int.parse(args['workers'] as String),
     runBudget: _optionalBudget(args['max-minutes'] as String?),
+    journalPath: args['journal'] as String?,
+    onJournalDiscarded: (String reason) => stderr.writeln(
+      'note: the journal at ${args['journal']} was started over — $reason — '
+      'so every mutant runs.',
+    ),
     onWorkersFallback: (String reason) => stderr.writeln(
       'note: --workers was not applied ($reason), so mutants run one at a '
       'time in the package itself.',
@@ -273,7 +289,7 @@ String? _maxMinutesOptionError(ArgResults args) {
 /// Checked up front: a run can take hours, and finding out at the end that
 /// the report has nowhere to go loses all of it.
 String? _outputOptionError(ArgResults args) {
-  for (final String option in <String>['output', 'history']) {
+  for (final String option in <String>['output', 'history', 'journal']) {
     final String? path = args[option] as String?;
     if (path != null &&
         (path.isEmpty || FileSystemEntity.isDirectorySync(path))) {
@@ -388,11 +404,17 @@ String _budgetPhrase(Duration budget) =>
     'each mutant given at most ${_formatSeconds(budget)}';
 
 void _printPlan(RunPlan plan) {
+  final String reused = plan.reused == 0
+      ? ''
+      : ' (${plan.reused} more reused from the journal)';
   stdout.writeln(
     '${_count(plan.mutantCount, 'mutant')} in '
-    '${_count(plan.fileCount, 'file')} — baseline '
+    '${_count(plan.fileCount, 'file')}$reused — baseline '
     '${_formatSeconds(plan.baseline)}, ${_budgetPhrase(plan.budget)}',
   );
+  if (plan.mutantCount == 0) {
+    return;
+  }
   // Both ends, because one number alone would be read as the answer and
   // neither is: the floor assumes every worker busy on a mutant that costs
   // a full baseline, the top assumes one worker doing all of them. What the
