@@ -104,12 +104,13 @@ Future<void> main(List<String> arguments) async {
       'journal',
       valueHelp: 'path',
       help:
-          'Record each mutant\'s result in this file as it finishes. A run '
-          'started again with the same file reuses every recorded result, '
-          'except timeouts, and runs only the rest — as long as the engine '
-          'version, test command, gate, operators, --select-by-coverage and '
-          'the content of pubspec.yaml, pubspec.lock, lib/, test/ and the '
-          'files given are unchanged; otherwise the file is started over.',
+          'Record the baseline, the coverage map and each mutant\'s result in '
+          'this file as they finish. A run started again with the same file '
+          'reuses all of them, except timeouts, and runs only the rest — as '
+          'long as the test command, gate, operators, --select-by-coverage '
+          'and the content of pubspec.yaml, pubspec.lock, lib/, test/ and the '
+          'files given are unchanged, and no release since changed how a '
+          'verdict is reached; otherwise the file is started over.',
     )
     ..addOption(
       'history',
@@ -407,10 +408,15 @@ void _printPlan(RunPlan plan) {
   final String reused = plan.reused == 0
       ? ''
       : ' (${plan.reused} more reused from the journal)';
+  final String fromJournal = <String>[
+    if (plan.baselineReused) 'baseline',
+    if (plan.coverageReused) 'coverage map',
+  ].join(' and ');
   stdout.writeln(
     '${_count(plan.mutantCount, 'mutant')} in '
     '${_count(plan.fileCount, 'file')}$reused — baseline '
-    '${_formatSeconds(plan.baseline)}, ${_budgetPhrase(plan.budget)}',
+    '${_formatSeconds(plan.baseline)}, ${_budgetPhrase(plan.budget)}'
+    '${fromJournal.isEmpty ? '' : ' ($fromJournal from the journal)'}',
   );
   if (plan.mutantCount == 0) {
     return;

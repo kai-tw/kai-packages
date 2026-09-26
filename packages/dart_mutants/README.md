@@ -73,31 +73,34 @@ they are what makes any estimate possible.
 
 ### `--journal`: stop now, finish later
 
-`--journal <path>` writes each mutant's result to a JSON Lines file as it
-finishes. Start the same run again with the same file and every recorded
-result is reused; only the rest run. So a run can be stopped — Ctrl-C,
-`kill`, `--max-minutes`, a crash — and resumed, and a finished run started
-again costs one baseline.
+`--journal <path>` writes the baseline, the coverage map and each mutant's
+result to a JSON Lines file as each is known. Start the same run again with
+the same file and all of them are reused; only the rest run. So a run can be
+stopped — Ctrl-C, `kill`, `--max-minutes`, a crash — and resumed without
+paying for the baseline or the coverage pass again, and a finished run
+started again runs no test at all.
 
 ```bash
 dart run dart_mutants --journal .mutation/journal.jsonl \
   --test-command "flutter test test/foo" lib/foo.dart
 ```
 
-A recorded result is reused only when nothing it depends on has changed:
-the engine version, the test command, the operators, the compile-safety
-gate, `--select-by-coverage`, and the content of `pubspec.yaml`,
-`pubspec.lock`, everything under `lib/` and `test/`, and the files given.
-Any change starts the file over, with a note on stderr saying which — an
-edit anywhere can change any verdict, so none is guessed at. A file a test
-reads from outside `test/` is not covered; delete the journal after
-changing one. A recorded timeout is always asked again: the budget decided
-it, and the next start may have a larger one.
+What is recorded is reused only when nothing it depends on has changed: the
+test command, the operators, the compile-safety gate,
+`--select-by-coverage`, and the content of `pubspec.yaml`, `pubspec.lock`,
+everything under `lib/` and `test/`, and the files given. Any change starts
+the file over, with a note on stderr saying which — an edit anywhere can
+change any verdict, so none is guessed at. So does a release that changes
+how a verdict is reached; other releases resume a journal an earlier one
+wrote. A file a test reads from outside `test/`, or a Dart SDK upgrade, is
+not seen; delete the journal after changing one. A recorded timeout is
+always asked again: the budget decided it, and the next start may have a
+larger one.
 
-What a start still does every time: the baseline, the gate checks and any
-coverage pass — they say the suite is still green and set each mutant's
-budget. The plan line counts the mutants that will run and names how many
-more were reused, and the report's `reusedMutants` says the same.
+What a start still does every time: the gate checks. The plan line counts
+the mutants that will run, names how many more were reused, and says when
+the baseline or the coverage map came from the journal; the report's
+`reusedMutants` gives the count.
 
 ## What it mutates
 

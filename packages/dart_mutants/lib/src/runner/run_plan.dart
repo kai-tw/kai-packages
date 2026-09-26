@@ -14,6 +14,8 @@ class RunPlan {
     required this.budget,
     required this.workers,
     this.reused = 0,
+    this.baselineReused = false,
+    this.coverageReused = false,
   });
 
   /// Target files, after generated files are dropped.
@@ -26,6 +28,12 @@ class RunPlan {
   /// Mutants whose result a journal already holds, scored without running
   /// — see `MutationTestRunner.journalPath`.
   final int reused;
+
+  /// Whether [baseline] was read from a journal instead of run.
+  final bool baselineReused;
+
+  /// Whether the coverage map was read from a journal instead of collected.
+  final bool coverageReused;
 
   /// The full test command's wall time against unmodified code.
   final Duration baseline;

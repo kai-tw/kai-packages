@@ -26,9 +26,54 @@ import 'package:path/path.dart' as p;
 class CoverageMap {
   CoverageMap._(this._lines);
 
+  /// The map [toJson] wrote. Throws a [FormatException] on any other shape.
+  factory CoverageMap.fromJson(Object? json) {
+    if (json case {
+      'tests': final List<Object?> tests,
+      'files': final Map<String, Object?> files,
+    }) {
+      String test(Object? index) => switch (index) {
+        final int i when i >= 0 && i < tests.length => switch (tests[i]) {
+          final String name => name,
+          _ => throw const FormatException('a test name is not a string'),
+        },
+        _ => throw FormatException('no test at index $index'),
+      };
+      return CoverageMap._(<String, Map<int, Set<String>>>{
+        for (final MapEntry<String, Object?> file in files.entries)
+          file.key: switch (file.value) {
+            final Map<String, Object?> lines => <int, Set<String>>{
+              for (final MapEntry<String, Object?> line in lines.entries)
+                int.parse(line.key): switch (line.value) {
+                  final List<Object?> hitBy => hitBy.map(test).toSet(),
+                  _ => throw FormatException('bad line in ${file.key}'),
+                },
+            },
+            _ => throw FormatException('bad file ${file.key}'),
+          },
+      });
+    }
+    throw const FormatException('not a coverage map');
+  }
+
   /// file -> line -> the test files that hit it. A line present with an
   /// empty set was reported, and hit by nobody.
   final Map<String, Map<int, Set<String>>> _lines;
+
+  /// Each test file named once and referred to by index: a suite of hundreds
+  /// of files would otherwise repeat every name on every line it hit.
+  Map<String, Object?> toJson() {
+    final Map<String, int> index = <String, int>{};
+    int indexOf(String test) => index.putIfAbsent(test, () => index.length);
+    final Map<String, Object?> files = <String, Object?>{
+      for (final MapEntry<String, Map<int, Set<String>>> file in _lines.entries)
+        file.key: <String, Object?>{
+          for (final MapEntry<int, Set<String>> line in file.value.entries)
+            '${line.key}': line.value.map(indexOf).toList(),
+        },
+    };
+    return <String, Object?>{'tests': index.keys.toList(), 'files': files};
+  }
 
   /// The test files that executed any of [startLine]..[endLine] of [file]
   /// (both inclusive, 1-based). Empty when every one of those lines that any
