@@ -15,6 +15,9 @@ analyzer:
     # SPM package sources under `build/`, which then get analyzed as if they
     # were this repo's own code.
     - "**/build/**"
+    # Generated code, repeated from `dart_lints.yaml` for the same reason.
+    - "**/*.freezed.dart"
+    - "**/*.g.dart"
 
 linter:
   rules:

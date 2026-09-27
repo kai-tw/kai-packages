@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:json_annotation/json_annotation.dart';
 import 'package:path/path.dart' as p;
 
 import '../mutant.dart';
@@ -114,11 +115,13 @@ class RunJournal {
     _ => null,
   };
 
-  /// `null` for a map cut off mid-write, like any other line.
+  /// `null` for a map in any other shape, like any line that does not parse.
   static CoverageMap? _coverageOf(Object? json) {
-    if (json case {'coverage': final Object? map}) {
+    if (json case {'coverage': final Map<String, Object?> map}) {
       try {
         return CoverageMap.fromJson(map);
+      } on CheckedFromJsonException {
+        return null;
       } on FormatException {
         return null;
       }

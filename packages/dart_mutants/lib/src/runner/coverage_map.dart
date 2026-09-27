@@ -1,6 +1,26 @@
 import 'dart:io';
 
+import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:path/path.dart' as p;
+
+part 'coverage_map.freezed.dart';
+part 'coverage_map.g.dart';
+
+/// A [CoverageMap] as a journal stores it. Each test file is named once in
+/// [tests] and referred to by its index: a suite of hundreds of files would
+/// otherwise repeat every name on every line it hit.
+@freezed
+abstract class CoverageMapJson with _$CoverageMapJson {
+  const factory CoverageMapJson({
+    required List<String> tests,
+
+    /// file -> line -> indexes into [tests].
+    required Map<String, Map<int, List<int>>> files,
+  }) = _CoverageMapJson;
+
+  factory CoverageMapJson.fromJson(Map<String, Object?> json) =>
+      _$CoverageMapJsonFromJson(json);
+}
 
 /// Which test files executed which lines of the package under test — built
 /// once per run, before any mutant, so each mutant runs only the tests that
@@ -26,53 +46,40 @@ import 'package:path/path.dart' as p;
 class CoverageMap {
   CoverageMap._(this._lines);
 
-  /// The map [toJson] wrote. Throws a [FormatException] on any other shape.
-  factory CoverageMap.fromJson(Object? json) {
-    if (json case {
-      'tests': final List<Object?> tests,
-      'files': final Map<String, Object?> files,
-    }) {
-      String test(Object? index) => switch (index) {
-        final int i when i >= 0 && i < tests.length => switch (tests[i]) {
-          final String name => name,
-          _ => throw const FormatException('a test name is not a string'),
+  /// The map [toJson] wrote. Throws a [CheckedFromJsonException] on any
+  /// other shape, and a [FormatException] on a test index out of range.
+  factory CoverageMap.fromJson(Map<String, Object?> json) {
+    final CoverageMapJson stored = CoverageMapJson.fromJson(json);
+    String test(int index) => index >= 0 && index < stored.tests.length
+        ? stored.tests[index]
+        : throw FormatException('no test at index $index');
+    return CoverageMap._(<String, Map<int, Set<String>>>{
+      for (final MapEntry<String, Map<int, List<int>>> file
+          in stored.files.entries)
+        file.key: <int, Set<String>>{
+          for (final MapEntry<int, List<int>> line in file.value.entries)
+            line.key: line.value.map(test).toSet(),
         },
-        _ => throw FormatException('no test at index $index'),
-      };
-      return CoverageMap._(<String, Map<int, Set<String>>>{
-        for (final MapEntry<String, Object?> file in files.entries)
-          file.key: switch (file.value) {
-            final Map<String, Object?> lines => <int, Set<String>>{
-              for (final MapEntry<String, Object?> line in lines.entries)
-                int.parse(line.key): switch (line.value) {
-                  final List<Object?> hitBy => hitBy.map(test).toSet(),
-                  _ => throw FormatException('bad line in ${file.key}'),
-                },
-            },
-            _ => throw FormatException('bad file ${file.key}'),
-          },
-      });
-    }
-    throw const FormatException('not a coverage map');
+    });
   }
 
   /// file -> line -> the test files that hit it. A line present with an
   /// empty set was reported, and hit by nobody.
   final Map<String, Map<int, Set<String>>> _lines;
 
-  /// Each test file named once and referred to by index: a suite of hundreds
-  /// of files would otherwise repeat every name on every line it hit.
   Map<String, Object?> toJson() {
     final Map<String, int> index = <String, int>{};
     int indexOf(String test) => index.putIfAbsent(test, () => index.length);
-    final Map<String, Object?> files = <String, Object?>{
-      for (final MapEntry<String, Map<int, Set<String>>> file in _lines.entries)
-        file.key: <String, Object?>{
-          for (final MapEntry<int, Set<String>> line in file.value.entries)
-            '${line.key}': line.value.map(indexOf).toList(),
-        },
-    };
-    return <String, Object?>{'tests': index.keys.toList(), 'files': files};
+    final Map<String, Map<int, List<int>>> files =
+        <String, Map<int, List<int>>>{
+          for (final MapEntry<String, Map<int, Set<String>>> file
+              in _lines.entries)
+            file.key: <int, List<int>>{
+              for (final MapEntry<int, Set<String>> line in file.value.entries)
+                line.key: line.value.map(indexOf).toList(),
+            },
+        };
+    return CoverageMapJson(tests: index.keys.toList(), files: files).toJson();
   }
 
   /// The test files that executed any of [startLine]..[endLine] of [file]

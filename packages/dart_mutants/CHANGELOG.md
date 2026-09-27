@@ -13,6 +13,10 @@ journal `format` in place of the engine version; only a release that changes
 how a verdict is reached raises it. A journal 0.5.0 wrote is read as format
 1, so a run stopped on 0.5.0 resumes on 0.6.0 with every recorded mutant.
 
+**New dependencies: `freezed_annotation` and `json_annotation`.** The
+journal's coverage map is a freezed class; its generated code is committed,
+so a consumer does not run `build_runner`.
+
 ## 0.5.0
 
 **`--journal <path>`: a stopped run resumes instead of starting over.** Each

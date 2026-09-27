@@ -1,0 +1,10 @@
+# `checked`: a malformed document throws CheckedFromJsonException, an
+# Exception the journal can catch, instead of a bare TypeError. Set here
+# rather than as `@JsonSerializable(checked: true)` on a freezed constructor,
+# which the analyzer reports as an invalid annotation target.
+targets:
+  $default:
+    builders:
+      json_serializable:
+        options:
+          checked: true

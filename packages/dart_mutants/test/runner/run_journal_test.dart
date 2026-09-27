@@ -165,6 +165,23 @@ void main() {
   );
 
   test(
+    '[error] a coverage map in another shape is not read, and does not stop '
+    'the journal from opening',
+    () {
+      RunJournal.open(path, header);
+      File(path).writeAsStringSync(
+        '{"coverage":{"tests":"test/a_test.dart","files":{}}}\n',
+        mode: FileMode.append,
+      );
+
+      final RunJournal again = RunJournal.open(path, header);
+
+      expect(again.discarded, isNull);
+      expect(again.coverage, isNull);
+    },
+  );
+
+  test(
     '[decision] a journal 0.5.0 wrote is reused: its header named the engine '
     'version where format 1 now stands',
     () {

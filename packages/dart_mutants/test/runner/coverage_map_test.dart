@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:dart_mutants/src/runner/coverage_map.dart';
+import 'package:json_annotation/json_annotation.dart';
 import 'package:test/test.dart';
 
 /// A `dart test --coverage` suite document, shaped as the real one is: one
@@ -123,6 +124,16 @@ void main() {
         },
       }),
       throwsFormatException,
+    );
+  });
+
+  test('[error] fromJson throws on a document in another shape', () {
+    expect(
+      () => CoverageMap.fromJson(<String, Object?>{
+        'tests': 'test/a_test.dart',
+        'files': <String, Object?>{},
+      }),
+      throwsA(isA<CheckedFromJsonException>()),
     );
   });
 
