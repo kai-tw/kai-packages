@@ -1,3 +1,9 @@
+## 0.6.1
+
+**`json_annotation` is `^4.11.0`, not `^4.12.0`.** `json_serializable`
+6.13.0 pins `json_annotation` below 4.12.0, so a project on it could not
+resolve 0.6.0 at all. The generated code needs nothing 4.12.0 added.
+
 ## 0.6.0
 
 **`--journal` records the baseline and the coverage map, so a resumed run
