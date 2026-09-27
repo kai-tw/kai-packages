@@ -1,25 +1,31 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:json_annotation/json_annotation.dart';
 import 'package:path/path.dart' as p;
 
 import '../mutant.dart';
+import 'coverage_map.dart';
 import 'mutant_result.dart';
 import 'mutant_verdict.dart';
 
 /// Every mutant's result, written to a file as it finishes, so a run that is
 /// stopped part-way — Ctrl-C, `kill`, `--max-minutes`, a crash — can be
 /// started again and pick up where it stopped instead of from the first
-/// mutant.
+/// mutant. The baseline's wall time and the coverage map are written too, so
+/// a restart does not pay for them again: on a large Flutter suite the
+/// coverage pass alone is hours.
 ///
 /// The file is JSON Lines: a header naming what the results depend on, then
-/// one line per finished mutant. A later run reuses a recorded result only
-/// when the header matches it exactly; otherwise the file is started over
-/// and [discarded] says why. The header has two halves:
+/// the baseline, the coverage map and one line per finished mutant, each
+/// appended as it is known. A later run reuses what is recorded only when the
+/// header matches it exactly; otherwise the file is started over and
+/// [discarded] says why. The header has two halves:
 ///
-/// - the run's configuration — engine version, test command, operators,
-///   compile-safety gate, test selection. Not the timeouts or the workers:
-///   none of them can change a verdict that is reused (below).
+/// - the run's configuration — [format], test command, operators,
+///   compile-safety gate, test selection. Not the engine version, so a run
+///   stopped on one release resumes on the next; not the timeouts or the
+///   workers: none of them can change a verdict that is reused (below).
 /// - a fingerprint of the package's content, see [fingerprint]. Any edit to
 ///   the code or the tests can change any verdict, so an edited package
 ///   starts over rather than guessing which results still hold.
@@ -31,30 +37,96 @@ import 'mutant_verdict.dart';
 /// Lines are appended and flushed one by one, so a run killed outright loses
 /// at most the line it was writing; a line that does not parse is skipped.
 class RunJournal {
-  RunJournal._(this.path, this._recorded, this.discarded, this.recordedCount);
+  RunJournal._(
+    this.path,
+    this._recorded,
+    this.discarded,
+    this.recordedCount, {
+    this.baseline,
+    this.coverage,
+  });
 
   /// Opens [path] for a run whose header is [header], keeping what it
   /// recorded when the header matches and starting it over when not.
   factory RunJournal.open(String path, Map<String, Object?> header) {
     final File file = File(path);
-    final String wanted = jsonEncode(header);
     final bool existed = file.existsSync();
     final List<String> lines = existed
         ? file.readAsLinesSync()
         : const <String>[];
-    if (lines.firstOrNull == wanted) {
-      final Map<String, _Recorded> recorded = _entries(lines.skip(1));
-      return RunJournal._(path, recorded, null, recorded.length);
+    final Map<String, Object?>? old = _headerOf(lines.firstOrNull);
+    if (old != null && jsonEncode(old) == jsonEncode(header)) {
+      final Iterable<String> body = lines.skip(1);
+      final Map<String, _Recorded> recorded = _entries(body);
+      return RunJournal._(
+        path,
+        recorded,
+        null,
+        recorded.length,
+        baseline: _lastOf(body, _baselineOf),
+        coverage: _lastOf(body, _coverageOf),
+      );
     }
     file
       ..parent.createSync(recursive: true)
-      ..writeAsStringSync('$wanted\n', flush: true);
+      ..writeAsStringSync('${jsonEncode(header)}\n', flush: true);
     return RunJournal._(
       path,
       <String, _Recorded>{},
-      existed ? _whyNot(lines.firstOrNull, header) : null,
+      existed ? _whyNot(old, header) : null,
       0,
     );
+  }
+
+  /// What a recorded result means. Raise it with any change that can give a
+  /// recorded mutant a different verdict, and every journal written before
+  /// is started over.
+  static const int format = 1;
+
+  /// [firstLine] decoded, with the header 0.5.0 wrote read as [format] 1:
+  /// it named the engine version first where [format] now stands, and its
+  /// verdicts are format 1's.
+  static Map<String, Object?>? _headerOf(String? firstLine) {
+    final Object? json = firstLine == null ? null : _tryDecode(firstLine);
+    if (json is! Map<String, Object?>) {
+      return null;
+    }
+    if (json['dartMutantsVersion'] == '0.5.0') {
+      return <String, Object?>{
+        'format': 1,
+        for (final MapEntry<String, Object?> e in json.entries)
+          if (e.key != 'dartMutantsVersion') e.key: e.value,
+      };
+    }
+    return json;
+  }
+
+  /// The last line of [lines] that [read] makes something of.
+  static T? _lastOf<T>(Iterable<String> lines, T? Function(Object? json) read) {
+    T? last;
+    for (final String line in lines) {
+      last = read(_tryDecode(line)) ?? last;
+    }
+    return last;
+  }
+
+  static Duration? _baselineOf(Object? json) => switch (json) {
+    {'baselineMs': final int ms} => Duration(milliseconds: ms),
+    _ => null,
+  };
+
+  /// `null` for a map in any other shape, like any line that does not parse.
+  static CoverageMap? _coverageOf(Object? json) {
+    if (json case {'coverage': final Map<String, Object?> map}) {
+      try {
+        return CoverageMap.fromJson(map);
+      } on CheckedFromJsonException {
+        return null;
+      } on FormatException {
+        return null;
+      }
+    }
+    return null;
   }
 
   /// The entries of [lines], each mutant's last one winning.
@@ -73,6 +145,22 @@ class RunJournal {
 
   /// How many results the file held when it was opened.
   final int recordedCount;
+
+  /// The wall time of a baseline that passed against this same code, or
+  /// `null` when none is recorded.
+  final Duration? baseline;
+
+  /// The map a coverage pass over this same code collected, or `null` when
+  /// none is recorded.
+  final CoverageMap? coverage;
+
+  /// Appends a passing baseline's wall time to the file.
+  void recordBaseline(Duration wallTime) =>
+      _append(<String, Object?>{'baselineMs': wallTime.inMilliseconds});
+
+  /// Appends a finished coverage pass's map to the file.
+  void recordCoverage(CoverageMap map) =>
+      _append(<String, Object?>{'coverage': map.toJson()});
 
   /// [mutant]'s recorded result, or `null` when it has none that can be
   /// reused.
@@ -93,12 +181,17 @@ class RunJournal {
   void record(MutantResult result) {
     final _Recorded entry = _Recorded.of(result);
     _recorded[entry.key] = entry;
-    File(path).writeAsStringSync(
-      '${jsonEncode(entry.toJson())}\n',
-      mode: FileMode.append,
-      flush: true,
-    );
+    _append(entry.toJson());
   }
+
+  void _append(Map<String, Object?> json) =>
+      File(
+        path,
+      ).writeAsStringSync(
+        '${jsonEncode(json)}\n',
+        mode: FileMode.append,
+        flush: true,
+      );
 
   /// A hash of everything in [packageRoot] a verdict can depend on:
   /// `pubspec.yaml`, `pubspec.lock`, every file under `lib/` and `test/`,
@@ -154,9 +247,11 @@ class RunJournal {
   }
 
   /// Which half of the header differs, for [discarded].
-  static String _whyNot(String? firstLine, Map<String, Object?> header) {
-    final Object? old = firstLine == null ? null : _tryDecode(firstLine);
-    if (old is! Map<String, Object?>) {
+  static String _whyNot(
+    Map<String, Object?>? old,
+    Map<String, Object?> header,
+  ) {
+    if (old == null) {
       return 'it is not a journal this version can read';
     }
     final List<String> changed = <String>[

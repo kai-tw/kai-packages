@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:dart_mutants/src/runner/coverage_map.dart';
+import 'package:json_annotation/json_annotation.dart';
 import 'package:test/test.dart';
 
 /// A `dart test --coverage` suite document, shaped as the real one is: one
@@ -89,6 +92,48 @@ void main() {
       () {
         expect(map.testsFor('lib/src/foo.dart', 12, 14), isEmpty);
       },
+    );
+
+    test(
+      '[state] written to JSON and read back, it gives the same three '
+      'answers',
+      () {
+        final CoverageMap again = CoverageMap.fromJson(
+          jsonDecode(jsonEncode(map.toJson())),
+        );
+
+        expect(again.testsFor('lib/src/foo.dart', 10, 11), <String>{
+          'test/a_test.dart',
+          'test/b_test.dart',
+        });
+        expect(again.testsFor('lib/src/foo.dart', 12, 12), isEmpty);
+        expect(again.testsFor('lib/src/foo.dart', 20, 20), isNull);
+        expect(again.testsFor('lib/src/bar.dart', 1, 1), isNull);
+      },
+    );
+  });
+
+  test('[error] fromJson throws on a test index it was not given', () {
+    expect(
+      () => CoverageMap.fromJson(<String, Object?>{
+        'tests': <String>['test/a_test.dart'],
+        'files': <String, Object?>{
+          'lib/a.dart': <String, Object?>{
+            '1': <int>[1],
+          },
+        },
+      }),
+      throwsFormatException,
+    );
+  });
+
+  test('[error] fromJson throws on a document in another shape', () {
+    expect(
+      () => CoverageMap.fromJson(<String, Object?>{
+        'tests': 'test/a_test.dart',
+        'files': <String, Object?>{},
+      }),
+      throwsA(isA<CheckedFromJsonException>()),
     );
   });
 

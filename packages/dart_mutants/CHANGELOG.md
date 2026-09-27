@@ -1,3 +1,22 @@
+## 0.6.0
+
+**`--journal` records the baseline and the coverage map, so a resumed run
+skips both.** A restart used to run the baseline and the whole coverage pass
+again before reaching the first unrecorded mutant — on a suite of 926 test
+files, hours of `flutter test --coverage` per restart. Both are now appended
+to the journal once they pass, and a start whose header and fingerprint
+match reads them back instead. `RunPlan` gains `baselineReused` and
+`coverageReused`, and the plan line says when either came from the journal.
+
+**A journal no longer starts over on every release.** Its header names a
+journal `format` in place of the engine version; only a release that changes
+how a verdict is reached raises it. A journal 0.5.0 wrote is read as format
+1, so a run stopped on 0.5.0 resumes on 0.6.0 with every recorded mutant.
+
+**New dependencies: `freezed_annotation` and `json_annotation`.** The
+journal's coverage map is a freezed class; its generated code is committed,
+so a consumer does not run `build_runner`.
+
 ## 0.5.0
 
 **`--journal <path>`: a stopped run resumes instead of starting over.** Each

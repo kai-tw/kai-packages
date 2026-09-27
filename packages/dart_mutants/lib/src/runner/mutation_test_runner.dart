@@ -11,6 +11,7 @@ import '../mutation_visitor.dart';
 import '../operators.dart';
 import '../version.dart';
 import 'compile_safety_gate.dart';
+import 'coverage_map.dart';
 import 'file_mutation_report.dart';
 import 'host_load.dart';
 import 'mutant_progress.dart';
@@ -174,9 +175,10 @@ class MutationTestRunner {
   /// results a stopped run already has — see [RunJournal] for when a result
   /// is reused. `null`, the default, records nothing.
   ///
-  /// The baseline, the gate checks and any coverage pass still run on every
-  /// start: they are what says the suite is still green and what each
-  /// mutant's budget is. What is saved is the mutants, which are the run.
+  /// A passing baseline and a finished coverage pass are recorded too, and a
+  /// start that finds them skips both: the journal only matches code whose
+  /// fingerprint is unchanged, the code that baseline passed against and
+  /// that map was collected from. The gate checks still run on every start.
   final String? journalPath;
 
   /// Called with the reason a journal already at [journalPath] was started
@@ -238,6 +240,9 @@ class MutationTestRunner {
   /// Why [selectByCoverage] could not be applied, once the coverage pass
   /// says so. Non-null means the run aborts before the first mutant.
   String? _selectionUnavailable;
+
+  /// Whether the selection came from the journal's map rather than a pass.
+  bool _coverageReused = false;
 
   /// The current run's — see [run].
   late RunStats _stats;
@@ -305,12 +310,9 @@ class MutationTestRunner {
       // Before the baseline, so the fingerprint is taken while every target
       // is still the code it starts from.
       _journal = _openJournal(targets);
-      _testCache.clear();
-      final Stopwatch baselineClock = Stopwatch()..start();
-      final int? baselineExitCode = await testCommand.run(
-        timeout: baselineTimeout,
-      );
-      final Duration baseline = baselineClock.elapsed;
+      final _Baseline baselineRun = await _baseline();
+      final int? baselineExitCode = baselineRun.exitCode;
+      final Duration baseline = baselineRun.wallTime;
       if (baselineExitCode == null) {
         return MutationRunReport.aborted(
           stats: await _finished(stats),
@@ -400,6 +402,8 @@ class MutationTestRunner {
         baseline: baseline,
         budget: budget,
         workers: lanes.length,
+        baselineReused: baselineRun.reused,
+        coverageReused: _coverageReused,
       );
       onPlan?.call(runPlan);
       return await _scoreOrRefuse(
@@ -499,6 +503,22 @@ class MutationTestRunner {
     ];
   }
 
+  /// The test command against unmodified code — read from the journal when
+  /// it holds a passing one, and recorded there when it passes now.
+  Future<_Baseline> _baseline() async {
+    if (_journal?.baseline case final Duration recorded) {
+      return _Baseline(0, recorded, reused: true);
+    }
+    _testCache.clear();
+    final Stopwatch clock = Stopwatch()..start();
+    final int? exitCode = await testCommand.run(timeout: baselineTimeout);
+    final Duration wallTime = clock.elapsed;
+    if (exitCode == 0) {
+      _journal?.recordBaseline(wallTime);
+    }
+    return _Baseline(exitCode, wallTime, reused: false);
+  }
+
   /// The journal at [journalPath], opened for this run — `null` without one.
   RunJournal? _openJournal(List<String> targets) {
     final String? path = journalPath;
@@ -507,7 +527,7 @@ class MutationTestRunner {
     }
     final CompileSafetyGate gate = compileSafetyGate;
     final RunJournal journal = RunJournal.open(path, <String, Object?>{
-      'dartMutantsVersion': packageVersion,
+      'format': RunJournal.format,
       'testCommand': testCommand.toString(),
       'operators': operators.map((MutationOperator o) => o.name).toList(),
       'gate': gate is AnalyzerProcessGate
@@ -540,11 +560,13 @@ class MutationTestRunner {
   }
 
   /// The coverage pass, run once after the baseline when [selectByCoverage]
-  /// asks for it. `null` when it does not, and when the test command cannot
-  /// be taken apart or the pass fails — those two with the reason in
+  /// asks for it and the journal holds no map from an earlier start. `null`
+  /// when it does not ask, and when the test command cannot be taken apart
+  /// or the pass fails — those two with the reason in
   /// [_selectionUnavailable].
   Future<TestSelection?> _selection() async {
     _selectionUnavailable = null;
+    _coverageReused = false;
     if (!selectByCoverage) {
       return null;
     }
@@ -563,13 +585,21 @@ class MutationTestRunner {
           'the test command is not `dart test …` or `flutter test …`';
       return null;
     }
+    if (_journal?.coverage case final CoverageMap recorded) {
+      _coverageReused = true;
+      return TestSelection(invocation, recorded);
+    }
     _testCache.clear();
-    return collectCoverage(
+    final TestSelection? selection = await collectCoverage(
       invocation,
       timeout: baselineTimeout,
       onFailure: (String reason) => _selectionUnavailable = reason,
       temps: tempSpace,
     );
+    if (selection != null) {
+      _journal?.recordCoverage(selection.map);
+    }
+    return selection;
   }
 
   /// A budget derived from a run's wall time against unmodified code — see
@@ -1107,6 +1137,17 @@ class MutationTestRunner {
     command.executable,
     ...command.arguments,
   ].join('\u0000');
+}
+
+/// The test command's run against unmodified code, or the one a journal
+/// recorded — see [MutationTestRunner.journalPath].
+class _Baseline {
+  const _Baseline(this.exitCode, this.wallTime, {required this.reused});
+
+  /// `null` when it did not finish within the baseline timeout.
+  final int? exitCode;
+  final Duration wallTime;
+  final bool reused;
 }
 
 /// A target file as [MutationTestRunner.run] read and enumerated it, once.

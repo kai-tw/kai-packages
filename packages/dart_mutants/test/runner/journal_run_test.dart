@@ -64,7 +64,11 @@ class _Start {
   );
 }
 
-Future<_Start> _start(Directory dir, String journal) async {
+Future<_Start> _start(
+  Directory dir,
+  String journal, {
+  bool selectByCoverage = false,
+}) async {
   final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[dir.path]);
   addTearDown(gate.close);
   final _Start start = _Start();
@@ -76,6 +80,7 @@ Future<_Start> _start(Directory dir, String journal) async {
         compileSafetyGate: gate,
         mutantTimeout: const Duration(seconds: 20),
         baselineFactor: 0,
+        selectByCoverage: selectByCoverage,
         journalPath: journal,
         onPlan: (RunPlan plan) => start.plan = plan,
         onProgress: start.ran.add,
@@ -112,6 +117,27 @@ void main() {
       expect(second.ran, isEmpty);
       expect(second.report.reusedMutants, 2);
       expect(second.file('pick.dart').detected, 1);
+      expect(second.file('unused.dart').undetected, 1);
+    },
+    timeout: const Timeout(Duration(seconds: 180)),
+  );
+
+  test(
+    '[state] a second start reads the baseline and the coverage map from '
+    'the journal instead of running them again',
+    () async {
+      final _Start first = await _start(dir, journal, selectByCoverage: true);
+      final _Start second = await _start(dir, journal, selectByCoverage: true);
+
+      expect(first.plan?.baselineReused, isFalse);
+      expect(first.plan?.coverageReused, isFalse);
+      expect(second.plan?.baselineReused, isTrue);
+      expect(second.plan?.coverageReused, isTrue);
+      expect(
+        second.plan?.baseline.inMilliseconds,
+        first.plan?.baseline.inMilliseconds,
+      );
+      expect(second.report.selectedByCoverage, isTrue);
       expect(second.file('unused.dart').undetected, 1);
     },
     timeout: const Timeout(Duration(seconds: 180)),

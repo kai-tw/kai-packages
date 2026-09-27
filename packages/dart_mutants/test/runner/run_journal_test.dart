@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dart_mutants/src/mutant.dart';
+import 'package:dart_mutants/src/runner/coverage_map.dart';
 import 'package:dart_mutants/src/runner/mutant_result.dart';
 import 'package:dart_mutants/src/runner/mutant_verdict.dart';
 import 'package:dart_mutants/src/runner/run_journal.dart';
@@ -124,6 +126,98 @@ void main() {
     expect(opened.discarded, 'it is not a journal this version can read');
     expect(opened.recordedCount, 0);
   });
+
+  test(
+    '[state] a recorded baseline and coverage map are read back by the next '
+    'open',
+    () {
+      final CoverageMap map = (CoverageMapBuilder(
+        dir.path,
+      )..add('test/a_test.dart', 'lib/a.dart', 3, 1)).build();
+      RunJournal.open(path, header)
+        ..recordBaseline(const Duration(milliseconds: 4200))
+        ..recordCoverage(map);
+
+      final RunJournal again = RunJournal.open(path, header);
+
+      expect(again.baseline, const Duration(milliseconds: 4200));
+      expect(again.coverage?.testsFor('lib/a.dart', 3, 3), <String>{
+        'test/a_test.dart',
+      });
+    },
+  );
+
+  test(
+    '[boundary] a coverage map cut off mid-write is not read — the next '
+    'start collects it again',
+    () {
+      RunJournal.open(path, header).recordBaseline(const Duration(seconds: 1));
+      File(path).writeAsStringSync(
+        '{"coverage":{"tests":["test/a',
+        mode: FileMode.append,
+      );
+
+      final RunJournal again = RunJournal.open(path, header);
+
+      expect(again.baseline, const Duration(seconds: 1));
+      expect(again.coverage, isNull);
+    },
+  );
+
+  test(
+    '[error] a coverage map in another shape is not read, and does not stop '
+    'the journal from opening',
+    () {
+      RunJournal.open(path, header);
+      File(path).writeAsStringSync(
+        '{"coverage":{"tests":"test/a_test.dart","files":{}}}\n',
+        mode: FileMode.append,
+      );
+
+      final RunJournal again = RunJournal.open(path, header);
+
+      expect(again.discarded, isNull);
+      expect(again.coverage, isNull);
+    },
+  );
+
+  test(
+    '[decision] a journal 0.5.0 wrote is reused: its header named the engine '
+    'version where format 1 now stands',
+    () {
+      RunJournal.open(path, <String, Object?>{
+        'dartMutantsVersion': '0.5.0',
+        ...header,
+      }).record(
+        MutantResult(mutant: _mutant(3), verdict: MutantVerdict.detected),
+      );
+
+      final RunJournal opened = RunJournal.open(path, <String, Object?>{
+        'format': RunJournal.format,
+        ...header,
+      });
+
+      expect(opened.discarded, isNull);
+      expect(opened.recall(_mutant(3))?.verdict, MutantVerdict.detected);
+    },
+  );
+
+  test(
+    '[decision] a journal another engine version wrote without a format is '
+    'started over',
+    () {
+      File(path).writeAsStringSync(
+        '${jsonEncode(<String, Object?>{'dartMutantsVersion': '0.4.9', ...header})}\n',
+      );
+
+      final RunJournal opened = RunJournal.open(path, <String, Object?>{
+        'format': RunJournal.format,
+        ...header,
+      });
+
+      expect(opened.discarded, isNotNull);
+    },
+  );
 
   group('the fingerprint', () {
     late Directory pkg;
