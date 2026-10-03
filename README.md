@@ -10,6 +10,7 @@ never disagree about a dependency version.
 | [`design_mockups`](packages/design_mockups) | Photographs an app's real widgets across breakpoint × state × theme × locale, headless. |
 | [`design_mockups_annotations`](packages/design_mockups_annotations) | The `@MockupPreview` annotation, so a widget in `lib/` can declare its own renders. |
 | [`ui_kit`](packages/ui_kit) | A UI kit that shares Flutter components through my projects. |
+| [`versioned_json`](packages/versioned_json) | Persisted JSON with a schema version, step-by-step migrations, and field-by-field take/changed. |
 
 ## Working on it
 

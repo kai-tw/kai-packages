@@ -68,6 +68,9 @@ jobs:
       - run: dart test
         working-directory: packages/clock_anchor
 
+      - run: dart test
+        working-directory: packages/versioned_json
+
       # `flutter test`, not `dart test`: ui_kit's tests import `flutter_test`,
       # which the bare Dart test runner cannot load.
       - run: flutter test
@@ -104,8 +107,8 @@ jobs:
       - run: dart pub publish --dry-run
         working-directory: packages/clock_anchor
 
-      # ui_kit and connectivity_status are intentionally not published (git
-      # dependency only), so no publish dry-run step for either.
+      # ui_kit, connectivity_status and versioned_json are intentionally not
+      # published (git dependency only), so no publish dry-run step for them.
 
   connectivity_status_ios:
     runs-on: macos-latest
