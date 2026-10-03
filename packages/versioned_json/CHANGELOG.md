@@ -22,8 +22,9 @@ First release.
   `dart:io`. A file whose version cannot be migrated is never written.
   `migrateFile` and `readFile` let that exception and any
   `FileSystemException` propagate; `migrateDirectory` skips such a file and
-  carries on. Every write goes to a sibling file and is renamed over the
-  target. `writeFile` stamps the DTO's `schemaVersion` itself and throws an
+  carries on. Every write goes to its own staging sibling and is renamed over
+  the target, so concurrent writes to one file cannot collide and the last
+  rename wins. `writeFile` stamps the DTO's `schemaVersion` itself and throws an
   `ArgumentError` when it is not the current version.
 - **`package:versioned_json/testing.dart`** — checks for a consumer's own tests
   that return mismatches instead of asserting: `FieldwiseJson` key naming,

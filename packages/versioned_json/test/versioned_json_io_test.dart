@@ -33,7 +33,7 @@ void main() {
   /// The names in [tempDir], so a test can see that no staging file is left.
   List<String> entryNames() => <String>[
     for (final FileSystemEntity entity in tempDir.listSync())
-      entity.uri.pathSegments.last,
+      entity.path.split(Platform.pathSeparator).last,
   ]..sort();
 
   /// Backdates the file, so a later write is visible as a newer timestamp
@@ -289,6 +289,49 @@ void main() {
       });
       expect((await schema.readFile(file))!.payload, 'written');
       expect(entryNames(), <String>['note.json']);
+    });
+
+    test(
+      'concurrent writeFile calls each land whole, the last one winning',
+      () async {
+        final File file = writeRaw('note.json', 'old content');
+        // Large enough that the writes interleave rather than finish in turn.
+        final List<String> payloads = <String>[
+          for (int i = 0; i < 20; i++) '$i:${'x' * 200000}',
+        ];
+
+        await Future.wait(<Future<void>>[
+          for (final String payload in payloads)
+            schema.writeFile(file, NoteDto(payload: payload)),
+        ]);
+
+        final Map<String, dynamic> written = readBack(file);
+        expect(written['schemaVersion'], 3);
+        expect(payloads, contains(written['payload']));
+        expect(entryNames(), <String>['note.json']);
+      },
+    );
+
+    test('a failed rename removes its staging file', () async {
+      final Directory occupied = Directory(fileNamed('note.json').path)
+        ..createSync();
+      File(
+        '${occupied.path}${Platform.pathSeparator}inside.txt',
+      ).writeAsStringSync('kept');
+
+      await expectLater(
+        schema.writeFile(File(occupied.path), const NoteDto(payload: 'p')),
+        throwsA(isA<FileSystemException>()),
+      );
+
+      expect(entryNames(), <String>['note.json']);
+      expect(
+        <String>[
+          for (final FileSystemEntity entity in occupied.listSync())
+            entity.uri.pathSegments.last,
+        ],
+        <String>['inside.txt'],
+      );
     });
 
     test('writeFile stamps the version a toJson leaves out', () async {

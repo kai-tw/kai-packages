@@ -98,9 +98,11 @@ a caller would then overwrite. `migrateDirectory` skips either kind of file and
 carries on, so one file a newer build wrote, or one the process cannot read,
 does not hold every other file at its old version.
 
-Every write goes to a sibling file in the same directory and is renamed over
-the target, so a crash leaves the old content or the new, never a truncated
-file. `writeFile` stamps the DTO's `schemaVersion` into the JSON itself, and
+Every write goes to its own staging sibling in the same directory and is
+renamed over the target, so a crash leaves the old content or the new, never a
+truncated file. Concurrent writes to one file never share a staging file; the
+last rename wins. A crash between the two steps can leave a stray `*.tmp`
+sibling, which no read or sweep ever touches. `writeFile` stamps the DTO's `schemaVersion` into the JSON itself, and
 throws an `ArgumentError` without writing when that version is not the
 schema's current one.
 
