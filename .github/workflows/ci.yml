@@ -68,6 +68,9 @@ jobs:
       - run: dart test
         working-directory: packages/clock_anchor
 
+      - run: dart test
+        working-directory: packages/versioned_json
+
       # `flutter test`, not `dart test`: ui_kit's tests import `flutter_test`,
       # which the bare Dart test runner cannot load.
       - run: flutter test

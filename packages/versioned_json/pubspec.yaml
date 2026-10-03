@@ -1,0 +1,23 @@
+name: versioned_json
+description: >-
+  Versioned JSON: a version field, step-by-step migrations that refuse to read
+  or overwrite a newer version, and field-wise take/changed over a flat
+  record's JSON. Pure Dart; the file helpers live in a separate library.
+version: 0.1.0
+repository: https://github.com/kai-tw/kai-packages/tree/main/packages/versioned_json
+issue_tracker: https://github.com/kai-tw/kai-packages/issues
+publish_to: none
+
+environment:
+  sdk: ^3.8.0
+
+resolution: workspace
+
+dev_dependencies:
+  lints: ^6.1.0
+  # Deliberately wider than the latest release. The workspace resolves every
+  # member against one lockfile, and a Flutter member's `flutter_test` pins
+  # `test_api` to whatever the installed SDK ships, so a higher floor here makes
+  # the whole workspace unresolvable. None of these tests use an API newer than
+  # 1.25.
+  test: ">=1.25.0 <2.0.0"

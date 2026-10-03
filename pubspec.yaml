@@ -19,6 +19,7 @@ workspace:
   - packages/log_system
   - packages/preference_store
   - packages/ui_kit
+  - packages/versioned_json
 
 # Lets `dart run dart_lints` work from the repo root, so the lint entry point is
 # the same here as in a consuming app.
