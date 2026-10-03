@@ -138,6 +138,43 @@ void main() {
       expect(plantFieldwise.changed(fern, sameCare), isEmpty);
     });
 
+    group('a nested map with one extra key is a change', () {
+      final PlantValues withSoil = PlantValues(
+        name: fern.name,
+        height: fern.height,
+        care: <String, dynamic>{...fern.care, 'soil': 'peat'},
+        plantedAt: spring,
+      );
+
+      test('when the key is added', () {
+        expect(plantFieldwise.changed(fern, withSoil), <PlantField>{
+          PlantField.care,
+        });
+      });
+
+      test('when the key is removed', () {
+        expect(plantFieldwise.changed(withSoil, fern), <PlantField>{
+          PlantField.care,
+        });
+      });
+    });
+
+    test('a list of the same length with one element changed is a change', () {
+      final PlantValues brighter = PlantValues(
+        name: fern.name,
+        height: fern.height,
+        care: <String, dynamic>{
+          'water': 'weekly',
+          'light': <String>['shade', 'direct'],
+        },
+        plantedAt: spring,
+      );
+
+      expect(plantFieldwise.changed(fern, brighter), <PlantField>{
+        PlantField.care,
+      });
+    });
+
     test('reports a key present on one side only', () {
       final PlantValues unmeasured = PlantValues(
         name: fern.name,
