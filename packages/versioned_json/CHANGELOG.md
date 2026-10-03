@@ -19,8 +19,12 @@ First release.
   values JSON are declared once and passed over by both.
 - **`package:versioned_json/versioned_json_io.dart`** — `migrateFile`,
   `migrateDirectory`, `readFile` and `writeFile`. The only library that imports
-  `dart:io`. A file whose version cannot be migrated is never written;
-  `migrateDirectory` skips it and carries on.
+  `dart:io`. A file whose version cannot be migrated is never written.
+  `migrateFile` and `readFile` let that exception and any
+  `FileSystemException` propagate; `migrateDirectory` skips such a file and
+  carries on. Every write goes to a sibling file and is renamed over the
+  target. `writeFile` stamps the DTO's `schemaVersion` itself and throws an
+  `ArgumentError` when it is not the current version.
 - **`package:versioned_json/testing.dart`** — checks for a consumer's own tests
   that return mismatches instead of asserting: `FieldwiseJson` key naming,
   round-trips and canonical serialisation, and a worked example for every

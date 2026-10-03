@@ -107,8 +107,8 @@ jobs:
       - run: dart pub publish --dry-run
         working-directory: packages/clock_anchor
 
-      # ui_kit and connectivity_status are intentionally not published (git
-      # dependency only), so no publish dry-run step for either.
+      # ui_kit, connectivity_status and versioned_json are intentionally not
+      # published (git dependency only), so no publish dry-run step for them.
 
   connectivity_status_ios:
     runs-on: macos-latest

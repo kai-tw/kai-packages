@@ -10,8 +10,9 @@ abstract interface class VersionedJsonDto {
   /// carries its schema's [VersionedJsonSchema.currentVersion].
   int get schemaVersion;
 
-  /// Serialises this DTO, including [schemaVersion] under
-  /// [VersionedJsonMigrator.versionKey]. Without that key the written JSON
-  /// reads back as version 1 and is migrated a second time.
+  /// Serialises this DTO. The file writer stamps [schemaVersion] under
+  /// [VersionedJsonMigrator.versionKey] itself; JSON stored any other way must
+  /// carry that key, or it reads back as version 1 and is migrated a second
+  /// time.
   Map<String, dynamic> toJson();
 }

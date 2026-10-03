@@ -4,12 +4,14 @@ import 'dart:io';
 import '../schema_version_invalid_exception.dart';
 import '../schema_version_too_new_exception.dart';
 import '../versioned_json_migrator.dart';
+import 'json_file_atomic_writer.dart';
 
 /// Migrates JSON files in place.
 extension VersionedJsonMigratorIo on VersionedJsonMigrator {
   /// Reads [file], migrates it to
   /// [VersionedJsonMigrator.currentVersion], writes the result back once if any
-  /// step ran, and returns it.
+  /// step ran, and returns it. The write-back replaces the file atomically, so
+  /// a crash leaves either the old version or the new, never a truncated file.
   ///
   /// Returns null when the file does not exist, or its content is not a JSON
   /// object (empty, malformed, not UTF-8, or another JSON type); such a file is
@@ -18,8 +20,9 @@ extension VersionedJsonMigratorIo on VersionedJsonMigrator {
   /// Throws [SchemaVersionTooNewException] or [SchemaVersionInvalidException]
   /// — never a null — when the version cannot be migrated, and leaves the file
   /// untouched: a newer build wrote it and needs it back intact, so a caller
-  /// must not replace it with a default either. Other [FileSystemException]s
-  /// propagate.
+  /// must not replace it with a default either. A [FileSystemException] (no
+  /// permission to read, a failed write-back) propagates too, rather than
+  /// reading as "no data" that a caller would then overwrite.
   Future<Map<String, dynamic>?> migrateFile(File file) async {
     final _VersionedJsonFileMigration? migration = await _migrateFile(file);
     return migration?.json;
@@ -28,10 +31,12 @@ extension VersionedJsonMigratorIo on VersionedJsonMigrator {
   /// Runs [migrateFile] over every `.json` file directly inside [dir], and
   /// returns how many were rewritten. Running it again rewrites nothing.
   ///
-  /// A file whose version cannot be migrated is skipped and left untouched,
-  /// and the sweep goes on: one file a newer build wrote must not keep every
-  /// other file at its old version. Reading that file through [migrateFile]
-  /// later still reports it. A missing [dir] holds nothing to migrate.
+  /// A file whose version cannot be migrated, or that raises a
+  /// [FileSystemException], is skipped and left as it is, and the sweep goes
+  /// on: one file a newer build wrote, or one the process may not read, must
+  /// not keep every other file at its old version. Reading that file through
+  /// [migrateFile] later still reports it. A missing [dir] holds nothing to
+  /// migrate; a failure to list [dir] itself propagates.
   Future<int> migrateDirectory(Directory dir) async {
     if (!await dir.exists()) {
       return 0;
@@ -57,6 +62,10 @@ extension VersionedJsonMigratorIo on VersionedJsonMigrator {
     } on SchemaVersionInvalidException {
       // Not written: the file keeps whatever it holds for a reader to report.
       return false;
+    } on FileSystemException {
+      // Unreadable, or the write-back failed; either way the atomic write left
+      // the file's previous content in place for a reader to report.
+      return false;
     }
   }
 
@@ -72,7 +81,7 @@ extension VersionedJsonMigratorIo on VersionedJsonMigrator {
       await file.lastModified(),
     );
     if (rewritten) {
-      await file.writeAsString(jsonEncode(migrated), flush: true);
+      await const JsonFileAtomicWriter().write(file, migrated);
     }
     return _VersionedJsonFileMigration(json: migrated, rewritten: rewritten);
   }

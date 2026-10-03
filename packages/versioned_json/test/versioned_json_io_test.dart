@@ -20,11 +20,21 @@ void main() {
   });
 
   tearDown(() {
+    // Undo any mode a permission test set, so the directory can be removed.
+    if (!Platform.isWindows) {
+      _chmod(<String>['-R', 'u+rwx', tempDir.path]);
+    }
     tempDir.deleteSync(recursive: true);
   });
 
   File fileNamed(String name) =>
       File('${tempDir.path}${Platform.pathSeparator}$name');
+
+  /// The names in [tempDir], so a test can see that no staging file is left.
+  List<String> entryNames() => <String>[
+    for (final FileSystemEntity entity in tempDir.listSync())
+      entity.uri.pathSegments.last,
+  ]..sort();
 
   /// Backdates the file, so a later write is visible as a newer timestamp
   /// even when it rewrites identical bytes.
@@ -59,6 +69,7 @@ void main() {
       expect(result['step1to2'], isTrue);
       expect(result['step2to3'], isTrue);
       expect(readBack(file), result);
+      expect(entryNames(), <String>['v1.json']);
     });
 
     test('the step receives the file\'s modification time', () async {
@@ -277,6 +288,151 @@ void main() {
         'payload': 'written',
       });
       expect((await schema.readFile(file))!.payload, 'written');
+      expect(entryNames(), <String>['note.json']);
     });
+
+    test('writeFile stamps the version a toJson leaves out', () async {
+      final File file = fileNamed('keyless.json');
+
+      await const _KeylessNoteSchema().writeFile(
+        file,
+        const _KeylessNoteDto(schemaVersion: 3),
+      );
+
+      expect(readBack(file), <String, dynamic>{
+        'schemaVersion': 3,
+        'payload': 'keyless',
+      });
+    });
+
+    test(
+      'writeFile rejects a DTO that is not at the current version',
+      () async {
+        const String content = 'old content';
+        final File file = writeRaw('note.json', content);
+
+        await expectLater(
+          schema.writeFile(
+            file,
+            const NoteDto(payload: 'stale', schemaVersion: 2),
+          ),
+          throwsA(isA<ArgumentError>()),
+        );
+        expectUntouched(file, content);
+        expect(entryNames(), <String>['note.json']);
+      },
+    );
   });
+
+  group('file-system failures', () {
+    final String? skip = _permissionSkipReason();
+
+    test('migrateFile propagates an unreadable file', () async {
+      final File file = writeJson('locked.json', <String, dynamic>{
+        'schemaVersion': 1,
+      });
+      _chmod(<String>['000', file.path]);
+
+      await expectLater(
+        migrator.migrateFile(file),
+        throwsA(isA<FileSystemException>()),
+      );
+    }, skip: skip);
+
+    test('readFile propagates an unreadable file', () async {
+      final File file = writeJson('locked.json', <String, dynamic>{
+        'schemaVersion': 3,
+        'payload': 'p',
+      });
+      _chmod(<String>['000', file.path]);
+
+      await expectLater(
+        const NoteSchema().readFile(file),
+        throwsA(isA<FileSystemException>()),
+      );
+    }, skip: skip);
+
+    test(
+      'a failed write-back propagates and leaves the file as it was',
+      () async {
+        final String content = jsonEncode(<String, dynamic>{
+          'schemaVersion': 1,
+        });
+        final File file = writeRaw('v1.json', content);
+        _chmod(<String>['a-w', tempDir.path]);
+
+        await expectLater(
+          migrator.migrateFile(file),
+          throwsA(isA<FileSystemException>()),
+        );
+
+        _chmod(<String>['u+w', tempDir.path]);
+        expectUntouched(file, content);
+        expect(entryNames(), <String>['v1.json']);
+      },
+      skip: skip,
+    );
+
+    test(
+      'migrateDirectory skips an unreadable file and migrates the rest',
+      () async {
+        final String lockedContent = jsonEncode(<String, dynamic>{
+          'schemaVersion': 1,
+        });
+        final File locked = writeRaw('c.json', lockedContent);
+        final List<File> older = <File>[
+          for (final String name in <String>['a', 'b', 'd', 'e'])
+            writeJson('$name.json', <String, dynamic>{'schemaVersion': 1}),
+        ];
+        _chmod(<String>['000', locked.path]);
+
+        expect(await migrator.migrateDirectory(tempDir), older.length);
+
+        for (final File file in older) {
+          expect(readBack(file)['schemaVersion'], 3, reason: file.path);
+        }
+        _chmod(<String>['u+rw', locked.path]);
+        expectUntouched(locked, lockedContent);
+      },
+      skip: skip,
+    );
+  });
+}
+
+/// Why the permission tests cannot run here, or null when they can: file modes
+/// are POSIX-only, and root reads and writes regardless of them.
+String? _permissionSkipReason() {
+  if (Platform.isWindows) {
+    return 'file modes are POSIX-only';
+  }
+  final ProcessResult id = Process.runSync('id', <String>['-u']);
+  return (id.stdout as String).trim() == '0' ? 'root ignores file modes' : null;
+}
+
+void _chmod(List<String> arguments) {
+  final ProcessResult result = Process.runSync('chmod', arguments);
+  expect(result.exitCode, 0, reason: 'chmod ${arguments.join(' ')}');
+}
+
+/// A DTO whose `toJson` leaves out the version, as a generated serialiser does
+/// for a getter.
+class _KeylessNoteDto implements VersionedJsonDto {
+  const _KeylessNoteDto({required this.schemaVersion});
+
+  @override
+  final int schemaVersion;
+
+  @override
+  Map<String, dynamic> toJson() => <String, dynamic>{'payload': 'keyless'};
+}
+
+class _KeylessNoteSchema extends VersionedJsonSchema<_KeylessNoteDto> {
+  const _KeylessNoteSchema();
+
+  @override
+  VersionedJsonMigrator get migrator => const ThreeVersionMigrator();
+
+  @override
+  _KeylessNoteDto fromJson(Map<String, dynamic> json) =>
+      _KeylessNoteDto(schemaVersion: json['schemaVersion'] as int);
 }
