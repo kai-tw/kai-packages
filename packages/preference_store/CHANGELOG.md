@@ -2,13 +2,21 @@
 
 ## 0.2.0
 
-**Breaking:** a key is no longer stored under its `toString()`. It is stored
-under the string a new member, `String storageKeyOf(K key)`, returns for it.
-`PreferenceLocalDataSource<K>` declares that member, and
-`PreferenceLocalDataSourceImpl<K>` is now abstract and leaves it
-unimplemented, so code that constructs `PreferenceLocalDataSourceImpl`
-directly no longer compiles. Subclass it and give every member of your key
-enum its string. There is no default and no fallback to the old derivation.
+**Breaking:** two changes, and the one edit below migrates both.
+
+1. A key is no longer stored under its `toString()`. It is stored under the
+   string a new member, `String storageKeyOf(K key)`, returns for it.
+   `PreferenceLocalDataSource<K>` declares that member. The class that
+   implements the rest is now abstract and leaves it unimplemented, so code
+   that constructs it directly no longer compiles. Subclass it and give
+   every member of your key enum its string. There is no default and no
+   fallback to the old derivation.
+2. That class, `PreferenceLocalDataSourceImpl<K>`, is now
+   `SharedPreferencesLocalDataSource<K>`. Being abstract, it is no longer an
+   implementation by itself, and the name now says which store it sits on.
+   There is no alias for the old name. Its file is renamed to match, which
+   only matters to code that imported it by path rather than through
+   `package:preference_store/preference_store.dart`.
 
 Before:
 
@@ -21,7 +29,7 @@ After:
 
 ```dart
 class AppPreferenceLocalDataSource
-    extends PreferenceLocalDataSourceImpl<AppKeys> {
+    extends SharedPreferencesLocalDataSource<AppKeys> {
   AppPreferenceLocalDataSource(super.prefs);
 
   @override
@@ -57,16 +65,22 @@ two of them are given the same string — in one enum or across two — and the
 package does not detect it. Keeping the strings distinct is the consumer's
 responsibility.
 
-A class that implements `PreferenceLocalDataSource` itself (a hand-written
-fake, say) needs the new member too. `PreferenceRepository<T>` is unchanged,
-and so is every other signature.
+Anything else that implements `PreferenceLocalDataSource` must provide the
+new member too, hand-written fakes and generated mocks alike. A fake does
+not compile until it has one. A mock does, because it answers through
+`noSuchMethod` — stub `storageKeyOf` on it, or a call to it fails at runtime
+instead.
 
-Tests went from 34 to 50. Each of the eleven methods that touches the store
+`PreferenceRepository<T>` is unchanged, and so is every other signature.
+
+Tests went from 34 to 54. Each of the eleven methods that touches the store
 is pinned to the returned string: a write by comparing the store's whole key
 set afterwards, a read or a `remove` against a store that also holds entries
-under the key's `toString()` and `name`. The cases that pinned the old
-guarantee now pin the new contract — an overridden `toString()` has no
-effect, and two enums given the same string share one entry.
+under the key's `toString()` and `name`. Each of the five reads is also
+pinned to return null when a value of its own type sits only under those
+two. The cases that pinned the old guarantee now pin the new contract — an
+overridden `toString()` has no effect, and two enums given the same string
+share one entry.
 
 ## 0.1.1
 

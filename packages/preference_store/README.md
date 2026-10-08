@@ -11,7 +11,7 @@ string. This package is that engine, and nothing else.
 enum AppKeys { themeMode, fontSize }
 
 class AppPreferenceLocalDataSource
-    extends PreferenceLocalDataSourceImpl<AppKeys> {
+    extends SharedPreferencesLocalDataSource<AppKeys> {
   AppPreferenceLocalDataSource(super.prefs);
 
   @override
@@ -40,7 +40,7 @@ final int? fontSize = await dataSource.tryGetInt(AppKeys.fontSize);
   enums you need) and the string each member is stored under; the data
   source derives nothing from a key, it asks your `storageKeyOf`.
 - **No DI wiring.** Register your subclass of
-  `PreferenceLocalDataSourceImpl` with whatever service locator (or none)
+  `SharedPreferencesLocalDataSource` with whatever service locator (or none)
   your app already uses.
 
 ## The two symbols
@@ -79,14 +79,14 @@ base. An app wiring this by hand (or through a different DI approach
 entirely) has no need for the typedef; it exists for the "distinct
 named type" use case, not as part of this package's contract.
 
-### `PreferenceLocalDataSource<K>` / `PreferenceLocalDataSourceImpl<K>`
+### `PreferenceLocalDataSource<K>` / `SharedPreferencesLocalDataSource<K>`
 
 The engine underneath: `tryGetInt` / `setInt` / … against
 `SharedPreferences`, where `key` is a value of your own enum `K` and is
 stored under the string your `storageKeyOf(key)` returns.
 
 **The package derives no key — you write each one down.**
-`PreferenceLocalDataSourceImpl<K>` is abstract and leaves `storageKeyOf`
+`SharedPreferencesLocalDataSource<K>` is abstract and leaves `storageKeyOf`
 unimplemented, so a data source cannot exist until every member of `K` has
 been given a string. Write it as one exhaustive `switch` with no wildcard
 arm, as in the example above: a member added later then does not compile

@@ -4,9 +4,9 @@ import 'preference_local_data_source.dart';
 
 /// Every [PreferenceLocalDataSource] member except [storageKeyOf], which a
 /// subclass supplies for its own key enum.
-abstract class PreferenceLocalDataSourceImpl<K extends Enum>
+abstract class SharedPreferencesLocalDataSource<K extends Enum>
     implements PreferenceLocalDataSource<K> {
-  PreferenceLocalDataSourceImpl(this._prefs);
+  SharedPreferencesLocalDataSource(this._prefs);
 
   final SharedPreferences _prefs;
 

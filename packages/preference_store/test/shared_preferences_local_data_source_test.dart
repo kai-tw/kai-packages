@@ -8,7 +8,7 @@ enum _AppKeys { fontSize, isEnabled, volume, userName, tagQueue }
 /// (`_AppKeys.fontSize`) and its `name` (`fontSize`), so a data source that
 /// derived a key from the enum instead of asking would read and write
 /// somewhere these tests do not look.
-class _AppDataSource extends PreferenceLocalDataSourceImpl<_AppKeys> {
+class _AppDataSource extends SharedPreferencesLocalDataSource<_AppKeys> {
   _AppDataSource(super.prefs);
 
   @override
@@ -25,7 +25,8 @@ class _AppDataSource extends PreferenceLocalDataSourceImpl<_AppKeys> {
 
 enum _OtherAppKeys { fontSize }
 
-class _OtherAppDataSource extends PreferenceLocalDataSourceImpl<_OtherAppKeys> {
+class _OtherAppDataSource
+    extends SharedPreferencesLocalDataSource<_OtherAppKeys> {
   _OtherAppDataSource(super.prefs);
 
   @override
@@ -38,7 +39,7 @@ class _OtherAppDataSource extends PreferenceLocalDataSourceImpl<_OtherAppKeys> {
 
 /// Gives its one key the string [_AppDataSource] gives `_AppKeys.fontSize`.
 class _CollidingDataSource
-    extends PreferenceLocalDataSourceImpl<_OtherAppKeys> {
+    extends SharedPreferencesLocalDataSource<_OtherAppKeys> {
   _CollidingDataSource(super.prefs);
 
   @override
@@ -57,7 +58,7 @@ enum _OverridingKeys {
 }
 
 class _OverridingDataSource
-    extends PreferenceLocalDataSourceImpl<_OverridingKeys> {
+    extends SharedPreferencesLocalDataSource<_OverridingKeys> {
   _OverridingDataSource(super.prefs);
 
   @override
@@ -266,16 +267,17 @@ void main() {
         'fontSize',
       });
     });
+  });
 
-    test('an entry stored only under toString() or name is not read', () async {
-      // What a consumer changing a member's string has to know: the value
-      // under the old string stays on the device, and reads as never
-      // written.
+  group('an entry stored only under toString() or name is not read', () {
+    // What a consumer changing a member's string has to know: the value
+    // under the old string stays on the device and reads as never written.
+    // Each store holds values of the type being asked for, so a read that
+    // fell back to either entry would return it instead of null.
+
+    test('tryGetInt', () async {
       final SharedPreferences restoredPrefs = await _storeHolding(
-        <String, Object>{
-          '_AppKeys.fontSize': 98,
-          'fontSize': 99,
-        },
+        <String, Object>{'_AppKeys.fontSize': 98, 'fontSize': 99},
       );
 
       expect(
@@ -285,6 +287,71 @@ void main() {
       expect(restoredPrefs.getKeys(), <String>{
         '_AppKeys.fontSize',
         'fontSize',
+      });
+    });
+
+    test('tryGetDouble', () async {
+      final SharedPreferences restoredPrefs = await _storeHolding(
+        <String, Object>{'_AppKeys.volume': 0.98, 'volume': 0.99},
+      );
+
+      expect(
+        await _AppDataSource(restoredPrefs).tryGetDouble(_AppKeys.volume),
+        isNull,
+      );
+      expect(restoredPrefs.getKeys(), <String>{'_AppKeys.volume', 'volume'});
+    });
+
+    test('tryGetBool', () async {
+      final SharedPreferences restoredPrefs = await _storeHolding(
+        <String, Object>{'_AppKeys.isEnabled': true, 'isEnabled': true},
+      );
+
+      expect(
+        await _AppDataSource(restoredPrefs).tryGetBool(_AppKeys.isEnabled),
+        isNull,
+      );
+      expect(restoredPrefs.getKeys(), <String>{
+        '_AppKeys.isEnabled',
+        'isEnabled',
+      });
+    });
+
+    test('tryGetString', () async {
+      final SharedPreferences restoredPrefs = await _storeHolding(
+        <String, Object>{
+          '_AppKeys.userName': 'from toString',
+          'userName': 'from name',
+        },
+      );
+
+      expect(
+        await _AppDataSource(restoredPrefs).tryGetString(_AppKeys.userName),
+        isNull,
+      );
+      expect(restoredPrefs.getKeys(), <String>{
+        '_AppKeys.userName',
+        'userName',
+      });
+    });
+
+    test('tryGetStringList', () async {
+      final SharedPreferences restoredPrefs = await _storeHolding(
+        <String, Object>{
+          '_AppKeys.tagQueue': <String>['from toString'],
+          'tagQueue': <String>['from name'],
+        },
+      );
+
+      expect(
+        await _AppDataSource(
+          restoredPrefs,
+        ).tryGetStringList(_AppKeys.tagQueue),
+        isNull,
+      );
+      expect(restoredPrefs.getKeys(), <String>{
+        '_AppKeys.tagQueue',
+        'tagQueue',
       });
     });
   });

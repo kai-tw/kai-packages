@@ -12,13 +12,22 @@ nothing in a consuming app can quietly grow an untyped key alongside it.
 door: it maps a member of `K` to its string, and every read, write and
 remove still takes a `K`.
 
-**`storageKeyOf` stays abstract.** `PreferenceLocalDataSourceImpl<K>` leaves
-it unimplemented so that a consumer cannot get a data source without
+**`storageKeyOf` stays abstract.** `SharedPreferencesLocalDataSource<K>`
+leaves it unimplemented so that a consumer cannot get a data source without
 deciding, member by member, what is stored under what. Refuse a default
 implementation and refuse a fallback to `toString()` or `name`, however
 convenient: either one lets a key reach storage under a string nobody
 chose, and ties the on-device format back to identifier names, where a
 rename changes it silently.
+
+Refuse two other ways of supplying the mapping as well:
+
+- **A key-mapping function passed to the constructor.** A consumer's mapping
+  should exist exactly once, as its subclass. A function accepted at every
+  construction lets a second mapping appear, most easily in a test.
+- **A `Map<K, String>`.** A lookup gives up the exhaustiveness check a
+  `switch` has, so a member left out is a miss at runtime instead of a
+  compile error.
 
 The package makes no promise that two keys land in different entries. Which
 strings exist, and that they are distinct, is the consumer's responsibility;
