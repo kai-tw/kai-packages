@@ -10,9 +10,22 @@ string. This package is that engine, and nothing else.
 ```dart
 enum AppKeys { themeMode, fontSize }
 
+class AppPreferenceLocalDataSource
+    extends PreferenceLocalDataSourceImpl<AppKeys> {
+  AppPreferenceLocalDataSource(super.prefs);
+
+  @override
+  String storageKeyOf(AppKeys key) {
+    return switch (key) {
+      AppKeys.themeMode => 'app.theme_mode',
+      AppKeys.fontSize => 'app.font_size',
+    };
+  }
+}
+
 final SharedPreferences prefs = await SharedPreferences.getInstance();
 final PreferenceLocalDataSource<AppKeys> dataSource =
-    PreferenceLocalDataSourceImpl<AppKeys>(prefs);
+    AppPreferenceLocalDataSource(prefs);
 
 await dataSource.setInt(AppKeys.fontSize, 16);
 final int? fontSize = await dataSource.tryGetInt(AppKeys.fontSize);
@@ -23,10 +36,12 @@ final int? fontSize = await dataSource.tryGetInt(AppKeys.fontSize);
 - **No entities.** `AppearancePreferenceData`, `ReaderPreferenceData` and
   the rest of NovelGlide's fourteen domain shapes stayed behind — this
   package has no opinion on what your preferences look like.
-- **No key enum.** You own `AppKeys` (or however many enums you need); the
-  data source only ever calls `.toString()` on whatever you pass it.
-- **No DI wiring.** Register `PreferenceLocalDataSourceImpl` with whatever
-  service locator (or none) your app already uses.
+- **No key enum, and no key strings.** You own `AppKeys` (or however many
+  enums you need) and the string each member is stored under; the data
+  source derives nothing from a key, it asks your `storageKeyOf`.
+- **No DI wiring.** Register your subclass of
+  `PreferenceLocalDataSourceImpl` with whatever service locator (or none)
+  your app already uses.
 
 ## The two symbols
 
@@ -67,17 +82,31 @@ named type" use case, not as part of this package's contract.
 ### `PreferenceLocalDataSource<K>` / `PreferenceLocalDataSourceImpl<K>`
 
 The engine underneath: `tryGetInt` / `setInt` / … against
-`SharedPreferences`, keyed by `key.toString()` where `key` is a value of
-your own enum `K`.
+`SharedPreferences`, where `key` is a value of your own enum `K` and is
+stored under the string your `storageKeyOf(key)` returns.
 
-**`key.toString()`, not `key.name`, and that is load-bearing.** A plain
-Dart enum's default `toString()` is `EnumName.memberName` — the type name
-is part of the stored key. That is what makes two unrelated key enums
-unable to collide, and it is why an override of `toString()` on a key enum
-is not a decoration choice: it changes the storage format for every key
-in it. Once an app has real users, that format is the on-device schema —
-changing it silently strands their existing data behind a key nothing
-reads anymore.
+**The package derives no key — you write each one down.**
+`PreferenceLocalDataSourceImpl<K>` is abstract and leaves `storageKeyOf`
+unimplemented, so a data source cannot exist until every member of `K` has
+been given a string. Write it as one exhaustive `switch` with no wildcard
+arm, as in the example above: a member added later then does not compile
+until it has a string of its own.
+
+Three things follow from that:
+
+- **The strings are the on-device schema.** Once an app has real users,
+  returning a different string for a member strands their existing value
+  behind a key nothing reads anymore. Nothing moves it and nothing warns.
+- **The identifiers are not.** A key's `toString()` and `name` are never
+  consulted, so renaming a member or the enum, or overriding `toString()`,
+  changes nothing that is stored.
+- **Keeping the strings distinct is your job.** `SharedPreferences` is one
+  flat key space and the data source adds nothing to a string. Two keys
+  given the same string — in one enum or across two — are one entry, each
+  overwriting the other, and the package does not detect it.
+
+Upgrading from 0.1.x with values already on devices: the strings that keep
+them readable are in the 0.2.0 entry of [CHANGELOG.md](CHANGELOG.md).
 
 `tryGetXxx` returns `null` for a missing key and for a stored value of the
 wrong runtime type alike — a caller cannot and should not tell the two

@@ -1,15 +1,8 @@
-/// A typed, key-namespaced wrapper over `SharedPreferences`.
+/// A typed, enum-keyed wrapper over `SharedPreferences`.
 ///
-/// [K] is the app's own preference-key enum — this package never sees its
-/// members, only calls `.toString()` on them. That has two consequences
-/// worth knowing before choosing a key enum:
-///
-/// - Storage is keyed by the default `EnumName.memberName` string Dart
-///   gives every enum value, so two different key enums can never collide,
-///   and reordering members within one enum does not change any stored
-///   key.
-/// - A key enum that overrides `toString()` changes the storage format for
-///   every key in it. Do not override it.
+/// [K] is the app's own preference-key enum. This package never sees its
+/// members and derives nothing from them: a key is stored under the string
+/// [storageKeyOf] returns for it.
 ///
 /// A `tryGetXxx` call returns `null` both when the key was never written
 /// and when the stored value is a different runtime type than requested —
@@ -20,6 +13,23 @@
 /// a list of strings is returned however it is typed, and a list holding
 /// anything else is `null` like any other wrong-type read.
 abstract class PreferenceLocalDataSource<K extends Enum> {
+  /// The string [key] is stored under.
+  ///
+  /// These strings are the on-device format. Once an app has shipped,
+  /// returning a different string for a member leaves the value stored
+  /// under the old one behind, unread. Implement this as one exhaustive
+  /// `switch` over [K] with no wildcard arm, so that a member added later
+  /// does not compile until it has been given a string.
+  ///
+  /// Keeping the strings distinct is the implementer's job.
+  /// `SharedPreferences` is one flat key space, so two keys given the same
+  /// string — in one enum or across two — read and write the same entry,
+  /// and nothing here detects it.
+  ///
+  /// A key's `toString()` and `name` play no part: renaming a member or
+  /// the enum, or overriding `toString()`, changes nothing that is stored.
+  String storageKeyOf(K key);
+
   Future<int?> tryGetInt(K key);
 
   Future<double?> tryGetDouble(K key);

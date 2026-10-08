@@ -4,9 +4,51 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 enum _AppKeys { fontSize, isEnabled, volume, userName, tagQueue }
 
+/// Every string here differs from both the member's `toString()`
+/// (`_AppKeys.fontSize`) and its `name` (`fontSize`), so a data source that
+/// derived a key from the enum instead of asking would read and write
+/// somewhere these tests do not look.
+class _AppDataSource extends PreferenceLocalDataSourceImpl<_AppKeys> {
+  _AppDataSource(super.prefs);
+
+  @override
+  String storageKeyOf(_AppKeys key) {
+    return switch (key) {
+      _AppKeys.fontSize => 'app.font_size',
+      _AppKeys.isEnabled => 'app.is_enabled',
+      _AppKeys.volume => 'app.volume_level',
+      _AppKeys.userName => 'app.user_name',
+      _AppKeys.tagQueue => 'app.tag_queue',
+    };
+  }
+}
+
 enum _OtherAppKeys { fontSize }
 
-/// A key enum doing the one thing the data source's dartdoc says not to.
+class _OtherAppDataSource extends PreferenceLocalDataSourceImpl<_OtherAppKeys> {
+  _OtherAppDataSource(super.prefs);
+
+  @override
+  String storageKeyOf(_OtherAppKeys key) {
+    return switch (key) {
+      _OtherAppKeys.fontSize => 'other.font_size',
+    };
+  }
+}
+
+/// Gives its one key the string [_AppDataSource] gives `_AppKeys.fontSize`.
+class _CollidingDataSource
+    extends PreferenceLocalDataSourceImpl<_OtherAppKeys> {
+  _CollidingDataSource(super.prefs);
+
+  @override
+  String storageKeyOf(_OtherAppKeys key) {
+    return switch (key) {
+      _OtherAppKeys.fontSize => 'app.font_size',
+    };
+  }
+}
+
 enum _OverridingKeys {
   fontSize;
 
@@ -14,14 +56,33 @@ enum _OverridingKeys {
   String toString() => 'custom.$name';
 }
 
+class _OverridingDataSource
+    extends PreferenceLocalDataSourceImpl<_OverridingKeys> {
+  _OverridingDataSource(super.prefs);
+
+  @override
+  String storageKeyOf(_OverridingKeys key) {
+    return switch (key) {
+      _OverridingKeys.fontSize => 'overriding.font_size',
+    };
+  }
+}
+
+/// A store as it looks after a restart: [stored] is already on the device
+/// and nothing has been written through a data source yet.
+Future<SharedPreferences> _storeHolding(Map<String, Object> stored) {
+  SharedPreferences.setMockInitialValues(stored);
+  return SharedPreferences.getInstance();
+}
+
 void main() {
+  late SharedPreferences prefs;
   late PreferenceLocalDataSource<_AppKeys> dataSource;
 
   setUp(() async {
     TestWidgetsFlutterBinding.ensureInitialized();
-    SharedPreferences.setMockInitialValues(<String, Object>{});
-    final SharedPreferences prefs = await SharedPreferences.getInstance();
-    dataSource = PreferenceLocalDataSourceImpl<_AppKeys>(prefs);
+    prefs = await _storeHolding(<String, Object>{});
+    dataSource = _AppDataSource(prefs);
   });
 
   group('round trip per primitive type', () {
@@ -79,32 +140,227 @@ void main() {
     expect(await dataSource.tryGetInt(_AppKeys.fontSize), isNull);
   });
 
-  group('storage key format — load-bearing, do not change casually', () {
-    test(
-      'key is stored under EnumName.memberName, not the bare member name',
-      () async {
-        SharedPreferences.setMockInitialValues(<String, Object>{
-          '_AppKeys.fontSize': 20,
-        });
-        final SharedPreferences prefs = await SharedPreferences.getInstance();
-        dataSource = PreferenceLocalDataSourceImpl<_AppKeys>(prefs);
+  group('every write lands under the string storageKeyOf returns', () {
+    // `getKeys()` is compared whole, so a write that also (or instead) went
+    // under the member's `toString()` or `name` fails here rather than
+    // leaving a stray entry nothing asserts on.
 
-        expect(await dataSource.tryGetInt(_AppKeys.fontSize), 20);
-      },
-    );
+    test('setInt', () async {
+      await dataSource.setInt(_AppKeys.fontSize, 16);
+
+      expect(prefs.getKeys(), <String>{'app.font_size'});
+      expect(prefs.get('app.font_size'), 16);
+    });
+
+    test('setDouble', () async {
+      await dataSource.setDouble(_AppKeys.volume, 0.5);
+
+      expect(prefs.getKeys(), <String>{'app.volume_level'});
+      expect(prefs.get('app.volume_level'), 0.5);
+    });
+
+    test('setBool', () async {
+      await dataSource.setBool(_AppKeys.isEnabled, true);
+
+      expect(prefs.getKeys(), <String>{'app.is_enabled'});
+      expect(prefs.get('app.is_enabled'), true);
+    });
+
+    test('setString', () async {
+      await dataSource.setString(_AppKeys.userName, 'kai');
+
+      expect(prefs.getKeys(), <String>{'app.user_name'});
+      expect(prefs.get('app.user_name'), 'kai');
+    });
+
+    test('setStringList', () async {
+      await dataSource.setStringList(_AppKeys.tagQueue, <String>['a', 'b']);
+
+      expect(prefs.getKeys(), <String>{'app.tag_queue'});
+      expect(prefs.get('app.tag_queue'), <String>['a', 'b']);
+    });
+  });
+
+  group('every read and remove goes to the string storageKeyOf returns', () {
+    // Each store also holds a different value under the member's
+    // `toString()` and under its `name`, so a method that derived its key
+    // from the enum would find something — the wrong thing — rather than
+    // null.
+
+    test('tryGetInt', () async {
+      final PreferenceLocalDataSource<_AppKeys> restored = _AppDataSource(
+        await _storeHolding(<String, Object>{
+          'app.font_size': 20,
+          '_AppKeys.fontSize': 98,
+          'fontSize': 99,
+        }),
+      );
+
+      expect(await restored.tryGetInt(_AppKeys.fontSize), 20);
+    });
+
+    test('tryGetDouble', () async {
+      final PreferenceLocalDataSource<_AppKeys> restored = _AppDataSource(
+        await _storeHolding(<String, Object>{
+          'app.volume_level': 0.5,
+          '_AppKeys.volume': 0.98,
+          'volume': 0.99,
+        }),
+      );
+
+      expect(await restored.tryGetDouble(_AppKeys.volume), 0.5);
+    });
+
+    test('tryGetBool', () async {
+      final PreferenceLocalDataSource<_AppKeys> restored = _AppDataSource(
+        await _storeHolding(<String, Object>{
+          'app.is_enabled': true,
+          '_AppKeys.isEnabled': false,
+          'isEnabled': false,
+        }),
+      );
+
+      expect(await restored.tryGetBool(_AppKeys.isEnabled), true);
+    });
+
+    test('tryGetString', () async {
+      final PreferenceLocalDataSource<_AppKeys> restored = _AppDataSource(
+        await _storeHolding(<String, Object>{
+          'app.user_name': 'kai',
+          '_AppKeys.userName': 'from toString',
+          'userName': 'from name',
+        }),
+      );
+
+      expect(await restored.tryGetString(_AppKeys.userName), 'kai');
+    });
+
+    test('tryGetStringList', () async {
+      final PreferenceLocalDataSource<_AppKeys> restored = _AppDataSource(
+        await _storeHolding(<String, Object>{
+          'app.tag_queue': <String>['a', 'b'],
+          '_AppKeys.tagQueue': <String>['from toString'],
+          'tagQueue': <String>['from name'],
+        }),
+      );
+
+      expect(await restored.tryGetStringList(_AppKeys.tagQueue), <String>[
+        'a',
+        'b',
+      ]);
+    });
+
+    test('remove', () async {
+      final SharedPreferences restoredPrefs = await _storeHolding(
+        <String, Object>{
+          'app.font_size': 20,
+          '_AppKeys.fontSize': 98,
+          'fontSize': 99,
+        },
+      );
+
+      await _AppDataSource(restoredPrefs).remove(_AppKeys.fontSize);
+
+      expect(restoredPrefs.getKeys(), <String>{
+        '_AppKeys.fontSize',
+        'fontSize',
+      });
+    });
+
+    test('an entry stored only under toString() or name is not read', () async {
+      // What a consumer changing a member's string has to know: the value
+      // under the old string stays on the device, and reads as never
+      // written.
+      final SharedPreferences restoredPrefs = await _storeHolding(
+        <String, Object>{
+          '_AppKeys.fontSize': 98,
+          'fontSize': 99,
+        },
+      );
+
+      expect(
+        await _AppDataSource(restoredPrefs).tryGetInt(_AppKeys.fontSize),
+        isNull,
+      );
+      expect(restoredPrefs.getKeys(), <String>{
+        '_AppKeys.fontSize',
+        'fontSize',
+      });
+    });
+  });
+
+  test('a caller holding only the interface can ask for the string', () {
+    // `dataSource` is typed as the interface, so this compiles only while
+    // `storageKeyOf` is declared there and not on the subclass alone.
+    expect(dataSource.storageKeyOf(_AppKeys.fontSize), 'app.font_size');
+  });
+
+  group('a key enum that overrides toString()', () {
+    test('the fixture really does override it', () {
+      expect(_OverridingKeys.fontSize.toString(), 'custom.fontSize');
+    });
+
+    test('is written under the returned string, not its toString()', () async {
+      final PreferenceLocalDataSource<_OverridingKeys> overriding =
+          _OverridingDataSource(prefs);
+
+      await overriding.setInt(_OverridingKeys.fontSize, 24);
+
+      expect(prefs.getKeys(), <String>{'overriding.font_size'});
+      expect(prefs.get('overriding.font_size'), 24);
+    });
+
+    test('is read from the returned string, not its toString()', () async {
+      final PreferenceLocalDataSource<_OverridingKeys> overriding =
+          _OverridingDataSource(
+            await _storeHolding(<String, Object>{
+              'overriding.font_size': 20,
+              'custom.fontSize': 99,
+            }),
+          );
+
+      expect(await overriding.tryGetInt(_OverridingKeys.fontSize), 20);
+    });
+  });
+
+  group('keeping the strings distinct is left to the implementer', () {
+    // The store is one flat key space and the data source adds nothing to
+    // a string, so the enum a key belongs to separates nothing by itself.
+
+    test('two enums given the same string share one entry', () async {
+      final PreferenceLocalDataSource<_OtherAppKeys> colliding =
+          _CollidingDataSource(prefs);
+
+      await dataSource.setInt(_AppKeys.fontSize, 16);
+      await colliding.setInt(_OtherAppKeys.fontSize, 24);
+
+      expect(await dataSource.tryGetInt(_AppKeys.fontSize), 24);
+      expect(await colliding.tryGetInt(_OtherAppKeys.fontSize), 24);
+      expect(prefs.getKeys(), <String>{'app.font_size'});
+    });
+
+    test('removing through one enum removes it for the other', () async {
+      final PreferenceLocalDataSource<_OtherAppKeys> colliding =
+          _CollidingDataSource(prefs);
+
+      await dataSource.setInt(_AppKeys.fontSize, 16);
+      await colliding.remove(_OtherAppKeys.fontSize);
+
+      expect(await dataSource.tryGetInt(_AppKeys.fontSize), isNull);
+    });
 
     test(
-      'two different key enums with the same member name never collide',
+      'two enums with the same member name and different strings do not',
       () async {
-        final SharedPreferences prefs = await SharedPreferences.getInstance();
-        final PreferenceLocalDataSource<_OtherAppKeys> otherDataSource =
-            PreferenceLocalDataSourceImpl<_OtherAppKeys>(prefs);
+        final PreferenceLocalDataSource<_OtherAppKeys> other =
+            _OtherAppDataSource(prefs);
 
         await dataSource.setInt(_AppKeys.fontSize, 16);
-        await otherDataSource.setInt(_OtherAppKeys.fontSize, 24);
+        await other.setInt(_OtherAppKeys.fontSize, 24);
 
         expect(await dataSource.tryGetInt(_AppKeys.fontSize), 16);
-        expect(await otherDataSource.tryGetInt(_OtherAppKeys.fontSize), 24);
+        expect(await other.tryGetInt(_OtherAppKeys.fontSize), 24);
+        expect(prefs.getKeys(), <String>{'app.font_size', 'other.font_size'});
       },
     );
   });
@@ -239,10 +495,10 @@ void main() {
       expect(await dataSource.tryGetDouble(_AppKeys.volume), -0.125);
     });
 
-    test('unicode, newlines and the separator the key format uses', () async {
-      // The last one matters: keys are `EnumName.memberName`, so a dot in a
-      // *value* must not be treated as anything structural.
-      const String awkward = '繁體\n中文 · _AppKeys.fontSize';
+    test('unicode, newlines and a value spelled like a stored key', () async {
+      // The last one matters: a *value* spelled exactly like the string
+      // another key is stored under is still only a value.
+      const String awkward = '繁體\n中文 · app.font_size';
       await dataSource.setString(_AppKeys.userName, awkward);
 
       expect(await dataSource.tryGetString(_AppKeys.userName), awkward);
@@ -303,29 +559,6 @@ void main() {
     });
   });
 
-  group('the toString hazard the dartdoc warns about', () {
-    test('overriding toString changes every stored key in that enum', () async {
-      // `PreferenceLocalDataSource`'s dartdoc says not to override
-      // `toString()` on a key enum because it changes the storage format.
-      // This is that warning as an executable fact rather than prose: a
-      // value written under the default format is invisible to an enum that
-      // overrides it, which in a real app is every stored preference
-      // silently reverting to its default after an upgrade.
-      SharedPreferences.setMockInitialValues(<String, Object>{
-        '_OverridingKeys.fontSize': 20,
-      });
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      final PreferenceLocalDataSource<_OverridingKeys> overriding =
-          PreferenceLocalDataSourceImpl<_OverridingKeys>(prefs);
-
-      expect(await overriding.tryGetInt(_OverridingKeys.fontSize), isNull);
-
-      await overriding.setInt(_OverridingKeys.fontSize, 24);
-      expect(prefs.getInt('custom.fontSize'), 24);
-      expect(prefs.getInt('_OverridingKeys.fontSize'), 20);
-    });
-  });
-
   group('a list that came back from the platform, not from this session', () {
     // The regression group for the defect these tests found. Every other
     // list case here writes and reads inside one session, where the plugin's
@@ -338,11 +571,9 @@ void main() {
     Future<PreferenceLocalDataSource<_AppKeys>> restoredWith(
       Object stored,
     ) async {
-      SharedPreferences.setMockInitialValues(<String, Object>{
-        '_AppKeys.tagQueue': stored,
-      });
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      return PreferenceLocalDataSourceImpl<_AppKeys>(prefs);
+      return _AppDataSource(
+        await _storeHolding(<String, Object>{'app.tag_queue': stored}),
+      );
     }
 
     test('an untyped list of strings reads back as a List<String>', () async {
@@ -371,16 +602,18 @@ void main() {
       // The shape of the bug was that these two disagreed: the plugin cast
       // and handed the list over, this package refused it and reported the
       // preference as unset.
-      SharedPreferences.setMockInitialValues(<String, Object>{
-        '_AppKeys.tagQueue': <Object?>['a', 'b'],
-      });
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      final PreferenceLocalDataSource<_AppKeys> restored =
-          PreferenceLocalDataSourceImpl<_AppKeys>(prefs);
+      final SharedPreferences restoredPrefs = await _storeHolding(
+        <String, Object>{
+          'app.tag_queue': <Object?>['a', 'b'],
+        },
+      );
+      final PreferenceLocalDataSource<_AppKeys> restored = _AppDataSource(
+        restoredPrefs,
+      );
 
       expect(
         await restored.tryGetStringList(_AppKeys.tagQueue),
-        prefs.getStringList('_AppKeys.tagQueue'),
+        restoredPrefs.getStringList('app.tag_queue'),
       );
     });
 
