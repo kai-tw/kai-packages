@@ -68,8 +68,9 @@ responsibility.
 Anything else that implements `PreferenceLocalDataSource` must provide the
 new member too, hand-written fakes and generated mocks alike. A fake does
 not compile until it has one. A mock does, because it answers through
-`noSuchMethod` — stub `storageKeyOf` on it, or a call to it fails at runtime
-instead.
+`noSuchMethod` — stub `storageKeyOf` on it. Left unstubbed, a call to it
+either fails at runtime or returns a placeholder string, depending on the
+mocking library.
 
 `PreferenceRepository<T>` is unchanged, and so is every other signature.
 
