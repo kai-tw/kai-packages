@@ -2,7 +2,7 @@ name: preference_store
 description: >-
   Typed, enum-keyed access over SharedPreferences, shared across my Flutter
   projects.
-version: 0.1.1
+version: 0.2.0
 repository: https://github.com/kai-tw/kai-packages/tree/main/packages/preference_store
 
 environment:

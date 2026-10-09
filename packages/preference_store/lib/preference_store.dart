@@ -4,7 +4,7 @@
 ///
 /// - [PreferenceRepository] — the observable, typed seam a feature-level
 ///   preference repository implements.
-/// - [PreferenceLocalDataSource] (+ [PreferenceLocalDataSourceImpl]) — the
+/// - [PreferenceLocalDataSource] (+ [SharedPreferencesLocalDataSource]) — the
 ///   generic engine underneath: primitives in, primitives out, keyed by an
 ///   app-owned enum instead of a raw string.
 ///
@@ -14,5 +14,5 @@
 library;
 
 export 'src/data/preference_local_data_source.dart';
-export 'src/data/preference_local_data_source_impl.dart';
+export 'src/data/shared_preferences_local_data_source.dart';
 export 'src/domain/preference_repository.dart';
