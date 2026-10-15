@@ -157,6 +157,7 @@ void main() {
     ('--baseline-factor', 'Infinity'),
     ('--workers', '0'),
     ('--workers', 'two'),
+    ('--per-line', '0'),
   ]) {
     test('[error] $flag $value is a usage error, exit 64', () async {
       final ProcessResult result = await Process.run('dart', <String>[

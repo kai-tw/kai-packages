@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:dart_mutants/src/runner/process_command.dart';
+import 'package:dart_mutants/src/runner/suite_coverage.dart';
 import 'package:dart_mutants/src/runner/test_invocation.dart';
 import 'package:dart_mutants/src/runner/test_selection.dart';
 import 'package:path/path.dart' as p;
@@ -40,8 +41,10 @@ String _fake(String name, String body) {
 Future<(TestSelection?, List<String>)> _collect(
   Directory root,
   String executable,
-  List<String> args,
-) async {
+  List<String> args, {
+  Map<String, SuiteCoverage>? recorded,
+  void Function(SuiteCoverage suite)? onSuite,
+}) async {
   final List<String> reasons = <String>[];
   final TestSelection? selection = await collectCoverage(
     TestInvocation.parse(
@@ -49,6 +52,8 @@ Future<(TestSelection?, List<String>)> _collect(
     )!,
     timeout: const Duration(seconds: 30),
     onFailure: reasons.add,
+    recorded: recorded,
+    onSuite: onSuite,
   );
   return (selection, reasons);
 }
@@ -299,6 +304,65 @@ exit 0
           File(p.join(root.path, '.b_runs')).readAsStringSync().trim(),
           '2',
           reason: 'retried once, not more',
+        );
+      },
+    );
+
+    test(
+      '[state] a pass cut short resumes from the file it stopped at: each '
+      'finished file is handed over as it finishes, and not run again',
+      () async {
+        // Logs every file it runs; fails b_test.dart while .fail_b exists.
+        final String flutter = _fake('flutter', '''
+out=""; file=""
+for a in "\$@"; do
+  case "\$a" in
+    --coverage-path=*) out="\${a#--coverage-path=}" ;;
+    test/*) file="\$a" ;;
+  esac
+done
+echo "\$file" >> "${root.path}/.runs"
+[ "\$file" = "test/b_test.dart" ] && [ -e "${root.path}/.fail_b" ] && exit 1
+printf 'SF:lib/pkg.dart\\nDA:1,3\\nDA:2,0\\nend_of_record\\n' > "\$out"
+exit 0
+''');
+        File(p.join(root.path, '.fail_b')).createSync();
+        final Map<String, SuiteCoverage> recorded = <String, SuiteCoverage>{};
+
+        final (TestSelection? cut, _) = await _collect(
+          root,
+          flutter,
+          <String>['test'],
+          onSuite: (SuiteCoverage s) => recorded[s.testFile] = s,
+        );
+        File(p.join(root.path, '.fail_b')).deleteSync();
+        File(p.join(root.path, '.runs')).writeAsStringSync('');
+        final List<String> handedOver = <String>[];
+        final (TestSelection? resumed, List<String> reasons) = await _collect(
+          root,
+          flutter,
+          <String>['test'],
+          recorded: recorded,
+          onSuite: (SuiteCoverage s) => handedOver.add(s.testFile),
+        );
+
+        expect(cut, isNull);
+        expect(recorded.keys, <String>['test/a_test.dart']);
+        expect(reasons, isEmpty);
+        expect(
+          File(p.join(root.path, '.runs')).readAsLinesSync(),
+          <String>['test/b_test.dart'],
+          reason: 'a_test.dart was recorded, so it is not run again',
+        );
+        expect(handedOver, <String>['test/b_test.dart']);
+        expect(resumed!.map.testsFor('lib/pkg.dart', 1, 1), <String>{
+          'test/a_test.dart',
+          'test/b_test.dart',
+        });
+        expect(
+          resumed.map.testsFor('lib/pkg.dart', 2, 2),
+          isEmpty,
+          reason: 'a recorded zero still reads as reported and unhit',
         );
       },
     );

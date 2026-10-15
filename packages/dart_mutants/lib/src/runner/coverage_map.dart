@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:path/path.dart' as p;
 
+import 'suite_coverage.dart';
+
 part 'coverage_map.freezed.dart';
 part 'coverage_map.g.dart';
 
@@ -219,6 +221,36 @@ class CoverageMapBuilder {
       throw FormatException('unexpected lcov DA record for $file', fields);
     }
     add(testFile, file, line, count);
+  }
+
+  /// What [testFile] contributed so far, as a journal stores it — every line
+  /// it was reported on, split into hit and not hit.
+  SuiteCoverage suiteOf(String testFile) {
+    final Map<String, Set<int>> hit = <String, Set<int>>{};
+    final Map<String, Set<int>> zero = <String, Set<int>>{};
+    for (final MapEntry<String, Map<int, Set<String>>> file in _lines.entries) {
+      for (final MapEntry<int, Set<String>> line in file.value.entries) {
+        (line.value.contains(testFile) ? hit : zero)
+            .putIfAbsent(file.key, () => <int>{})
+            .add(line.key);
+      }
+    }
+    return SuiteCoverage(testFile, hit: hit, zero: zero);
+  }
+
+  /// Adds a [SuiteCoverage] a journal recorded, as if its test file had just
+  /// reported it.
+  void addSuite(SuiteCoverage suite) {
+    for (final MapEntry<String, Set<int>> file in suite.hit.entries) {
+      for (final int line in file.value) {
+        add(suite.testFile, file.key, line, 1);
+      }
+    }
+    for (final MapEntry<String, Set<int>> file in suite.zero.entries) {
+      for (final int line in file.value) {
+        add(suite.testFile, file.key, line, 0);
+      }
+    }
   }
 
   CoverageMap build() => CoverageMap._(_lines);

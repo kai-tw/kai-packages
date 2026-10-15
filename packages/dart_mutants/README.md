@@ -78,7 +78,9 @@ result to a JSON Lines file as each is known. Start the same run again with
 the same file and all of them are reused; only the rest run. So a run can be
 stopped — Ctrl-C, `kill`, `--max-minutes`, a crash — and resumed without
 paying for the baseline or the coverage pass again, and a finished run
-started again runs no test at all.
+started again runs no test at all. Under `flutter test` the coverage pass is
+one run per test file, and each one's result is written as it finishes, so a
+pass stopped part-way resumes from the next test file too.
 
 ```bash
 dart run dart_mutants --journal .mutation/journal.jsonl \
@@ -101,6 +103,25 @@ What a start still does every time: the gate checks. The plan line counts
 the mutants that will run, names how many more were reused, and says when
 the baseline or the coverage map came from the journal; the report's
 `reusedMutants` gives the count.
+
+### `--lines` and `--per-line`: mutate what a change touched
+
+A file given on the command line is mutated whole. For a review, that is
+mostly mutants in code the change never touched. `--lines <file>:<ranges>`
+keeps only the mutants on those lines of that file, and `--per-line <n>`
+keeps at most `n` on any one line:
+
+```bash
+dart run dart_mutants --per-line 1 \
+  --lines lib/foo.dart:12-18,40 --lines lib/bar.dart:3 \
+  --test-command "flutter test test/foo" lib/foo.dart lib/bar.dart
+```
+
+Repeat `--lines` per file; a file it doesn't name is mutated whole, and one it
+names that isn't among the files given is a usage error. Which mutants a line
+keeps is fixed by a hash of each mutant, not by order, so the same code always
+keeps the same ones and `--journal` still finds them on a restart. The report
+counts only the mutants kept.
 
 ## What it mutates
 

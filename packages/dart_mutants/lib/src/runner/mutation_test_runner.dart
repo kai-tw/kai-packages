@@ -14,6 +14,7 @@ import 'compile_safety_gate.dart';
 import 'coverage_map.dart';
 import 'file_mutation_report.dart';
 import 'host_load.dart';
+import 'mutant_filter.dart';
 import 'mutant_progress.dart';
 import 'mutant_result.dart';
 import 'mutant_scope.dart';
@@ -60,7 +61,15 @@ class MutationTestRunner {
     this.runBudget,
     this.journalPath,
     this.onJournalDiscarded,
-  }) : tempSpace = tempSpace ?? TempSpace(),
+    Map<String, Set<int>>? lines,
+    this.perLine,
+  }) : lines = lines == null
+           ? null
+           : <String, Set<int>>{
+               for (final MapEntry<String, Set<int>> e in lines.entries)
+                 _pathKey(e.key): e.value,
+             },
+       tempSpace = tempSpace ?? TempSpace(),
        operators = operators ?? defaultOperators(),
        baselineTimeout = baselineTimeout ?? mutantTimeout * 10 {
     if (workers < 1) {
@@ -180,6 +189,18 @@ class MutationTestRunner {
   /// fingerprint is unchanged, the code that baseline passed against and
   /// that map was collected from. The gate checks still run on every start.
   final String? journalPath;
+
+  /// The only lines mutated, per target file — a diff's changed lines, so a
+  /// review sees mutants in what it changed rather than in the whole file. A
+  /// target with no entry is mutated whole; `null`, the default, mutates
+  /// every target whole. See [narrowMutants].
+  final Map<String, Set<int>>? lines;
+
+  /// At most this many mutants on any one line; `null`, the default, keeps
+  /// them all. See [narrowMutants] for which ones a line keeps.
+  final int? perLine;
+
+  static String _pathKey(String path) => p.normalize(p.absolute(path));
 
   /// Called with the reason a journal already at [journalPath] was started
   /// over rather than reused.
@@ -595,6 +616,8 @@ class MutationTestRunner {
       timeout: baselineTimeout,
       onFailure: (String reason) => _selectionUnavailable = reason,
       temps: tempSpace,
+      recorded: _journal?.suites,
+      onSuite: _journal?.recordSuite,
     );
     if (selection != null) {
       _journal?.recordCoverage(selection.map);
@@ -941,7 +964,11 @@ class MutationTestRunner {
       parsed.unit.accept(visitor);
       mutants.addAll(visitor.mutants);
     }
-    return mutants;
+    return narrowMutants(
+      mutants,
+      lines: lines?[_pathKey(filePath)],
+      perLine: perLine,
+    );
   }
 
   /// What [mutant] runs: [testCommand] without a selection or a parse to

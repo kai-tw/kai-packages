@@ -6,6 +6,7 @@ import 'package:dart_mutants/src/runner/coverage_map.dart';
 import 'package:dart_mutants/src/runner/mutant_result.dart';
 import 'package:dart_mutants/src/runner/mutant_verdict.dart';
 import 'package:dart_mutants/src/runner/run_journal.dart';
+import 'package:dart_mutants/src/runner/suite_coverage.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -216,6 +217,65 @@ void main() {
       });
 
       expect(opened.discarded, isNotNull);
+    },
+  );
+
+  test(
+    '[partition] each test file\'s coverage recorded in one run is read back '
+    'in the next, hit and unhit lines both',
+    () {
+      final RunJournal first = RunJournal.open(path, header);
+      first.recordSuite(
+        SuiteCoverage(
+          'test/a_test.dart',
+          hit: <String, Set<int>>{
+            'lib/a.dart': <int>{1, 2, 3, 7},
+          },
+          zero: <String, Set<int>>{
+            'lib/a.dart': <int>{4, 5},
+            'lib/b.dart': <int>{1},
+          },
+        ),
+      );
+      first.recordSuite(SuiteCoverage.empty('test/b_test.dart'));
+
+      final RunJournal again = RunJournal.open(path, header);
+      final SuiteCoverage a = again.suites['test/a_test.dart']!;
+
+      expect(again.suites.keys, <String>{
+        'test/a_test.dart',
+        'test/b_test.dart',
+      });
+      expect(a.hit, <String, Set<int>>{
+        'lib/a.dart': <int>{1, 2, 3, 7},
+      });
+      expect(a.zero, <String, Set<int>>{
+        'lib/a.dart': <int>{4, 5},
+        'lib/b.dart': <int>{1},
+      });
+      expect(again.suites['test/b_test.dart']!.hit, isEmpty);
+      expect(
+        File(path).readAsLinesSync()[1],
+        contains('[[1,3],[7,7]]'),
+        reason: 'consecutive lines are stored as one run',
+      );
+    },
+  );
+
+  test(
+    '[partition] a journal started over keeps no test file\'s coverage',
+    () {
+      RunJournal.open(
+        path,
+        header,
+      ).recordSuite(SuiteCoverage.empty('test/a_test.dart'));
+
+      final RunJournal opened = RunJournal.open(path, <String, Object?>{
+        ...header,
+        'fingerprint': 'bbbb',
+      });
+
+      expect(opened.suites, isEmpty);
     },
   );
 
