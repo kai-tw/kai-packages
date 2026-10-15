@@ -8,17 +8,19 @@ import '../mutant.dart';
 import 'coverage_map.dart';
 import 'mutant_result.dart';
 import 'mutant_verdict.dart';
+import 'suite_coverage.dart';
 
 /// Every mutant's result, written to a file as it finishes, so a run that is
 /// stopped part-way — Ctrl-C, `kill`, `--max-minutes`, a crash — can be
 /// started again and pick up where it stopped instead of from the first
 /// mutant. The baseline's wall time and the coverage map are written too, so
 /// a restart does not pay for them again: on a large Flutter suite the
-/// coverage pass alone is hours.
+/// coverage pass alone is hours — longer than a cloud VM may live — so under
+/// `flutter test` each test file's part of it is written as it finishes too.
 ///
 /// The file is JSON Lines: a header naming what the results depend on, then
-/// the baseline, the coverage map and one line per finished mutant, each
-/// appended as it is known. A later run reuses what is recorded only when the
+/// the baseline, each test file's coverage, the coverage map and one line per
+/// finished mutant, each appended as it is known. A later run reuses what is recorded only when the
 /// header matches it exactly; otherwise the file is started over and
 /// [discarded] says why. The header has two halves:
 ///
@@ -44,6 +46,7 @@ class RunJournal {
     this.recordedCount, {
     this.baseline,
     this.coverage,
+    this.suites = const <String, SuiteCoverage>{},
   });
 
   /// Opens [path] for a run whose header is [header], keeping what it
@@ -65,6 +68,13 @@ class RunJournal {
         recorded.length,
         baseline: _lastOf(body, _baselineOf),
         coverage: _lastOf(body, _coverageOf),
+        suites: <String, SuiteCoverage>{
+          for (final SuiteCoverage s
+              in body
+                  .map((String l) => SuiteCoverage.fromJson(_tryDecode(l)))
+                  .nonNulls)
+            s.testFile: s,
+        },
       );
     }
     file
@@ -153,6 +163,13 @@ class RunJournal {
   /// The map a coverage pass over this same code collected, or `null` when
   /// none is recorded.
   final CoverageMap? coverage;
+
+  /// Each test file's part of a coverage pass that had not finished, by test
+  /// file — see [SuiteCoverage]. Empty when none is recorded.
+  final Map<String, SuiteCoverage> suites;
+
+  /// Appends one test file's part of the coverage pass to the file.
+  void recordSuite(SuiteCoverage suite) => _append(suite.toJson());
 
   /// Appends a passing baseline's wall time to the file.
   void recordBaseline(Duration wallTime) =>

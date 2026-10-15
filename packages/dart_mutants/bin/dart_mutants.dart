@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
 import 'package:dart_mutants/src/runner/file_mutation_report.dart';
+import 'package:dart_mutants/src/runner/line_selection.dart';
 import 'package:dart_mutants/src/runner/mutant_progress.dart';
 import 'package:dart_mutants/src/runner/mutant_result.dart';
 import 'package:dart_mutants/src/runner/mutation_run_report.dart';
@@ -12,6 +13,7 @@ import 'package:dart_mutants/src/runner/process_command.dart';
 import 'package:dart_mutants/src/runner/run_budget.dart';
 import 'package:dart_mutants/src/runner/run_plan.dart';
 import 'package:dart_mutants/src/runner/wait_span.dart';
+import 'package:path/path.dart' as p;
 
 /// The CLI contract: a file list and a test command in, per-file
 /// total/undetected out. Which files to pass and what to do with the report
@@ -69,6 +71,22 @@ Future<void> main(List<String> arguments) async {
           '"flutter test ..." --test-command; a command the coverage pass '
           'refuses, or a pass that fails, aborts the run before the first '
           'mutant (abortKind selection-unavailable).',
+    )
+    ..addMultiOption(
+      'lines',
+      valueHelp: 'file:ranges',
+      splitCommas: false,
+      help:
+          'Mutate only these lines of this file, e.g. lib/a.dart:3-7,12 — a '
+          'diff\'s changed lines, so a review sees mutants in what it changed. '
+          'Repeat it per file; a file given without it is mutated whole.',
+    )
+    ..addOption(
+      'per-line',
+      valueHelp: 'n',
+      help:
+          'At most this many mutants on any one line. Which ones a line keeps '
+          'is fixed by the code, so a resumed run keeps the same ones.',
     )
     ..addOption(
       'workers',
@@ -171,6 +189,8 @@ Future<void> main(List<String> arguments) async {
     workers: int.parse(args['workers'] as String),
     runBudget: _optionalBudget(args['max-minutes'] as String?),
     journalPath: args['journal'] as String?,
+    lines: _lines(args),
+    perLine: _perLine(args),
     onJournalDiscarded: (String reason) => stderr.writeln(
       'note: the journal at ${args['journal']} was started over — $reason — '
       'so every mutant runs.',
@@ -243,11 +263,7 @@ ArgResults? _parseAndValidate(List<String> arguments, ArgParser parser) {
     return null;
   }
 
-  final String? optionError =
-      _timeoutOptionError(args) ??
-      _maxMinutesOptionError(args) ??
-      _outputOptionError(args) ??
-      _workersOptionError(args);
+  final String? optionError = _optionError(args);
   if (optionError != null) {
     stderr.writeln(optionError);
     exitCode = 64;
@@ -256,6 +272,59 @@ ArgResults? _parseAndValidate(List<String> arguments, ArgParser parser) {
 
   return args;
 }
+
+/// The first thing wrong with any option's value, or `null` if nothing is.
+String? _optionError(ArgResults args) =>
+    _timeoutOptionError(args) ??
+    _maxMinutesOptionError(args) ??
+    _outputOptionError(args) ??
+    _workersOptionError(args) ??
+    _perLineOptionError(args) ??
+    _linesOptionError(args);
+
+String? _perLineOptionError(ArgResults args) {
+  final String? perLine = args['per-line'] as String?;
+  return perLine != null && (int.tryParse(perLine) ?? 0) < 1
+      ? '--per-line must be a positive whole number'
+      : null;
+}
+
+/// What is wrong with --lines, or `null` if nothing is. A --lines file that
+/// is not among the files given would silently narrow nothing, so it is
+/// refused.
+String? _linesOptionError(ArgResults args) {
+  final Set<String> targets = args.rest.map(_absolute).toSet();
+  for (final String value in args['lines'] as List<String>) {
+    try {
+      final String file = LineSelection.parse(value).file;
+      if (!targets.contains(_absolute(file))) {
+        return '--lines names $file, which is not among the files given';
+      }
+    } on FormatException catch (e) {
+      return '--lines: ${e.message} (${e.source})';
+    }
+  }
+  return null;
+}
+
+String _absolute(String path) => p.normalize(p.absolute(path));
+
+/// --lines as the runner takes it, or `null` when none was given.
+Map<String, Set<int>>? _lines(ArgResults args) {
+  final List<String> values = args['lines'] as List<String>;
+  if (values.isEmpty) {
+    return null;
+  }
+  final Map<String, Set<int>> lines = <String, Set<int>>{};
+  for (final String value in values) {
+    final LineSelection selection = LineSelection.parse(value);
+    lines.putIfAbsent(selection.file, () => <int>{}).addAll(selection.lines);
+  }
+  return lines;
+}
+
+int? _perLine(ArgResults args) =>
+    int.tryParse(args['per-line'] as String? ?? '');
 
 /// What is wrong with the three timeout options, or `null` if nothing is.
 String? _timeoutOptionError(ArgResults args) {

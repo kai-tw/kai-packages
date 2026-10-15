@@ -8,6 +8,7 @@ import 'coverage_map.dart';
 import 'line_range.dart';
 import 'mutant_scope.dart';
 import 'process_command.dart';
+import 'suite_coverage.dart';
 import 'temp_space.dart';
 import 'test_invocation.dart';
 
@@ -83,11 +84,18 @@ class TestSelection {
 ///
 /// The reports go to a directory from [temps], deleted before this returns;
 /// the runner passes its own, so an interrupt deletes it too.
+///
+/// Under `flutter test`, each test file's part is handed to [onSuite] as it
+/// finishes, and a test file already in [recorded] is not run again: a pass
+/// cut short resumes from where it stopped. `dart test` covers every file in
+/// one run, so there is nothing to resume there.
 Future<TestSelection?> collectCoverage(
   TestInvocation invocation, {
   required Duration timeout,
   required void Function(String reason) onFailure,
   TempSpace? temps,
+  Map<String, SuiteCoverage>? recorded,
+  void Function(SuiteCoverage suite)? onSuite,
 }) async {
   final TempSpace space = temps ?? TempSpace();
   final String? packageName = _packageName(invocation.root);
@@ -115,6 +123,8 @@ Future<TestSelection?> collectCoverage(
         out,
         builder,
         timeout,
+        recorded,
+        onSuite,
       ),
     };
     if (failure != null) {
@@ -290,7 +300,8 @@ Future<String?> _collectDart(
       : null;
 }
 
-/// One `flutter test --coverage` run per test file; `null` on success, else
+/// One `flutter test --coverage` run per test file, skipping those in
+/// [recorded] and handing each new one to [onSuite]; `null` on success, else
 /// why not.
 Future<String?> _collectFlutter(
   TestInvocation invocation,
@@ -298,31 +309,69 @@ Future<String?> _collectFlutter(
   Directory out,
   CoverageMapBuilder builder,
   Duration timeout,
+  Map<String, SuiteCoverage>? recorded,
+  void Function(SuiteCoverage suite)? onSuite,
 ) async {
   for (int i = 0; i < testFiles.length; i++) {
-    final File lcov = File(p.join(out.path, '$i.info'));
-    final int? exit = await _retriedOnce(
-      () => invocation
-          .withTestFiles(
-            <String>[testFiles[i]],
-            extra: <String>['--coverage', '--coverage-path=${lcov.path}'],
-          )
-          .run(timeout: timeout),
-      failed: (int? exit) =>
-          exit != _noTestsRan && (exit != 0 || !lcov.existsSync()),
-    );
-    if (exit == _noTestsRan) {
-      // Declares no test, or none the command's filters keep: it cannot
-      // fail a test in the full command either, so it reaches nothing.
+    if (recorded?[testFiles[i]] case final SuiteCoverage suite) {
+      builder.addSuite(suite);
       continue;
     }
-    if (exit != 0 || !lcov.existsSync()) {
+    final File lcov = File(p.join(out.path, '$i.info'));
+    final int? exit = await _coverageRun(
+      invocation,
+      testFiles[i],
+      lcov,
+      timeout,
+    );
+    final SuiteCoverage? suite = _suiteOf(invocation, testFiles[i], exit, lcov);
+    if (suite == null) {
       return _failed(exit, 'flutter test --coverage ${testFiles[i]}');
     }
-    builder.addLcov(testFiles[i], lcov.readAsStringSync());
+    builder.addSuite(suite);
+    onSuite?.call(suite);
   }
   return null;
 }
+
+/// What [testFile]'s coverage run reported, read alone so it can be recorded
+/// by itself; `null` when the run failed.
+SuiteCoverage? _suiteOf(
+  TestInvocation invocation,
+  String testFile,
+  int? exit,
+  File lcov,
+) {
+  if (exit == _noTestsRan) {
+    // Declares no test, or none the command's filters keep: it cannot fail a
+    // test in the full command either, so it reaches nothing.
+    return SuiteCoverage.empty(testFile);
+  }
+  if (exit != 0 || !lcov.existsSync()) {
+    return null;
+  }
+  return (CoverageMapBuilder(
+    invocation.root,
+  )..addLcov(testFile, lcov.readAsStringSync())).suiteOf(testFile);
+}
+
+/// One `flutter test --coverage` of [testFile] into [lcov], run again once
+/// if it fails; its exit code, `null` when it timed out.
+Future<int?> _coverageRun(
+  TestInvocation invocation,
+  String testFile,
+  File lcov,
+  Duration timeout,
+) => _retriedOnce(
+  () => invocation
+      .withTestFiles(
+        <String>[testFile],
+        extra: <String>['--coverage', '--coverage-path=${lcov.path}'],
+      )
+      .run(timeout: timeout),
+  failed: (int? exit) =>
+      exit != _noTestsRan && (exit != 0 || !lcov.existsSync()),
+);
 
 /// `dart test` and `flutter test` both exit with this when no test ran.
 const int _noTestsRan = 79;

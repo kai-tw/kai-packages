@@ -1,3 +1,23 @@
+## 0.7.0
+
+**`--lines <file>:<ranges>` and `--per-line <n>`: mutate what a change
+touched, a few mutants a line.** Mutating every line of every changed file
+costs hours on a Flutter suite, and most of those mutants sit in code the
+change never touched. `--lines` keeps only the mutants on the given lines of
+a file — a diff's changed lines — and `--per-line` keeps at most that many on
+any one line. Which mutants a line keeps is fixed by a hash of each mutant,
+so the same code always keeps the same ones and a journal still names them.
+
+**A coverage pass stopped part-way resumes from the next test file.** Under
+`flutter test` the pass is one run per test file, and until now the journal
+got the coverage map only once the whole pass had finished. On a large suite
+the pass alone can outlive a cloud VM, so every restart ran it from the
+first test file again and never reached a mutant. Each test file's coverage
+is now appended to the journal as it finishes, as runs of hit and unhit
+lines, and a start whose header and fingerprint match runs only the test
+files it has no record of. `dart test` covers every file in one run, so
+nothing changes there.
+
 ## 0.6.1
 
 **`json_annotation` is `^4.11.0`, not `^4.12.0`.** `json_serializable`
