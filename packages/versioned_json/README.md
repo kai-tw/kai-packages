@@ -1,20 +1,34 @@
 # versioned_json
 
-Persisted JSON that carries its own schema version and is brought up to date
-one step at a time — plus field-by-field operations on a flat record's JSON.
+Persisted JSON that carries its own schema version, is brought up to date one
+step at a time, and is never read or overwritten by a build older than the one
+that wrote it — plus field-by-field operations on a flat record's JSON.
 
-Pure Dart. The core library imports no `dart:io`; file helpers live in a
-separate library.
+The library imports `dart:io`, so it runs on the Dart VM and Flutter's native
+platforms, not on the web.
 
-## Migrations
+## Schemas
 
-Every format declares one migrator. The version lives under `schemaVersion`;
-JSON without that key reads as version 1, so files written before the format
-was versioned stay readable.
+One schema per persisted format. It owns the format's whole history: the
+current version, the steps from every older one, and the DTO today's shape
+parses into. Callers never see the version or the map in between: they read a
+DTO or a refusal.
 
 ```dart
-class NoteMigrator extends VersionedJsonMigrator {
-  const NoteMigrator();
+class NoteDto implements VersionedJsonDto {
+  const NoteDto({required this.text, required this.createdAt});
+
+  factory NoteDto.fromJson(Map<String, dynamic> json) => /* generated */;
+
+  final String text;
+  final DateTime createdAt;
+
+  @override
+  Map<String, dynamic> toJson() => /* generated */;
+}
+
+class NoteSchema extends VersionedJsonFileSchema<NoteDto> {
+  const NoteSchema();
 
   @override
   int get currentVersion => 2;
@@ -24,87 +38,141 @@ class NoteMigrator extends VersionedJsonMigrator {
     Map<String, dynamic> source,
     int sourceVersion,
     DateTime modifiedAt,
-  ) {
-    return switch (sourceVersion) {
-      1 => <String, dynamic>{
-        ...source,
-        'createdAt': modifiedAt.toUtc().toIso8601String(),
-        VersionedJsonMigrator.versionKey: 2,
-      },
-      _ => throw StateError('no step from version $sourceVersion'),
-    };
-  }
-}
-
-final Map<String, dynamic> current =
-    const NoteMigrator().migrateJson(decoded, downloadedAt);
-```
-
-Three rules make this safe to run over data you cannot regenerate:
-
-- **A step writes the new version itself.** Nothing else stamps it, and a step
-  that forgets produces JSON that is migrated again on the next read.
-- **A shipped step is frozen.** It works on maps alone, never on today's DTO or
-  domain types: its job is to produce the shape the next version had *when it
-  shipped*, and today's types have moved on since.
-- **A newer version is never read and never overwritten.** `migrateJson` throws
-  `SchemaVersionTooNewException`; the build that wrote it needs it back intact.
-  A version field that is present but not an integer of at least 1 throws
-  `SchemaVersionInvalidException` instead of being guessed at. Both are
-  `FormatException`s and carry only version numbers, never the JSON, so they
-  are safe to log.
-
-`currentVersion` may stay at 1 for a format that carried a version from its
-first write. A format that existed on disk unversioned starts at 2, because its
-old files read as version 1.
-
-## Schemas
-
-A `VersionedJsonSchema<T>` pairs a DTO type with its format's migrator, so a
-read is "migrate, then parse" and the two cannot be mismatched:
-
-```dart
-class NoteSchema extends VersionedJsonSchema<NoteDto> {
-  const NoteSchema();
-
-  @override
-  VersionedJsonMigrator get migrator => const NoteMigrator();
+  ) => switch (sourceVersion) {
+    1 => <String, dynamic>{
+      ...source,
+      'schemaVersion': 2,
+      'createdAt': modifiedAt.toUtc().toIso8601String(),
+    },
+    _ => throwNoStepFrom(sourceVersion),
+  };
 
   @override
   NoteDto fromJson(Map<String, dynamic> json) => NoteDto.fromJson(json);
 }
-
-final NoteDto note = const NoteSchema().readJson(decoded, downloadedAt);
 ```
 
-The DTO implements `VersionedJsonDto`. `writeFile` stamps its `schemaVersion`
-into the file; JSON stored any other way must carry that key in `toJson`.
+The DTO carries no version. The schema stamps `schemaVersion` when it encodes
+one, and reads the stored version before the DTO is ever parsed. A document
+without `schemaVersion`, or with `null` there, is version 1, so files written
+before the format was versioned stay readable. A format that existed on disk
+unversioned therefore starts at 2; one that carried a version from its first
+write may stay at 1 and needs no steps.
 
-## Files
+Three rules make this safe to run over data you can't regenerate:
+
+- **A shipped step is frozen.** It reads and writes the map alone, never
+  today's DTO or domain types: its job is to produce the shape the next
+  version had *when it shipped*, and today's types have moved on since. Keep
+  the steps in a private class of their own, away from the DTO-facing code.
+- **A newer version is never read and never overwritten.** The build that
+  wrote it needs it back intact.
+- **An enum code this build doesn't know is refused too.** Override
+  `holdsUnknownCode` for a format with coded fields. Read with a default member
+  in the code's place, the document would be written back with that member
+  over the newer value.
+
+Every hook a subclass implements is `@protected`.
+
+## Lenient reads: files kept on disk
+
+`VersionedJsonFileSchema` is for a file this build owns. A document it may not
+act on reads as `null`, so the caller falls back to an empty value rather than
+overwriting it. A newer build's document stays on disk untouched. An older
+document that holds an unknown enum code is different: it's migrated and
+written back at the current version first, with the code kept as stored (a
+step passes it through like any other field), and only then reads as `null`:
 
 ```dart
-import 'package:versioned_json/versioned_json_io.dart';
+const NoteSchema schema = NoteSchema();
 
-final NoteDto? note = await const NoteSchema().readFile(file);
-await const NoteSchema().writeFile(file, note!);
-final int rewritten = await const NoteMigrator().migrateDirectory(notesDir);
+final NoteDto? note = await schema.readFile(file);
+await schema.writeFile(file, updated);
+final NoteDto? downloaded = schema.readString(text, downloadedAt);
+
+// A sweep at startup, so every file is at the current version.
+await schema.migrateDirectory(notesDir);
 ```
 
-`migrateFile` and `readFile` write a migrated file back once, and return null
-when there is no file or no JSON object in it. A version they cannot migrate
-throws and the file is left untouched; so does a `FileSystemException` (no
-permission to read, a failed write-back), rather than reading as "no data" that
-a caller would then overwrite. `migrateDirectory` skips either kind of file and
-carries on, so one file a newer build wrote, or one the process cannot read,
-does not hold every other file at its old version.
+`readFile` and `readString` answer `null` for a missing or unreadable file, an
+empty one, bytes that aren't UTF-8 or JSON, JSON that is no object, a version
+that is no integer or is below 1, a version above `currentVersion`, and an
+unknown enum code. Anything `fromJson` throws propagates: that's a mismatch
+between the last step and the DTO, a bug rather than missing data.
 
-Every write goes to its own staging sibling in the same directory and is
-renamed over the target, so a crash leaves the old content or the new, never a
-truncated file. Concurrent writes to one file never share a staging file; the
-last rename wins. A crash between the two steps can leave a stray `*.tmp`
-sibling, which no read or sweep ever touches. `writeFile` stamps the DTO's `schemaVersion` into the JSON itself, and
-throws an `ArgumentError` without writing when that version is not the
-schema's current one.
+A read migrates in place. An older file is rewritten once, after every step,
+at the current version — even when the last step forgot to stamp it.
+`migrateFile` does the same without parsing, and `migrateDirectory` runs it
+over every `.json` file in a directory. Both are idempotent.
+
+`modifiedAt`, passed to each step, is the file's modification time, or for
+`readString`, whatever time the caller passes in (the download time, say). A
+step uses it to fill in a timestamp the old shape didn't record.
+
+## Atomic writes
+
+`writeFile` and every write-back stage the bytes in `<file>.tmp` next to the
+target, flush them, and rename the staging file over the target. A rename is
+atomic within one file system, so a reader sees the old document or the new,
+never part of one. A failed write leaves the target as it was and removes the
+staging file.
+
+**The caller must serialize writes to one file.** The staging name is fixed,
+so two writes to the same target at once share `<file>.tmp`. Run them one
+after another; writes to different files don't interfere.
+
+A crash between the two steps can leave a stray `<file>.tmp`. Its name doesn't
+end in `.json`, so no read or sweep touches it, and the next write to that
+target replaces it.
+
+## Strict reads
+
+A store that has to tell a newer build's document from a corrupt one reads
+through the protected `decodeBytes`, which returns the DTO or throws the
+`VersionedJsonReadException` that says why not:
+
+| Refusal | When |
+|---|---|
+| `VersionedJsonReadNewerException` | The version is above `currentVersion`. |
+| `VersionedJsonReadUnknownCodeException` | `holdsUnknownCode` is true for the migrated document. |
+| `VersionedJsonReadCorruptException` | Not UTF-8 or JSON, no object, a version that is no integer or is below 1, or a `CheckedFromJsonException` from `fromJson`. |
+
+```dart
+enum NoteRefusal { needsUpdate, corrupt }
+
+class StrictNoteSchema extends NoteSchema {
+  const StrictNoteSchema();
+
+  /// Why [bytes] can't be read, or null when they can.
+  NoteRefusal? refusalOf(Uint8List bytes, DateTime modifiedAt) {
+    try {
+      decodeBytes(bytes, modifiedAt);
+      return null;
+    } on VersionedJsonReadException catch (e) {
+      return switch (e) {
+        VersionedJsonReadNewerException() ||
+        VersionedJsonReadUnknownCodeException() => NoteRefusal.needsUpdate,
+        VersionedJsonReadCorruptException() => NoteRefusal.corrupt,
+      };
+    }
+  }
+}
+```
+
+Each carries `storedVersion`, the version on disk, and never the document, so
+they're safe to log. They're all `FormatException`s, so a caller that already
+skips malformed input skips them too.
+
+`decodeBytesWithin` reads a document whose content moved into this format out
+of another schema's document, and every refusal reports the outer document's
+version. `readMigrated` hands a reader the migrated map, for salvaging one
+value out of a document that may not decode as a whole.
+
+A schema asked for a step it doesn't hold throws
+`VersionedJsonMigrationException`. That means `currentVersion` was raised
+without the step that reaches it, which no stored file can cause, so it's an
+`Exception` but not a `FormatException`: an `on FormatException` that skips bad
+input doesn't swallow it.
 
 ## Field-by-field
 
@@ -131,12 +199,12 @@ final PlantValues merged = plantFieldwise.take(
 final Set<PlantField> edited = plantFieldwise.changed(before, after);
 ```
 
-`nonValueFields` names fields the values JSON does not carry — a set merged
+`nonValueFields` names fields the values JSON doesn't carry — a set merged
 somewhere else, say; `take` and `changed` pass over them.
 
-`changed` compares JSON, deeply, not Dart objects. That is the point — the same
-instant as local time and as UTC is `!=` in Dart but one value in JSON — and it
-is also the precondition: **`toJson` must be canonical**, writing equivalent
+`changed` compares JSON, deeply, not Dart objects. That's the point — the same
+instant as local time and as UTC is `!=` in Dart but one value in JSON — and
+it's also the precondition: **`toJson` must be canonical**, writing equivalent
 values identically.
 
 ## Checking a consumer's own types
@@ -151,29 +219,22 @@ import 'package:versioned_json/testing.dart';
 expect(plantFieldwise.keyMismatches(fullySetPlant), isEmpty);
 expect(plantFieldwise.roundTripMismatches(sampleJson), isEmpty);
 expect(plantFieldwise.equivalenceMismatches(atUtc, sameInstantLocal), isEmpty);
-expect(
-  const NoteMigrator().stepExampleMismatches(<int, VersionedJsonStepExample>{
-    1: VersionedJsonStepExample(before: v1, after: v2, modifiedAt: at),
-  }),
-  isEmpty,
-);
 ```
 
-`keyMismatches` fails when a new enum member has no key in `toJson`, and
-`stepExampleMismatches` fails when `currentVersion` rises without an example for
-the new step.
+`keyMismatches` fails when a new enum member has no key in `toJson`.
 
 ## Status
 
-`0.1.0`, distributed as a git dependency rather than on pub.dev:
+`0.2.0`, distributed as a git dependency rather than on pub.dev:
 
 ```yaml
 versioned_json:
   git:
     url: https://github.com/kai-tw/kai-packages.git
     path: packages/versioned_json
-    ref: versioned_json-v0.1.0
+    ref: versioned_json-v0.2.0
 ```
 
-The version key, `schemaVersion`, is persisted by every consumer and does not
-change without a major version.
+0.2.0 replaces the 0.1.0 API; see the [changelog](CHANGELOG.md). The version
+key, `schemaVersion`, is persisted by every consumer and doesn't change without
+a major version.

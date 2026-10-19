@@ -1,9 +1,9 @@
 name: versioned_json
 description: >-
-  Versioned JSON: a version field, step-by-step migrations that refuse to read
-  or overwrite a newer version, and field-wise take/changed over a flat
-  record's JSON. Pure Dart; the file helpers live in a separate library.
-version: 0.1.0
+  Versioned JSON: a schema that owns a format's version, its migration steps
+  and its DTO, strict and lenient reads that never overwrite a newer version,
+  atomic file writes, and field-wise take/changed over a flat record's JSON.
+version: 0.2.0
 repository: https://github.com/kai-tw/kai-packages/tree/main/packages/versioned_json
 issue_tracker: https://github.com/kai-tw/kai-packages/issues
 publish_to: none
@@ -12,6 +12,13 @@ environment:
   sdk: ^3.8.0
 
 resolution: workspace
+
+dependencies:
+  # CheckedFromJsonException: a `checked: true` generated codec's parse
+  # failure, which a strict read reports as a corrupt document.
+  json_annotation: ^4.9.0
+  # @protected on the schema hooks a subclass implements.
+  meta: ^1.15.0
 
 dev_dependencies:
   lints: ^6.1.0
