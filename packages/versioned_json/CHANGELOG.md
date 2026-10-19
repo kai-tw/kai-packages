@@ -54,9 +54,9 @@ Nothing from 0.1.0 is kept except `FieldwiseJson` and its checks in
   know is refused rather than read with a default member in its place.
 - **`wrapUnversioned`** — a format whose first shape was no JSON object (a
   bare list, say) enters the steps at version 1.
-- **`VersionedJsonMigrationError`**, a `StateError`, for a schema asked for a
-  step it doesn't hold: a programming error that an `on FormatException`
-  doesn't catch.
+- **`VersionedJsonMigrationException`** for a schema asked for a step it
+  doesn't hold. It implements `Exception` but isn't a `FormatException`, so an
+  `on FormatException` doesn't catch it.
 - A migrating read's write-back stamps the current version even when the last
   step doesn't.
 - Dependencies on `json_annotation` (a strict read reports a

@@ -168,10 +168,11 @@ of another schema's document, and every refusal reports the outer document's
 version. `readMigrated` hands a reader the migrated map, for salvaging one
 value out of a document that may not decode as a whole.
 
-A schema asked for a step it doesn't hold throws `VersionedJsonMigrationError`.
-That's a programming error — `currentVersion` raised without the step that
-reaches it — not something a stored file can cause, so it's a `StateError`,
-which an `on FormatException` doesn't catch.
+A schema asked for a step it doesn't hold throws
+`VersionedJsonMigrationException`. That means `currentVersion` was raised
+without the step that reaches it, which no stored file can cause, so it's an
+`Exception` but not a `FormatException`: an `on FormatException` that skips bad
+input doesn't swallow it.
 
 ## Field-by-field
 

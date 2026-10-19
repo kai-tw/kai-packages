@@ -15,8 +15,8 @@
 /// * [VersionedJsonReadNewerException], [VersionedJsonReadUnknownCodeException]
 ///   and [VersionedJsonReadCorruptException] — the three ways a stored
 ///   document is refused, all [FormatException]s.
-/// * [VersionedJsonMigrationError] — a schema asked for a step it does
-///   not hold: a programming error, so a [StateError].
+/// * [VersionedJsonMigrationException] — a schema asked for a step it does
+///   not hold. No stored file causes it, so it is not a [FormatException].
 /// * [FieldwiseJson] — copy chosen fields from one record into another, and
 ///   list which fields changed, through the record's JSON.
 ///

@@ -1,3 +1,4 @@
+import 'package:test/test.dart';
 import 'package:versioned_json/versioned_json.dart';
 
 import 'note_dto.dart';
@@ -18,10 +19,10 @@ class NoteSchema extends VersionedJsonFileSchema<NoteDto> {
     DateTime modifiedAt,
   ) {
     // A loop that stops advancing its version would hand a step the map it
-    // just produced under the same number, forever: refused here, so that
+    // just produced under the same number, forever: failed here, so that
     // regression fails at the second step instead of hanging the run.
     if ((source['schemaVersion'] ?? 1) != sourceVersion) {
-      throw StateError('step from v$sourceVersion handed another version');
+      fail('step from v$sourceVersion handed another version');
     }
     final List<dynamic> steps = <dynamic>[
       ...source['steps'] as List<dynamic>? ?? <dynamic>[],

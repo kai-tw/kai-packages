@@ -166,7 +166,7 @@ void main() {
 
       await expectLater(
         const _SteplessNoteSchema().migrateFile(file),
-        throwsA(isA<VersionedJsonMigrationError>()),
+        throwsA(isA<VersionedJsonMigrationException>()),
       );
       expectUntouched(file, content);
     });

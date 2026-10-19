@@ -19,7 +19,7 @@ import 'io/json_file_atomic_writer.dart';
 import 'versioned_json_dto.dart';
 
 part 'versioned_json_file_schema.dart';
-part 'versioned_json_migration_error.dart';
+part 'versioned_json_migration_exception.dart';
 part 'versioned_json_migration_outcome.dart';
 part 'versioned_json_read_exceptions.dart';
 
@@ -84,10 +84,11 @@ abstract class VersionedJsonSchema<TDto extends VersionedJsonDto> {
   /// What [migrateOneStep] answers for a [sourceVersion] it holds no step
   /// from.
   @protected
-  Never throwNoStepFrom(int sourceVersion) => throw VersionedJsonMigrationError(
-    sourceVersion: sourceVersion,
-    currentVersion: currentVersion,
-  );
+  Never throwNoStepFrom(int sourceVersion) =>
+      throw VersionedJsonMigrationException(
+        sourceVersion: sourceVersion,
+        currentVersion: currentVersion,
+      );
 
   /// [document], a JSON value of this file that is no object, as the
   /// version-1 object it stands for — or `null`, the default, when this file

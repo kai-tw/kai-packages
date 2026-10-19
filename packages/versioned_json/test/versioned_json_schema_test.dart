@@ -402,47 +402,45 @@ void main() {
 
   group('throwNoStepFrom', () {
     test('a schema raised to version 2 without the step that reaches it '
-        'throws VersionedJsonMigrationError, a StateError naming the '
-        'version asked for and the current one', () {
+        'throws VersionedJsonMigrationException naming the version asked for '
+        'and the current one', () {
       expect(
         () => _SteplessNoteSchema().readString('{}', modifiedAt),
         throwsA(
-          isA<VersionedJsonMigrationError>()
+          isA<VersionedJsonMigrationException>()
               .having(
-                (VersionedJsonMigrationError e) => e.sourceVersion,
+                (VersionedJsonMigrationException e) => e.sourceVersion,
                 'sourceVersion',
                 1,
               )
               .having(
-                (VersionedJsonMigrationError e) => e.currentVersion,
+                (VersionedJsonMigrationException e) => e.currentVersion,
                 'currentVersion',
                 2,
               )
               .having(
-                (VersionedJsonMigrationError e) => e.message,
+                (VersionedJsonMigrationException e) => e.message,
                 'message',
                 'No migration step from schema v1 (current v2)',
               )
               .having(
-                (VersionedJsonMigrationError e) => e.toString(),
+                (VersionedJsonMigrationException e) => e.toString(),
                 'toString',
-                'VersionedJsonMigrationError: '
+                'VersionedJsonMigrationException: '
                     'No migration step from schema v1 (current v2)',
               ),
         ),
       );
     });
 
-    test('is no FormatException, so a catch for bad input does not swallow '
-        'it', () {
-      expect(
-        VersionedJsonMigrationError(sourceVersion: 1, currentVersion: 2),
-        isA<StateError>().having(
-          (StateError e) => e is FormatException,
-          'is FormatException',
-          isFalse,
-        ),
-      );
+    test('is an Exception that a catch for bad input does not swallow', () {
+      expect(() {
+        try {
+          _SteplessNoteSchema().readString('{}', modifiedAt);
+        } on FormatException {
+          fail('caught as a FormatException');
+        }
+      }, throwsA(allOf(isA<Exception>(), isNot(isA<Error>()))));
     });
   });
 
