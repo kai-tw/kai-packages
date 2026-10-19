@@ -47,7 +47,7 @@ class NoteSchema extends VersionedJsonFileSchema<NoteDto> {
   NoteDto fromJson(Map<String, dynamic> json) => NoteDto.fromJson(json);
 
   @override
-  bool holdsUnknownCode(Map<String, dynamic> json) => !<Object?>{
+  bool holdsUnknownCode(Map<String, dynamic> json) => !<String?>{
     null,
     for (final NoteColour colour in NoteColour.values) colour.name,
   }.contains(json['colour']);

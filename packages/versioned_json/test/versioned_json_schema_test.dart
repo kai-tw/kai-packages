@@ -32,7 +32,7 @@ void main() {
   group('readString', () {
     const NoteSchema schema = NoteSchema();
 
-    NoteDto? read(Object? document) =>
+    NoteDto? read(Map<String, dynamic> document) =>
         schema.readString(jsonEncode(document), modifiedAt);
 
     test('a document at version 1 runs every step, then is parsed', () {
@@ -241,7 +241,7 @@ void main() {
 
     test('a field fromJson cannot parse is refused as corrupt, carrying the '
         'version and the parse failure\'s stack trace', () {
-      Object? caught;
+      VersionedJsonReadCorruptException? caught;
       StackTrace? trace;
       try {
         schema.decode(

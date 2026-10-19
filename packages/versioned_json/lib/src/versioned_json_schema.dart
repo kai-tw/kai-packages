@@ -170,18 +170,19 @@ abstract class VersionedJsonSchema<TDto extends VersionedJsonDto> {
     };
   }
 
-  /// What [read] takes out of [bytes], a stored document of this file
+  /// The value [read] takes out of [bytes], a stored document of this file
   /// brought to today's shape — `null` when it is not a document this build
   /// may act on (no JSON object, or a version this build does not reach).
   ///
   /// For salvaging one value out of a document that may not decode as a
   /// whole; [read] gets the migrated map and must take only what it can
-  /// read tolerantly.
+  /// read tolerantly. [TValue] is that value's type, bound to [Object] so
+  /// that `null` is added in one place only, by the return type.
   @protected
-  R? readMigrated<R extends Object>(
+  TValue? readMigrated<TValue extends Object>(
     Uint8List bytes,
     DateTime modifiedAt,
-    R? Function(Map<String, dynamic> json) read,
+    TValue? Function(Map<String, dynamic> json) read,
   ) => switch (_migrateBytes(bytes, modifiedAt)) {
     _VersionedJsonMigrationCurrentOutcome(:final Map<String, dynamic> json) =>
       read(json),
