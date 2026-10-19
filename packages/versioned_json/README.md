@@ -77,8 +77,11 @@ Every hook a subclass implements is `@protected`.
 ## Lenient reads: files kept on disk
 
 `VersionedJsonFileSchema` is for a file this build owns. A document it may not
-act on reads as `null` and stays on disk untouched, so the caller falls back to
-an empty value rather than overwriting it:
+act on reads as `null`, so the caller falls back to an empty value rather than
+overwriting it. A newer build's document stays on disk untouched. An older
+document that holds an unknown enum code is different: it's migrated and
+written back at the current version first, with the code kept as stored (a
+step passes it through like any other field), and only then reads as `null`:
 
 ```dart
 const NoteSchema schema = NoteSchema();

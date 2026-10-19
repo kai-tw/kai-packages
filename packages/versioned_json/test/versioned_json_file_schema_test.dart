@@ -306,6 +306,25 @@ void main() {
       expectUntouched(fileNamed('malformed.json'), contents['malformed.json']!);
     });
 
+    test('migrates an older document holding an unknown code in place, '
+        'keeping the code, before reading it as null', () async {
+      final File file = writeJson('older.json', <String, dynamic>{
+        'schemaVersion': 1,
+        'payload': 'p',
+        'colour': 'ultraviolet',
+      });
+
+      expect(await schema.readFile(file), isNull);
+
+      expect(onDisk(file), <String, dynamic>{
+        'schemaVersion': 3,
+        'payload': 'p',
+        'colour': 'ultraviolet',
+        'steps': <dynamic>['1to2', '2to3'],
+        'migratedAt': stale.toUtc().toIso8601String(),
+      });
+    });
+
     test('lets a field fromJson cannot parse propagate', () async {
       final File file = writeJson('bad.json', <String, dynamic>{
         'schemaVersion': 3,
