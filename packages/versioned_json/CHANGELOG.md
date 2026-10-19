@@ -1,5 +1,67 @@
 # Changelog
 
+## 0.2.0
+
+A new API, designed around a schema that owns its format's whole history.
+Nothing from 0.1.0 is kept except `FieldwiseJson` and its checks in
+`testing.dart`.
+
+### Breaking changes
+
+- **No web support.** `package:versioned_json/versioned_json.dart` now imports
+  `dart:io`.
+- **`VersionedJsonMigrator` is gone**, and with it `migrateJson`,
+  `readVersion` and `VersionedJsonMigrator.versionKey`. A
+  `VersionedJsonSchema` now declares `currentVersion` and `migrateOneStep`
+  itself, both `@protected`, and answers a version it holds no step from with
+  `throwNoStepFrom`.
+- **`VersionedJsonSchema.readJson` is gone.** Callers no longer handle the
+  migrated map. Read a file through `VersionedJsonFileSchema` (`readFile`,
+  `readString`), or bytes through the protected strict reads (`decodeBytes`,
+  `decodeBytesWithin`, `readMigrated`).
+- **`VersionedJsonDto` no longer has `schemaVersion`.** The DTO is today's
+  shape only; the schema stamps the version in `encode` and `writeFile`.
+  `writeFile` therefore no longer throws an `ArgumentError` for a DTO at
+  another version.
+- **`package:versioned_json/versioned_json_io.dart` is gone.**
+  `VersionedJsonFileSchema` replaces its `migrateFile`, `migrateDirectory`,
+  `readFile` and `writeFile`, with different failure handling:
+  - `readFile` reads an unreadable file as `null` rather than throwing a
+    `FileSystemException`, and a newer or invalid version as `null` rather
+    than throwing.
+  - `migrateFile` and `migrateDirectory` return nothing. `migrateDirectory`
+    used to return the number of files rewritten.
+  - A failed write-back still propagates its `FileSystemException`.
+- **New read exceptions.** `SchemaVersionTooNewException` and
+  `SchemaVersionInvalidException` are replaced by the sealed
+  `VersionedJsonReadException`: `VersionedJsonReadNewerException`,
+  `VersionedJsonReadUnknownCodeException` and
+  `VersionedJsonReadCorruptException`, each carrying `storedVersion`. All are
+  still `FormatException`s.
+- **`schemaVersion: null` reads as version 1**, the same as a missing key. It
+  used to throw `SchemaVersionInvalidException`.
+- **`VersionedJsonStepExample` and `stepExampleMismatches` are gone** from
+  `testing.dart`, along with the migrator they checked.
+- **Writes stage in a fixed `<target>.tmp`**, not a uniquely named sibling.
+  Concurrent writes to one file are no longer safe: the caller must serialize
+  them.
+
+### Added
+
+- **`VersionedJsonFileSchema.readString`** — the lenient read for a document
+  held somewhere other than its file, such as a download.
+- **`holdsUnknownCode`** — a document holding an enum code this build doesn't
+  know is refused rather than read with a default member in its place.
+- **`wrapUnversioned`** — a format whose first shape was no JSON object (a
+  bare list, say) enters the steps at version 1.
+- **`VersionedJsonMigrationError`**, a `StateError`, for a schema asked for a
+  step it doesn't hold: a programming error that an `on FormatException`
+  doesn't catch.
+- A migrating read's write-back stamps the current version even when the last
+  step doesn't.
+- Dependencies on `json_annotation` (a strict read reports a
+  `CheckedFromJsonException` from `fromJson` as a corrupt document) and `meta`.
+
 ## 0.1.0
 
 First release.

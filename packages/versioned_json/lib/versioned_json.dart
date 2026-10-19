@@ -3,23 +3,27 @@
 ///
 /// What is here:
 ///
-/// * [VersionedJsonMigrator] — reads the version, runs one step per version
-///   transition, and refuses JSON newer than it understands.
-/// * [VersionedJsonDto] and [VersionedJsonSchema] — pair today's DTO with the
-///   migrator for its format, so a read is "migrate, then parse".
-/// * [SchemaVersionTooNewException] and [SchemaVersionInvalidException] — the
-///   two ways a version can be unreadable, both [FormatException]s.
+/// * [VersionedJsonSchema] — one persisted format: its current version, the
+///   steps from every older one, and the DTO today's shape parses into. Its
+///   strict reads return the DTO or throw a [VersionedJsonReadException]
+///   that says why not.
+/// * [VersionedJsonFileSchema] — a [VersionedJsonSchema] for a file kept on
+///   disk: lenient reads that answer `null` for a document this build may
+///   not act on, atomic writes, and in-place migration of a file or a
+///   directory.
+/// * [VersionedJsonDto] — the marker interface every DTO implements.
+/// * [VersionedJsonReadNewerException], [VersionedJsonReadUnknownCodeException]
+///   and [VersionedJsonReadCorruptException] — the three ways a stored
+///   document is refused, all [FormatException]s.
+/// * [VersionedJsonMigrationError] — a schema asked for a step it does
+///   not hold: a programming error, so a [StateError].
 /// * [FieldwiseJson] — copy chosen fields from one record into another, and
 ///   list which fields changed, through the record's JSON.
 ///
-/// This library does no I/O and imports no `dart:io`. Reading and writing
-/// files is `package:versioned_json/versioned_json_io.dart`; checks for a
-/// consumer's own tests are `package:versioned_json/testing.dart`.
+/// This library imports `dart:io`, so it does not run on the web. Checks for
+/// a consumer's own tests are `package:versioned_json/testing.dart`.
 library;
 
 export 'src/fieldwise_json.dart';
-export 'src/schema_version_invalid_exception.dart';
-export 'src/schema_version_too_new_exception.dart';
 export 'src/versioned_json_dto.dart';
-export 'src/versioned_json_migrator.dart';
 export 'src/versioned_json_schema.dart';
