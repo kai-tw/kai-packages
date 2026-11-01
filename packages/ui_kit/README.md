@@ -29,7 +29,7 @@ class SimpleWidget extends StatelessWidget {
 - **CommonInfoWidget**: centred icon+title(+caption+actions) placeholder for
   empty/offline/neutral states, with a `dense` inline variant.
 - **CommonErrorWidget** (+ `CommonErrorSliverWidget`, `CommonErrorDialog`):
-  error-tinted variants of the above.
+  error-tinted variants of the above; `CommonErrorWidget` also takes `dense`.
 - **CommonLoadingWidget** (+ `CommonLoadingSliverWidget`,
   `CommonLoadingDialog`): spinner (or determinate progress) + label.
 - **CommonSuccessDialog**: a success-confirmation dialog.

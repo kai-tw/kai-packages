@@ -1,3 +1,14 @@
+## 4.1.0
+
+- `CommonErrorWidget` takes `dense`, passed straight to
+  `CommonInfoWidget.dense`. An error inside a card or a section of a page
+  could only be the full-screen placeholder before, so apps built their own
+  small error layout for those spots. Defaults to `false`: existing callers
+  render exactly as before.
+- `CommonErrorSliverWidget` stays full-screen and doesn't take `dense`: it
+  fills the rest of the viewport, which a small inline error shouldn't do.
+  Put a dense `CommonErrorWidget` in a `SliverToBoxAdapter` instead.
+
 ## 4.0.0
 
 - **BREAKING** — `CommonBadge.size` is renamed `CommonBadge.minSize`.
