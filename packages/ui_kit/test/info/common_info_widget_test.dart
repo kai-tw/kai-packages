@@ -266,8 +266,8 @@ void main() {
   });
 
   group('composed widgets inherit the cap', () {
-    // Both compose or extend CommonInfoWidget without ever passing `dense`, so
-    // they inherit the cap and can never reach the dense padding branch.
+    // Both compose or extend CommonInfoWidget with `dense: false` by default
+    // (the sliver has no `dense` at all), so they inherit the cap.
     testWidgets('CommonErrorWidget is capped', (WidgetTester tester) async {
       await _pump(
         tester,
@@ -299,6 +299,40 @@ void main() {
 
       expect(_captionWidth(tester), CommonInfoWidget.defaultMaxContentWidth);
       expect(tester.takeException(), isNull);
+    });
+  });
+
+  group('CommonErrorWidget dense', () {
+    testWidgets('passes dense through: small error-tinted icon, no SafeArea', (
+      WidgetTester tester,
+    ) async {
+      await _pump(
+        tester,
+        width: 400.0,
+        child: const CommonErrorWidget(
+          content: 'Something went wrong',
+          dense: true,
+        ),
+      );
+
+      final Icon icon = tester.widget<Icon>(find.byType(Icon));
+      final BuildContext context = tester.element(find.byType(Icon));
+      expect(icon.size, 20.0);
+      expect(icon.color, Theme.of(context).colorScheme.error);
+      expect(find.byType(SafeArea), findsNothing);
+    });
+
+    testWidgets('defaults to the full-screen variant', (
+      WidgetTester tester,
+    ) async {
+      await _pump(
+        tester,
+        width: 400.0,
+        child: const CommonErrorWidget(content: 'Something went wrong'),
+      );
+
+      expect(tester.widget<Icon>(find.byType(Icon)).size, 48.0);
+      expect(find.byType(SafeArea), findsOneWidget);
     });
   });
 }
