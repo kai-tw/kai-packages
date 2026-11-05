@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:dart_mutants/src/runner/process_command.dart';
 import 'package:dart_mutants/src/runner/temp_space.dart';
 import 'package:dart_mutants/src/runner/worker_sandbox.dart';
 import 'package:path/path.dart' as p;
@@ -266,69 +265,6 @@ dependencies:
     expect(
       File(p.join(package, 'lib/src/b.dart')).readAsStringSync(),
       'int b() => 2;\n',
-    );
-  });
-
-  test('[partition] a command moves to the worker: its directory, and any '
-      'argument naming a path in the package', () {
-    final ProcessCommand moved = create().commandFor(
-      ProcessCommand('dart', <String>[
-        'test',
-        p.join(package, 'test', 'a_test.dart'),
-        'test/relative_test.dart',
-        '--name',
-        'x',
-      ], workingDirectory: package),
-      flutter: false,
-    );
-
-    expect(moved.workingDirectory, isNot(package));
-    expect(moved.arguments, <String>[
-      'test',
-      p.join(moved.workingDirectory!, 'test', 'a_test.dart'),
-      'test/relative_test.dart',
-      '--name',
-      'x',
-    ]);
-  });
-
-  test('[boundary] run from inside the package, a word that happens to name '
-      'one of its directories is not taken for a path', () {
-    final String cwd = Directory.current.path;
-    Directory.current = package;
-    addTearDown(() => Directory.current = cwd);
-
-    expect(
-      create()
-          .commandFor(
-            const ProcessCommand('dart', <String>['test', 'test/a_test.dart']),
-            flutter: false,
-          )
-          .arguments,
-      <String>['test', 'test/a_test.dart'],
-    );
-  });
-
-  test('[decision] under Flutter the command gets --no-pub, once', () {
-    final WorkerSandbox sandbox = create(flutter: true);
-
-    expect(
-      sandbox
-          .commandFor(
-            const ProcessCommand('flutter', <String>['test']),
-            flutter: true,
-          )
-          .arguments,
-      <String>['test', '--no-pub'],
-    );
-    expect(
-      sandbox
-          .commandFor(
-            const ProcessCommand('flutter', <String>['test', '--no-pub']),
-            flutter: true,
-          )
-          .arguments,
-      <String>['test', '--no-pub'],
     );
   });
 

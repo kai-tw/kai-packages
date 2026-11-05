@@ -1,21 +1,17 @@
-import 'run_plan.dart';
-
 /// How long a run may take, and when its own pace is allowed to speak for
 /// what is left of it.
 ///
 /// A run's cost cannot be known before it starts and is not worth guessing
-/// at: [RunPlan.floor] is the one bound nothing can beat, and everything
-/// else about the cost — how many candidates the compile-safety gate
-/// rejects for free, what a selected command costs against the full one,
-/// how much parallel workers really win — only exists once mutants have
+/// at: how many candidates the compile-safety gate rejects for free, how
+/// many test files each mutant reaches and how fast they run, how much
+/// parallel workers really win — all of it only exists once mutants have
 /// run. So this holds both readings: the limit, and how much of the run has
 /// to be over before the pace it is holding is taken as a projection.
 class RunBudget {
   const RunBudget(this.limit, {this.paceAfterPerWorker = defaultPaceAfter});
 
-  /// The longest the mutants may take. The baseline, the coverage pass and
-  /// the worker sandbox check are not counted against it — they run before
-  /// the first mutant, and they are what makes any estimate possible.
+  /// The longest the mutants may take. The baseline and the coverage pass
+  /// are not counted against it — they run before the first mutant.
   final Duration limit;
 
   /// How many mutants each worker must finish before the pace they set is

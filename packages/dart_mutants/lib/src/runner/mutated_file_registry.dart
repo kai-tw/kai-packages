@@ -11,13 +11,12 @@ import 'dart:io';
 /// [armSignalRestore] catches `SIGINT` (Ctrl-C) and `SIGTERM` (what `kill`
 /// sends by default, and what most timeout wrappers send before escalating)
 /// and restores everything tracked before the process exits. It cannot catch
-/// `SIGKILL` — no process can, by design of the signal itself — so a `kill
-/// -9` or an immediate-hard-kill timeout wrapper is still a real gap. Nothing
-/// short of not writing mutated content to the real file at all closes that
-/// gap completely, and this package writes to the real file because the test
-/// command needs to see it there. Restoring after every individual mutant
-/// (rather than only at the very end) is the actual mitigation: at any
-/// moment during a run, at most one file is in a mutated state.
+/// `SIGKILL` — no process can, by design of the signal itself.
+///
+/// The runner no longer tracks anything here: every mutant runs in a copy of
+/// the package, so the real files are never written and a `SIGKILL` can
+/// leave nothing mutated behind. What it still uses is the signal handling,
+/// to kill its child processes and delete its copies before it exits.
 class MutatedFileRegistry {
   /// [watchSignal] and [exitProcess] default to the real `ProcessSignal.watch`
   /// and `exit`; a test swaps them to deliver a signal, or refuse to watch

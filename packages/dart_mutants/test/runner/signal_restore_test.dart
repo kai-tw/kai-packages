@@ -3,12 +3,16 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/fixture_pubspec.dart';
+
 /// Regression coverage for a real incident: a `mutation_test` run killed by
 /// a timeout once left a parameter-swap mutation sitting in a NovelGlide
 /// file's working tree — noticed only because that particular mutant
-/// happened not to compile. This drives the actual CLI binary as a real
-/// subprocess and sends it a real `SIGTERM` while a file is genuinely
-/// mutated on disk, because the property under test — does the signal
+/// happened not to compile. Mutants now run only in copies of the package,
+/// so what is left to prove is that an interrupt takes the run's child
+/// processes and copies with it. This drives the actual CLI binary as a real
+/// subprocess and sends it a real `SIGTERM` while a mutant is running,
+/// because the property under test — does the signal
 /// handler actually fire and actually win the race against the process
 /// dying — cannot be verified by calling Dart methods against each other in
 /// one process. Slow by design (mirrors a real kill-mid-run), so it is kept
@@ -30,7 +34,7 @@ environment:
   sdk: ^3.8.0
 dev_dependencies:
   test: ^1.25.0
-''');
+$dartMutantsDevDependency''');
   Directory(p.join(dir.path, 'lib')).createSync();
   Directory(p.join(dir.path, 'test')).createSync();
   File(p.join(dir.path, 'lib', 'calc.dart')).writeAsStringSync(
@@ -115,86 +119,91 @@ bool _isAlive(int pid) {
 List<int> _aliveAmong(List<int> pids) => pids.where(_isAlive).toList();
 
 void main() {
-  test(
-    'SIGTERM mid-run leaves the target file restored to its original '
-    'content, not sitting mutated',
-    () async {
-      final Directory dir = await _slowFixture();
-      addTearDown(() => dir.deleteSync(recursive: true));
-      final File target = File(p.join(dir.path, 'lib', 'calc.dart'));
-      final String original = target.readAsStringSync();
+  useHermeticVersionCheck();
 
-      final Process process = await Process.start('dart', <String>[
+  /// Starts the CLI on [dir]'s `lib/calc.dart` with its temporary
+  /// directories under [temps], and waits until a mutant is running: a
+  /// switched lane's copy exists and a child process is in flight.
+  Future<Process> startMidMutant(Directory dir, Directory temps) async {
+    final Process process = await Process.start(
+      'dart',
+      <String>[
         'run',
         _binPath,
         '--test-command',
         'dart test',
-        target.path,
-      ], workingDirectory: dir.path);
+        p.join(dir.path, 'lib', 'calc.dart'),
+      ],
+      workingDirectory: dir.path,
+      environment: <String, String>{
+        ...cliEnvironment,
+        'TMPDIR': temps.path,
+      },
+    );
+    // Drain stdio so the child cannot block on a full pipe buffer.
+    process.stdout.drain<void>();
+    process.stderr.drain<void>();
+    await _waitUntil(
+      () =>
+          _ownTemps(temps, process.pid).any(
+            (String name) => name.contains('_switched0_'),
+          ) &&
+          _descendantsOf(process.pid).isNotEmpty,
+      timeout: const Duration(seconds: 60),
+    );
+    return process;
+  }
 
-      // Drain stdio so the child cannot block on a full pipe buffer.
-      process.stdout.drain<void>();
-      process.stderr.drain<void>();
-
-      await _waitUntil(
-        () => target.readAsStringSync() != original,
-        timeout: const Duration(seconds: 30),
+  test(
+    'SIGTERM mid-mutant exits 1, leaves the package as it was and deletes '
+    'every copy the run made',
+    () async {
+      final Directory dir = await _slowFixture();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final Directory temps = Directory.systemTemp.createTempSync(
+        'signal_temps_',
       );
+      addTearDown(() => temps.deleteSync(recursive: true));
+      final File target = File(p.join(dir.path, 'lib', 'calc.dart'));
+      final String original = target.readAsStringSync();
 
-      final bool killed = process.kill(ProcessSignal.sigterm);
-      expect(killed, isTrue, reason: 'the process must still be alive to kill');
-
-      final int exitCode = await process.exitCode.timeout(
-        const Duration(seconds: 10),
+      final Process process = await startMidMutant(dir, temps);
+      expect(
+        process.kill(ProcessSignal.sigterm),
+        isTrue,
+        reason: 'the process must still be alive to kill',
       );
 
       // The handler must reach its own exit(1), not fall through to
-      // whatever code the process would otherwise end with — a deleted
-      // exit(1) is invisible to every other assertion here since the file
-      // restore and subprocess reap happen before it either way.
-      expect(exitCode, 1);
+      // whatever code the process would otherwise end with.
+      expect(
+        await process.exitCode.timeout(const Duration(seconds: 10)),
+        1,
+      );
       expect(target.readAsStringSync(), original);
+      expect(_ownTemps(temps, process.pid), isEmpty);
     },
-    timeout: const Timeout(Duration(seconds: 60)),
+    timeout: const Timeout(Duration(seconds: 90)),
   );
 
   test(
-    'SIGTERM mid-run also takes the in-flight test subprocess down with it, '
-    'rather than orphaning it',
+    'SIGTERM mid-mutant also takes the in-flight compiler and test process '
+    'down with it, rather than orphaning them',
     () async {
       // The interrupt half of the leak that exhausted a workstation's memory.
       // A timeout was the way it was found, but Ctrl-C reaches the identical
-      // state: the handler restored files and called `exit`, and the test
-      // command it had started went on running with nobody left to reap it.
-      // A `flutter test` engine in that state was measured growing at roughly
+      // state: the handler called `exit`, and the test process it had
+      // started went on running with nobody left to reap it. A
+      // `flutter_tester` in that state was measured growing at roughly
       // 130 MB/s, indefinitely.
       final Directory dir = await _slowFixture();
       addTearDown(() => dir.deleteSync(recursive: true));
-      final File target = File(p.join(dir.path, 'lib', 'calc.dart'));
-      final String original = target.readAsStringSync();
-
-      final Process process = await Process.start('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        target.path,
-      ], workingDirectory: dir.path);
-      process.stdout.drain<void>();
-      process.stderr.drain<void>();
-
-      // Wait for a subprocess to actually be in flight, not merely for the
-      // file to be mutated. Those used to coincide, back when the compile
-      // gate was itself a subprocess; with the default in-process gate a
-      // mutated file is first judged inside this very process, and sampling
-      // that window finds nothing to orphan. The child that can leak is the
-      // test command, so that is what to wait for.
-      await _waitUntil(
-        () =>
-            target.readAsStringSync() != original &&
-            _descendantsOf(process.pid).isNotEmpty,
-        timeout: const Duration(seconds: 30),
+      final Directory temps = Directory.systemTemp.createTempSync(
+        'signal_temps_',
       );
+      addTearDown(() => temps.deleteSync(recursive: true));
+
+      final Process process = await startMidMutant(dir, temps);
       final List<int> inFlight = _descendantsOf(process.pid);
       expect(
         inFlight,
@@ -203,10 +212,10 @@ void main() {
       );
 
       process.kill(ProcessSignal.sigterm);
-      final int exitCode = await process.exitCode.timeout(
-        const Duration(seconds: 10),
+      expect(
+        await process.exitCode.timeout(const Duration(seconds: 10)),
+        1,
       );
-      expect(exitCode, 1);
 
       List<int> survivors = inFlight;
       for (int attempt = 0; attempt < 30 && survivors.isNotEmpty; attempt++) {
@@ -221,7 +230,7 @@ void main() {
             'nothing will ever reap it',
       );
     },
-    timeout: const Timeout(Duration(seconds: 60)),
+    timeout: const Timeout(Duration(seconds: 90)),
   );
 
   test(
@@ -248,7 +257,10 @@ void main() {
           p.join(dir.path, 'lib', 'calc.dart'),
         ],
         workingDirectory: dir.path,
-        environment: <String, String>{'TMPDIR': temps.path},
+        environment: <String, String>{
+          ...cliEnvironment,
+          'TMPDIR': temps.path,
+        },
       );
       process.stdout.drain<void>();
       process.stderr.drain<void>();
@@ -272,3 +284,10 @@ void main() {
     timeout: const Timeout(Duration(seconds: 60)),
   );
 }
+
+/// The temporary directories the run with [pid] made under [temps], by name.
+List<String> _ownTemps(Directory temps, int pid) => <String>[
+  for (final FileSystemEntity e in temps.listSync())
+    if (p.basename(e.path).startsWith('dart_mutants_${pid}_'))
+      p.basename(e.path),
+];

@@ -24,11 +24,21 @@ enum AbortKind {
   /// and no test loads it; the run cannot tell which.
   gateRejectsUnmodified('gate-rejects-unmodified'),
 
-  /// The run would take longer than `MutationTestRunner.maxRunTime`, which
-  /// the caller set. Refused before the first mutant when the plan alone
-  /// says so, and otherwise stopped as soon as the pace the run held over
-  /// the mutants that did finish says so. Nothing is scored either way.
+  /// The run would take longer than `MutationTestRunner.runBudget`, which
+  /// the caller set: stopped as soon as the pace the run held over the
+  /// mutants that did finish says so. Nothing is scored.
   overBudget('over-budget'),
+
+  /// The mutants cannot be run as switched files at all, found before the
+  /// baseline: the test command is not `dart test …` or `flutter test …`,
+  /// passes an option a switched run cannot apply, or the package does not
+  /// resolve `package:dart_mutants`, say.
+  switchedRunUnavailable('switched-run-unavailable'),
+
+  /// A test file did not compile, or did not pass, with no mutant on in a
+  /// switched run, though the test command passed with it. The run would
+  /// not have run what the test command runs, so it stopped.
+  switchedRunFailed('switched-run-failed'),
 
   /// `MutationTestRunner.selectByCoverage` was asked for and cannot be
   /// honoured: the test command is one the coverage pass refuses, or the

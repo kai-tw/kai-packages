@@ -183,8 +183,9 @@ void main() {
   );
 
   test(
-    '[decision] a journal 0.5.0 wrote is reused: its header named the engine '
-    'version where format 1 now stands',
+    '[decision] a journal 0.5.0 wrote is read as format 1 — its header named '
+    'the engine version where format now stands — and so started over by a '
+    'release whose format is later',
     () {
       RunJournal.open(path, <String, Object?>{
         'dartMutantsVersion': '0.5.0',
@@ -198,8 +199,9 @@ void main() {
         ...header,
       });
 
-      expect(opened.discarded, isNull);
-      expect(opened.recall(_mutant(3))?.verdict, MutantVerdict.detected);
+      expect(RunJournal.format, greaterThan(1));
+      expect(opened.discarded, 'it was recorded with a different format');
+      expect(opened.recall(_mutant(3)), isNull);
     },
   );
 

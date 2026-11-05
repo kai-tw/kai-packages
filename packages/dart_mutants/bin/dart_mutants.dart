@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:args/args.dart';
+import 'package:dart_mutants/src/review/diff_scope.dart';
+import 'package:dart_mutants/src/review/review_comments.dart';
 import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
 import 'package:dart_mutants/src/runner/file_mutation_report.dart';
 import 'package:dart_mutants/src/runner/line_selection.dart';
@@ -13,21 +15,207 @@ import 'package:dart_mutants/src/runner/process_command.dart';
 import 'package:dart_mutants/src/runner/run_budget.dart';
 import 'package:dart_mutants/src/runner/run_plan.dart';
 import 'package:dart_mutants/src/runner/wait_span.dart';
+import 'package:dart_mutants/src/version_check.dart';
 import 'package:path/path.dart' as p;
 
 /// The CLI contract: a file list and a test command in, per-file
 /// total/undetected out. Which files to pass and what to do with the report
-/// is deliberately not this binary's concern — that is `plan-mutation`'s
-/// job, one layer up.
+/// is deliberately not this binary's concern — that is the caller's job,
+/// one layer up.
 Future<void> main(List<String> arguments) async {
-  final ArgParser parser = ArgParser()
+  final ArgResults? args = _parseAndValidate(arguments, _buildParser());
+  if (args == null) {
+    return;
+  }
+
+  try {
+    await VersionCheck().check();
+  } on OutdatedEngineException catch (e) {
+    stderr.writeln('dart_mutants: $e');
+    exitCode = 2;
+    return;
+  }
+
+  final DiffScope? scope;
+  try {
+    scope = await _diffScope(args);
+  } on DiffScopeException catch (e) {
+    stderr.writeln('--diff: $e — nothing was measured.');
+    exitCode = 2;
+    return;
+  }
+  if (scope != null && scope.lines.isEmpty) {
+    exitCode = _nothingToMutate(args);
+    return;
+  }
+  exitCode = await _runAndReport(args, scope);
+}
+
+/// The scope --diff names, or `null` without --diff.
+Future<DiffScope?> _diffScope(ArgResults args) async {
+  final String? diffRef = args['diff'] as String?;
+  if (diffRef == null) {
+    return null;
+  }
+  return DiffScope.of(
+    diffRef,
+    packageRoot: Directory.current.path,
+    files: args.rest.isEmpty ? null : args.rest,
+  );
+}
+
+/// Says there is nothing to mutate, and writes the empty review a --review
+/// caller is waiting for; the exit code, 1 only when that could not be
+/// written.
+int _nothingToMutate(ArgResults args) {
+  stdout.writeln(
+    'the change since ${args['diff']} only deletes lines, or touches no Dart '
+    'file under lib/ — nothing new to mutate.',
+  );
+  final String? reviewPath = args['review'] as String?;
+  return reviewPath != null && !_writeReport(reviewPath, '[]\n') ? 1 : 0;
+}
+
+/// The analyzers that judge whether a mutant compiles, and the closing of
+/// them: the runner is handed them, so it does not close them.
+class _Gates {
+  const _Gates(this.gate, this.fallback);
+
+  /// With no --analyze-command: the in-process gate, backed by `dart analyze`
+  /// for any file it cannot judge (see MutationTestRunner.run). With one:
+  /// that command alone — a caller who named their judge gets no substitute.
+  factory _Gates.of(String? analyzeCommand, List<String> targets) =>
+      analyzeCommand == null
+      ? _Gates(
+          InProcessAnalyzerGate(targets),
+          const AnalyzerProcessGate(
+            ProcessCommand('dart', <String>['analyze']),
+          ),
+        )
+      : _Gates(AnalyzerProcessGate(_parseCommand(analyzeCommand)), null);
+
+  final CompileSafetyGate gate;
+  final CompileSafetyGate? fallback;
+
+  Future<void> close() async {
+    await gate.close();
+    await fallback?.close();
+  }
+}
+
+/// Runs [scope] (or the files given) and prints the report; the exit code.
+Future<int> _runAndReport(ArgResults args, DiffScope? scope) async {
+  final List<String> targets = scope?.files ?? args.rest;
+  final _Gates gates = _Gates.of(args['analyze-command'] as String?, targets);
+  // stdout is the JSON report's under --json, and nothing else may share it.
+  final bool jsonOnStdout = args['json'] as bool;
+
+  final MutationRunReport report;
+  try {
+    report = await _runner(args, scope, gates, quiet: jsonOnStdout).run(
+      targets,
+    );
+  } finally {
+    await gates.close();
+  }
+
+  // The report is always printed here, before the exit code is chosen — a
+  // non-zero exit (an aborted run, or any file with undetected mutants) must
+  // never suppress it. A caller scoring per-file at a threshold other than
+  // "zero undetected" depends on reading the JSON even when this process's
+  // own exit code disagrees with their verdict.
+  final bool written = _emitReport(
+    report,
+    jsonOnStdout: jsonOnStdout,
+    outputPath: args['output'] as String?,
+    historyPath: args['history'] as String?,
+  );
+  if (!written || report.aborted) {
+    return 1;
+  }
+  return _verdict(report, args, quiet: jsonOnStdout);
+}
+
+MutationTestRunner _runner(
+  ArgResults args,
+  DiffScope? scope,
+  _Gates gates, {
+  required bool quiet,
+}) => MutationTestRunner(
+  testCommand: _parseCommand(args['test-command'] as String),
+  compileSafetyGate: gates.gate,
+  fallbackCompileSafetyGate: gates.fallback,
+  onGateFallback: (String filePath) => stderr.writeln(
+    'note: the in-process analyzer rejects $filePath before it has been '
+    'mutated, so its mutants are judged by `dart analyze` instead — one '
+    'process per mutant, much slower. One known cause: the file uses '
+    'language features newer than the analyzer package this was built with '
+    'understands.',
+  ),
+  // Already validated by _parseAndValidate — safe to parse again here
+  // rather than thread the number through as a second return value.
+  mutantTimeout: Duration(seconds: int.parse(args['mutant-timeout'] as String)),
+  baselineFactor: double.parse(args['baseline-factor'] as String),
+  baselineTimeout: _optionalSeconds(args['baseline-timeout'] as String?),
+  selectByCoverage: args['select-by-coverage'] as bool,
+  workers: int.parse(args['workers'] as String),
+  runBudget: _optionalBudget(args['max-minutes'] as String?),
+  journalPath: args['journal'] as String?,
+  lines: scope?.lines ?? _lines(args),
+  perLine: _perLine(args) ?? (scope == null ? null : 1),
+  onJournalDiscarded: (String reason) => stderr.writeln(
+    'note: the journal at ${args['journal']} was started over — $reason — '
+    'so every mutant runs.',
+  ),
+  onPlan: _planPrinter(quiet: quiet),
+  onProgress: _progressPrinter(quiet: quiet),
+);
+
+/// The exit code of a run that finished and whose report was written: 1 for
+/// any undetected mutant. In review mode the comments are the finding, so
+/// the run passes once they are written — unless the caller asked for any
+/// survivor to fail it.
+int _verdict(MutationRunReport report, ArgResults args, {required bool quiet}) {
+  final bool anyUndetected = report.files.any(
+    (FileMutationReport f) => f.undetected > 0,
+  );
+  final String? reviewPath = args['review'] as String?;
+  if (reviewPath == null) {
+    return anyUndetected ? 1 : 0;
+  }
+  final List<Map<String, Object>> comments = reviewComments(
+    report,
+    repoRoot: _repoRoot(),
+  );
+  if (!_writeReport(
+    reviewPath,
+    '${const JsonEncoder.withIndent('  ').convert(comments)}\n',
+  )) {
+    return 1;
+  }
+  if (!quiet) {
+    stdout.writeln(
+      'review: ${_count(comments.length, 'survivor')} to comment on, written '
+      'to $reviewPath',
+    );
+  }
+  return args['fail-on-survivors'] as bool && anyUndetected ? 1 : 0;
+}
+
+ArgParser _buildParser() {
+  return ArgParser()
     ..addOption(
       'test-command',
       mandatory: true,
       help:
-          'The command that runs the relevant tests, e.g. '
-          '"flutter test test/foo_test.dart". Split on whitespace — quoting '
-          'an argument that itself contains a space is not supported yet.',
+          'The "dart test ..." or "flutter test ..." command that runs the '
+          'relevant tests, e.g. "flutter test test/foo_test.dart". It runs '
+          'once unmodified; each mutant then runs against its test files '
+          'compiled once for the whole run, applying the command\'s '
+          'dart_test.yaml and its --name, --plain-name, --tags, '
+          '--exclude-tags, --timeout, --preset and --run-skipped. Split on '
+          'whitespace — quoting an argument that itself contains a space is '
+          'not supported yet.',
     )
     ..addOption(
       'analyze-command',
@@ -42,23 +230,24 @@ Future<void> main(List<String> arguments) async {
       'mutant-timeout',
       defaultsTo: '30',
       help:
-          'The least number of seconds a single mutant\'s test run gets '
-          'before it is killed and scored as a timeout instead of waited on '
-          'forever. A slow suite gets more: see --baseline-factor.',
+          'The least number of seconds a mutant gets on one test file before '
+          'it is killed and scored as a timeout instead of waited on forever. '
+          'A slow test file gets more: see --baseline-factor.',
     )
     ..addOption(
       'baseline-factor',
       defaultsTo: _formatFactor(MutationTestRunner.defaultBaselineFactor),
       help:
-          'Each mutant\'s budget is the larger of --mutant-timeout and this '
-          'many times the baseline\'s own wall time in this run. The headroom '
+          'A mutant\'s budget on a test file is the larger of --mutant-timeout '
+          'and this many times that file\'s own unmutated run. The headroom '
           'is for machine load changing mid-run. 0 turns it off.',
     )
     ..addOption(
       'baseline-timeout',
       help:
           'Seconds the test command gets against unmodified code before the '
-          'run aborts as hanging. Defaults to ten times --mutant-timeout.',
+          'run aborts as hanging, and one test file gets to compile or to run '
+          'unmutated. Defaults to ten times --mutant-timeout.',
     )
     ..addFlag(
       'select-by-coverage',
@@ -67,21 +256,10 @@ Future<void> main(List<String> arguments) async {
           'Collect per-test-file coverage once, then run each mutant against '
           'only the test files that enter the function it is in, and score a '
           'mutant in a function no test enters as undetected (marked '
-          'uncovered) without running anything. Needs a "dart test ..." or '
-          '"flutter test ..." --test-command; a command the coverage pass '
-          'refuses, or a pass that fails, aborts the run before the first '
-          'mutant (abortKind selection-unavailable).',
-    )
-    ..addFlag(
-      'schemata',
-      defaultsTo: true,
-      help:
-          'With --select-by-coverage and "flutter test", write every mutant '
-          'of a file in at once behind a switch, compile each selected test '
-          'file once, and run each mutant by starting flutter_tester directly '
-          'in a temporary copy of the package. A mutant that cannot be run '
-          'that way, or a test file that fails unmutated there, goes through '
-          'the test command as before.',
+          'uncovered) without running anything. Without it, every mutant runs '
+          'against every test file. A command the coverage pass refuses, or a '
+          'pass that fails, aborts the run before the first mutant (abortKind '
+          'selection-unavailable).',
     )
     ..addMultiOption(
       'lines',
@@ -104,21 +282,18 @@ Future<void> main(List<String> arguments) async {
       abbr: 'j',
       defaultsTo: '1',
       help:
-          'How many mutants run at once. Above 1, each worker runs in a copy '
-          'of the package made of links, a few megabytes each plus what the '
-          'test command builds, and the package itself is never written to. '
-          'Memory is the usual limit: each worker runs its own test command.',
+          'How many test files run at once. Each worker has its own copy of '
+          'the package made of links, a few megabytes, plus its own compiler '
+          'and test process; the package itself is never written to. Memory '
+          'is the usual limit.',
     )
     ..addOption(
       'max-minutes',
       valueHelp: 'minutes',
       help:
-          'Stop without scoring anything if the mutants would take longer '
-          'than this. Refused before the first one is written when the plan '
-          'alone is already over; otherwise stopped as soon as the pace the '
-          'run is holding says it will not fit. The baseline and the '
-          'coverage pass are what measure that pace, so they do not count '
-          'against it.',
+          'Stop without scoring anything as soon as the pace the mutants are '
+          'holding says they will take longer than this. The baseline and the '
+          'coverage pass do not count against it.',
     )
     ..addOption(
       'output',
@@ -149,6 +324,34 @@ Future<void> main(List<String> arguments) async {
           'to this file, so runs can be compared later. Aborted runs are '
           'appended too.',
     )
+    ..addOption(
+      'diff',
+      valueHelp: 'ref',
+      help:
+          'Review mode: mutate only the lines changed since the merge base of '
+          'this ref and HEAD, uncommitted edits to tracked files included, at '
+          'most --per-line mutants a line (default 1). With no files given, '
+          'every Dart file under the package\'s lib/ that the change touched, '
+          'generated files left out; a file whose change only deleted lines '
+          'is skipped.',
+    )
+    ..addOption(
+      'review',
+      valueHelp: 'path',
+      help:
+          'With --diff: write each survivor that a test runs past without '
+          'failing to this file, as a JSON list of {path, line, body} ready to '
+          'post on a pull request. A survivor on a line no test executes is '
+          'left out (that is line coverage\'s finding). The run then exits 0 '
+          'whatever the scores, unless --fail-on-survivors.',
+    )
+    ..addFlag(
+      'fail-on-survivors',
+      negatable: false,
+      help:
+          'With --review: exit 1 if any mutant survived, on a covered line or '
+          'not, once the review file is written.',
+    )
     ..addFlag(
       'json',
       help:
@@ -156,99 +359,18 @@ Future<void> main(List<String> arguments) async {
           'progress. Prefer --output, which keeps the progress.',
     )
     ..addFlag('help', abbr: 'h', negatable: false);
+}
 
-  final ArgResults? args = _parseAndValidate(arguments, parser);
-  if (args == null) {
-    return;
-  }
-
-  // With no --analyze-command: the in-process gate, backed by `dart analyze`
-  // for any file it cannot judge (see MutationTestRunner.run). With one: that
-  // command alone — a caller who named their judge gets no substitute.
-  final String? analyzeCommand = args['analyze-command'] as String?;
-  final CompileSafetyGate gate = analyzeCommand == null
-      ? InProcessAnalyzerGate(args.rest)
-      : AnalyzerProcessGate(_parseCommand(analyzeCommand));
-  final CompileSafetyGate? fallback = analyzeCommand == null
-      ? const AnalyzerProcessGate(ProcessCommand('dart', <String>['analyze']))
-      : null;
-
-  // stdout is the JSON report's under --json, and nothing else may share it.
-  final bool jsonOnStdout = args['json'] as bool;
-  final String? outputPath = args['output'] as String?;
-  final String? historyPath = args['history'] as String?;
-
-  final MutationTestRunner runner = MutationTestRunner(
-    testCommand: _parseCommand(args['test-command'] as String),
-    compileSafetyGate: gate,
-    fallbackCompileSafetyGate: fallback,
-    onGateFallback: (String filePath) => stderr.writeln(
-      'note: the in-process analyzer rejects $filePath before it has been '
-      'mutated, so its mutants are judged by `dart analyze` instead — one '
-      'process per mutant, much slower. One known cause: the file uses '
-      'language features newer than the analyzer package this was built with '
-      'understands.',
-    ),
-    // Already validated by _parseAndValidate — safe to parse again here
-    // rather than thread the number through as a second return value.
-    mutantTimeout: Duration(
-      seconds: int.parse(args['mutant-timeout'] as String),
-    ),
-    baselineFactor: double.parse(args['baseline-factor'] as String),
-    baselineTimeout: _optionalSeconds(args['baseline-timeout'] as String?),
-    selectByCoverage: args['select-by-coverage'] as bool,
-    schemata: args['schemata'] as bool,
-    onSchemataUnavailable: (String reason) => stderr.writeln(
-      'note: --schemata was not applied ($reason), so every mutant runs '
-      'through the test command.',
-    ),
-    workers: int.parse(args['workers'] as String),
-    runBudget: _optionalBudget(args['max-minutes'] as String?),
-    journalPath: args['journal'] as String?,
-    lines: _lines(args),
-    perLine: _perLine(args),
-    onJournalDiscarded: (String reason) => stderr.writeln(
-      'note: the journal at ${args['journal']} was started over — $reason — '
-      'so every mutant runs.',
-    ),
-    onWorkersFallback: (String reason) => stderr.writeln(
-      'note: --workers was not applied ($reason), so mutants run one at a '
-      'time in the package itself.',
-    ),
-    onPlan: _planPrinter(quiet: jsonOnStdout),
-    onProgress: _progressPrinter(quiet: jsonOnStdout),
-  );
-
-  final MutationRunReport report;
-  try {
-    report = await runner.run(args.rest);
-  } finally {
-    // The runner is handed the gates, so it does not close them; this is
-    // where they were made.
-    await gate.close();
-    await fallback?.close();
-  }
-
-  // The report is always printed here, before exitCode is touched below —
-  // a non-zero exit (an aborted run, or any file with undetected mutants)
-  // must never suppress it. A caller scoring per-file at a threshold other
-  // than "zero undetected" depends on reading the JSON even when this
-  // process's own exit code disagrees with their verdict.
-  final bool written = _emitReport(
-    report,
-    jsonOnStdout: jsonOnStdout,
-    outputPath: outputPath,
-    historyPath: historyPath,
-  );
-
-  if (!written || report.aborted) {
-    exitCode = 1;
-    return;
-  }
-  final bool anyUndetected = report.files.any(
-    (FileMutationReport f) => f.undetected > 0,
-  );
-  exitCode = anyUndetected ? 1 : 0;
+/// The repository the review's paths are relative to: the git top level
+/// above the working directory, or the working directory itself.
+String _repoRoot() {
+  final ProcessResult result = Process.runSync('git', <String>[
+    'rev-parse',
+    '--show-toplevel',
+  ]);
+  return result.exitCode == 0
+      ? (result.stdout as String).trim()
+      : Directory.current.path;
 }
 
 /// Parses [arguments] against [parser] and validates them. Returns `null`
@@ -272,7 +394,7 @@ ArgResults? _parseAndValidate(List<String> arguments, ArgParser parser) {
     return null;
   }
 
-  if (args.rest.isEmpty) {
+  if (args.rest.isEmpty && args['diff'] == null) {
     stderr.writeln('no files given — nothing to mutate');
     stderr.writeln(parser.usage);
     exitCode = 64;
@@ -291,12 +413,29 @@ ArgResults? _parseAndValidate(List<String> arguments, ArgParser parser) {
 
 /// The first thing wrong with any option's value, or `null` if nothing is.
 String? _optionError(ArgResults args) =>
+    _reviewOptionError(args) ??
     _timeoutOptionError(args) ??
     _maxMinutesOptionError(args) ??
     _outputOptionError(args) ??
     _workersOptionError(args) ??
     _perLineOptionError(args) ??
     _linesOptionError(args);
+
+/// What is wrong with how --diff, --review, --fail-on-survivors and --lines
+/// are combined, or `null` if nothing is.
+String? _reviewOptionError(ArgResults args) {
+  final bool diff = args['diff'] != null;
+  if (args['review'] != null && !diff) {
+    return '--review needs --diff <ref>: a review comments on changed lines';
+  }
+  if (args['fail-on-survivors'] as bool && args['review'] == null) {
+    return '--fail-on-survivors needs --review <file>';
+  }
+  if (diff && (args['lines'] as List<String>).isNotEmpty) {
+    return '--diff and --lines both choose the lines; give one';
+  }
+  return null;
+}
 
 String? _perLineOptionError(ArgResults args) {
   final String? perLine = args['per-line'] as String?;
@@ -487,7 +626,7 @@ void _printBudget(MutationRunReport report) {
 }
 
 String _budgetPhrase(Duration budget) =>
-    'each mutant given at most ${_formatSeconds(budget)}';
+    'each mutant given at least ${_formatSeconds(budget)} a test file';
 
 void _printPlan(RunPlan plan) {
   final String reused = plan.reused == 0
@@ -502,24 +641,6 @@ void _printPlan(RunPlan plan) {
     '${_count(plan.fileCount, 'file')}$reused — baseline '
     '${_formatSeconds(plan.baseline)}, ${_budgetPhrase(plan.budget)}'
     '${fromJournal.isEmpty ? '' : ' ($fromJournal from the journal)'}',
-  );
-  if (plan.mutantCount == 0) {
-    return;
-  }
-  // Both ends, because one number alone would be read as the answer and
-  // neither is: the floor assumes every worker busy on a mutant that costs
-  // a full baseline, the top assumes one worker doing all of them. What the
-  // run actually costs depends on how many candidates the gate rejects for
-  // free and how much a selected command saves, and nothing knows that
-  // until mutants have run — which the `left` on each progress line then
-  // reports from measurement rather than assumption.
-  final String span = plan.workers > 1
-      ? '${formatWait(plan.floor)} to ${formatWait(plan.estimate)}'
-      : 'about ${formatWait(plan.estimate)}';
-  stdout.writeln(
-    'at one baseline per mutant across ${_count(plan.workers, 'worker')} '
-    'that is $span — an upper bound; the per-mutant `left` below measures '
-    'the real pace',
   );
 }
 

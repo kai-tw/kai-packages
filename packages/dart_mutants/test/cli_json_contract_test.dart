@@ -4,6 +4,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import 'support/fixture_pubspec.dart';
+
 /// A caller scoring per-file at a threshold other than "zero undetected"
 /// (e.g. a per-file 80% pass bar) depends on reading `--json` even when
 /// this binary's own exit code disagrees with their verdict. This drives
@@ -27,7 +29,7 @@ environment:
   sdk: ^3.8.0
 dev_dependencies:
   test: ^1.25.0
-''');
+$dartMutantsDevDependency''');
   Directory(p.join(dir.path, 'lib')).createSync();
   Directory(p.join(dir.path, 'test')).createSync();
   // Never called by any test — its one ternary mutant is guaranteed
@@ -55,6 +57,8 @@ dev_dependencies:
 }
 
 void main() {
+  useHermeticVersionCheck();
+
   test(
     '[boundary] --json still prints a complete report to stdout when the '
     'exit code is non-zero',
@@ -62,14 +66,19 @@ void main() {
       final Directory dir = await _fixtureWithOneUndetectedMutant();
       addTearDown(() => dir.deleteSync(recursive: true));
 
-      final ProcessResult result = await Process.run('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        '--json',
-        p.join(dir.path, 'lib', 'uncovered.dart'),
-      ], workingDirectory: dir.path);
+      final ProcessResult result = await Process.run(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--json',
+          p.join(dir.path, 'lib', 'uncovered.dart'),
+        ],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
 
       expect(
         result.exitCode,
@@ -88,13 +97,15 @@ void main() {
       // no survivor is called uncovered.
       expect(json['selectedByCoverage'], isFalse);
       expect(fileReport['uncovered'], 0);
-      // The budget each mutant actually got, next to what it was derived
-      // from — neither is necessarily the --mutant-timeout that was passed.
-      final num baseline = json['baselineSeconds']! as num;
-      final num budget = json['mutantTimeoutSeconds']! as num;
-      expect(baseline, greaterThan(0));
-      expect(budget, greaterThanOrEqualTo(30));
-      expect(budget, greaterThanOrEqualTo(baseline * 4 - 0.001));
+      // The run's floor is the --mutant-timeout passed; the budget the
+      // survivor actually got on its test file is that plus the file's own
+      // unmutated run plus package:test's 30s.
+      expect(json['baselineSeconds']! as num, greaterThan(0));
+      expect(json['mutantTimeoutSeconds'], 30);
+      final Map<String, Object?> survivor =
+          (fileReport['undetectedMutants']! as List<Object?>).single!
+              as Map<String, Object?>;
+      expect(survivor['timeoutSeconds']! as num, greaterThan(60));
     },
   );
 
@@ -121,15 +132,20 @@ void main() {
         '}\n',
       );
 
-      final ProcessResult result = await Process.run('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        '--select-by-coverage',
-        '--json',
-        'lib/partly.dart',
-      ], workingDirectory: dir.path);
+      final ProcessResult result = await Process.run(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--select-by-coverage',
+          '--json',
+          'lib/partly.dart',
+        ],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
 
       final Map<String, Object?> json =
           jsonDecode(result.stdout as String) as Map<String, Object?>;
@@ -168,7 +184,7 @@ void main() {
         flag,
         value,
         'lib/anything.dart',
-      ]);
+      ], environment: cliEnvironment);
 
       expect(result.exitCode, 64);
       // Not just the flag name: an unknown option names it too, so this is
@@ -184,18 +200,23 @@ void main() {
       final Directory dir = await _fixtureWithOneUndetectedMutant();
       addTearDown(() => dir.deleteSync(recursive: true));
 
-      final ProcessResult result = await Process.run('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        '--baseline-factor',
-        '0',
-        '--baseline-timeout',
-        '120',
-        '--json',
-        p.join(dir.path, 'lib', 'uncovered.dart'),
-      ], workingDirectory: dir.path);
+      final ProcessResult result = await Process.run(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--baseline-factor',
+          '0',
+          '--baseline-timeout',
+          '120',
+          '--json',
+          p.join(dir.path, 'lib', 'uncovered.dart'),
+        ],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
 
       final Map<String, Object?> json =
           jsonDecode(result.stdout as String) as Map<String, Object?>;
@@ -214,14 +235,19 @@ void main() {
         "import 'package:test/test.dart';\n\nvoid main() { test('x', () => throw Exception('red')); }\n",
       );
 
-      final ProcessResult result = await Process.run('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        '--json',
-        p.join(dir.path, 'lib', 'uncovered.dart'),
-      ], workingDirectory: dir.path);
+      final ProcessResult result = await Process.run(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--json',
+          p.join(dir.path, 'lib', 'uncovered.dart'),
+        ],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
 
       expect(result.exitCode, isNot(0));
       final Map<String, Object?> json =
@@ -255,14 +281,19 @@ void main() {
       // rather than via p.equals: a caller keying a lookup on these paths
       // cares about the literal bytes, not about path equivalence.
       const String relative = 'lib/uncovered.dart';
-      final ProcessResult relativeRun = await Process.run('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        '--json',
-        relative,
-      ], workingDirectory: dir.path);
+      final ProcessResult relativeRun = await Process.run(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--json',
+          relative,
+        ],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
 
       final Map<String, Object?> relativeJson =
           jsonDecode(relativeRun.stdout as String) as Map<String, Object?>;
@@ -277,14 +308,19 @@ void main() {
       // The same file by absolute path comes back absolute — which is what
       // makes this an echo rather than a normalisation to either form.
       final String absolute = p.join(dir.path, 'lib', 'uncovered.dart');
-      final ProcessResult absoluteRun = await Process.run('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        '--json',
-        absolute,
-      ], workingDirectory: dir.path);
+      final ProcessResult absoluteRun = await Process.run(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--json',
+          absolute,
+        ],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
 
       final Map<String, Object?> absoluteJson =
           jsonDecode(absoluteRun.stdout as String) as Map<String, Object?>;
@@ -311,15 +347,20 @@ void main() {
       addTearDown(() => dir.deleteSync(recursive: true));
       final String out = p.join(dir.path, 'reports', 'mutation.json');
 
-      final ProcessResult result = await Process.run('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        '--output',
-        out,
-        'lib/uncovered.dart',
-      ], workingDirectory: dir.path);
+      final ProcessResult result = await Process.run(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--output',
+          out,
+          'lib/uncovered.dart',
+        ],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
 
       expect(result.exitCode, 1, reason: '${result.stderr}');
       final Map<String, Object?> json =
@@ -331,24 +372,23 @@ void main() {
       final Map<String, Object?> survivor =
           (file['undetectedMutants']! as List<Object?>).single!
               as Map<String, Object?>;
-      expect(survivor['timeoutSeconds'], json['mutantTimeoutSeconds']);
+      expect(
+        survivor['timeoutSeconds']! as num,
+        greaterThan((json['mutantTimeoutSeconds']! as num) + 30),
+      );
       expect(File('$out.partial').existsSync(), isFalse);
 
       final List<String> lines = (result.stdout as String).trim().split('\n');
+      // No estimate after the plan: the progress lines measure the pace.
       expect(lines[0], startsWith('1 mutant in 1 file — baseline '));
       expect(
-        lines[1],
-        matches(
-          RegExp(
-            r'^at one baseline per mutant across 1 worker that is about '
-            r'\d+[smh].* upper bound',
-          ),
-        ),
+        lines[0],
+        endsWith('each mutant given at least 30.0s a test file'),
       );
       // The last mutant carries no `left`: nothing is left, and a `~0s left`
       // on the final line reads as a run still going.
       expect(
-        lines[2],
+        lines[1],
         matches(
           RegExp(
             r'^\[1/1\] undetected lib/uncovered\.dart:1:\d+ ternary_swap '
@@ -370,15 +410,20 @@ void main() {
       );
       final String out = p.join(dir.path, 'mutation.json');
 
-      final ProcessResult result = await Process.run('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        '--output',
-        out,
-        'lib/uncovered.dart',
-      ], workingDirectory: dir.path);
+      final ProcessResult result = await Process.run(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--output',
+          out,
+          'lib/uncovered.dart',
+        ],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
 
       expect(result.exitCode, 1);
       final Map<String, Object?> json =
@@ -389,8 +434,8 @@ void main() {
   );
 
   test(
-    '[decision] --max-minutes smaller than the plan stops the run before '
-    'anything is mutated, and says so in the report',
+    '[decision] --max-minutes refuses nothing up front: only a pace the '
+    'mutants have held stops a run, and one mutant sets none',
     () async {
       final Directory dir = await _fixtureWithOneUndetectedMutant();
       addTearDown(() => dir.deleteSync(recursive: true));
@@ -398,26 +443,32 @@ void main() {
       final String source = target.readAsStringSync();
       final String out = p.join(dir.path, 'mutation.json');
 
-      final ProcessResult result = await Process.run('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        // Smaller than any real baseline, so the floor is over it whatever
-        // the machine is doing.
-        '--max-minutes',
-        '0.001',
-        '--output',
-        out,
-        'lib/uncovered.dart',
-      ], workingDirectory: dir.path);
+      final ProcessResult result = await Process.run(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--max-minutes',
+          '0.001',
+          '--output',
+          out,
+          'lib/uncovered.dart',
+        ],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
 
       expect(result.exitCode, 1);
       final Map<String, Object?> json =
           jsonDecode(File(out).readAsStringSync()) as Map<String, Object?>;
-      expect(json['abortKind'], 'over-budget');
-      expect(json['abortReason'], contains('Nothing was mutated'));
-      // A refusal that leaves a mutant behind would be the worst of both.
+      expect(json['abortKind'], isNull);
+      expect(
+        ((json['files']! as Map<String, Object?>)['lib/uncovered.dart']!
+            as Map<String, Object?>)['undetected'],
+        1,
+      );
       expect(target.readAsStringSync(), source);
     },
     timeout: const Timeout(Duration(seconds: 90)),
@@ -435,7 +486,7 @@ void main() {
         '--max-minutes',
         '0',
         'lib/anything.dart',
-      ]);
+      ], environment: cliEnvironment);
 
       expect(result.exitCode, 64);
       expect(result.stderr, contains('--max-minutes must be a positive'));
@@ -460,7 +511,7 @@ void main() {
           flag,
           dir.path,
           'lib/anything.dart',
-        ]);
+        ], environment: cliEnvironment);
 
         expect(result.exitCode, 64);
         expect(result.stderr, contains('$flag must name a file'));
@@ -475,15 +526,20 @@ void main() {
       final Directory dir = await _fixtureWithOneUndetectedMutant();
       addTearDown(() => dir.deleteSync(recursive: true));
       final String history = p.join(dir.path, 'history', 'runs.jsonl');
-      Future<ProcessResult> run() => Process.run('dart', <String>[
-        'run',
-        _binPath,
-        '--test-command',
-        'dart test',
-        '--history',
-        history,
-        'lib/uncovered.dart',
-      ], workingDirectory: dir.path);
+      Future<ProcessResult> run() => Process.run(
+        'dart',
+        <String>[
+          'run',
+          _binPath,
+          '--test-command',
+          'dart test',
+          '--history',
+          history,
+          'lib/uncovered.dart',
+        ],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
 
       await run();
       File(p.join(dir.path, 'test', 'broken_test.dart')).writeAsStringSync(
@@ -521,4 +577,118 @@ void main() {
     },
     timeout: const Timeout(Duration(seconds: 90)),
   );
+
+  group('review mode', () {
+    /// The fixture as a git repository whose one commit is the code before
+    /// the change; `uncovered.dart` then changes, uncommitted.
+    Future<Directory> changedFixture() async {
+      final Directory dir = await _fixtureWithOneUndetectedMutant();
+      addTearDown(() => dir.deleteSync(recursive: true));
+      for (final List<String> args in <List<String>>[
+        <String>['init', '-q', '-b', 'main'],
+        <String>['add', '.'],
+        <String>[
+          '-c',
+          'user.name=test',
+          '-c',
+          'user.email=test@example.com',
+          '-c',
+          'commit.gpgsign=false',
+          'commit',
+          '-q',
+          '-m',
+          'base',
+        ],
+      ]) {
+        final ProcessResult r = await Process.run(
+          'git',
+          args,
+          workingDirectory: dir.path,
+        );
+        expect(r.exitCode, 0, reason: '${r.stderr}');
+      }
+      File(p.join(dir.path, 'lib', 'uncovered.dart')).writeAsStringSync(
+        "String classify(bool isPositive) => isPositive ? 'yes' : 'no';\n",
+      );
+      return dir;
+    }
+
+    Future<ProcessResult> review(Directory dir, List<String> extra) =>
+        Process.run(
+          'dart',
+          <String>[
+            'run',
+            _binPath,
+            '--test-command',
+            'dart test',
+            '--diff',
+            'main',
+            '--review',
+            p.join(dir.path, 'review.json'),
+            ...extra,
+          ],
+          workingDirectory: dir.path,
+          environment: cliEnvironment,
+        );
+
+    test(
+      '[partition] --diff finds the changed file itself, and --review writes '
+      'each survivor as a comment at its line, exiting 0',
+      () async {
+        final Directory dir = await changedFixture();
+
+        final ProcessResult result = await review(dir, const <String>[]);
+
+        expect(result.exitCode, 0, reason: '${result.stderr}');
+        final List<Object?> comments =
+            jsonDecode(
+                  File(p.join(dir.path, 'review.json')).readAsStringSync(),
+                )
+                as List<Object?>;
+        expect(comments, hasLength(1));
+        final Map<String, Object?> comment =
+            comments.single! as Map<String, Object?>;
+        expect(comment['path'], 'lib/uncovered.dart');
+        expect(comment['line'], 1);
+        expect(comment['body'], contains('ternary_swap'));
+      },
+      timeout: const Timeout(Duration(seconds: 120)),
+    );
+
+    test(
+      '[decision] --fail-on-survivors makes a survivor exit 1, once the '
+      'review file is written',
+      () async {
+        final Directory dir = await changedFixture();
+
+        final ProcessResult result = await review(dir, const <String>[
+          '--fail-on-survivors',
+        ]);
+
+        expect(result.exitCode, 1);
+        expect(File(p.join(dir.path, 'review.json')).existsSync(), isTrue);
+      },
+      timeout: const Timeout(Duration(seconds: 120)),
+    );
+
+    test(
+      '[error] --review without --diff, and --fail-on-survivors without '
+      '--review, are usage errors before anything runs',
+      () async {
+        for (final List<String> args in <List<String>>[
+          <String>['--review', 'out.json', 'lib/a.dart'],
+          <String>['--fail-on-survivors', 'lib/a.dart'],
+        ]) {
+          final ProcessResult result = await Process.run('dart', <String>[
+            'run',
+            _binPath,
+            '--test-command',
+            'dart test',
+            ...args,
+          ], environment: cliEnvironment);
+          expect(result.exitCode, 64, reason: args.join(' '));
+        }
+      },
+    );
+  });
 }

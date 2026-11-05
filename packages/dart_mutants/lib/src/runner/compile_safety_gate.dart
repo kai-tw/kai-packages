@@ -36,7 +36,7 @@ import 'process_command.dart';
 /// invocation per mutant and exists for a caller who needs the project's own
 /// command to be the judge.
 abstract interface class CompileSafetyGate {
-  /// Whether [filePath] — already mutated on disk — still compiles.
+  /// Whether [filePath], as it is on disk, compiles.
   Future<bool> compiles(String filePath);
 
   /// Releases whatever the gate holds for the run. Safe to call when

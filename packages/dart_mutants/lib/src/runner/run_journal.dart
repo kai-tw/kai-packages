@@ -90,8 +90,9 @@ class RunJournal {
 
   /// What a recorded result means. Raise it with any change that can give a
   /// recorded mutant a different verdict, and every journal written before
-  /// is started over.
-  static const int format = 1;
+  /// is started over. 2: every mutant runs as a switched file, against the
+  /// tests `dart_test.yaml` and the command's filters keep.
+  static const int format = 2;
 
   /// [firstLine] decoded, with the header 0.5.0 wrote read as [format] 1:
   /// it named the engine version first where [format] now stands, and its

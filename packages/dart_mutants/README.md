@@ -24,9 +24,7 @@ A run prints what it holds once the baseline has passed, then one line per
 mutant as it finishes, then the text report:
 
 ```text
-3 mutants in 1 file — baseline 4.1s, each mutant given at most 16.4s
-at one baseline per mutant across 1 worker that is about 12s — an upper
-bound; the per-mutant `left` below measures the real pace
+3 mutants in 1 file — baseline 4.1s, each mutant given at least 30.0s a test file
 [1/3] detected lib/foo.dart:12:10 ternary_swap (3.9s, ~8s left)
 [2/3] invalid lib/foo.dart:18:5 statement_deletion (0.0s, ~3s left)
 [3/3] undetected lib/foo.dart:30:12 condition_negation (4.2s)
@@ -38,38 +36,32 @@ stdout parses as a whole.
 
 ## How long it will take
 
-Two numbers, and the difference between them is the point.
+The plan line doesn't say, because nothing before the first mutant knows. A
+mutant costs one run of each test file it reaches, until one of them fails,
+and how many files that is, how fast they run, how many candidates the
+compile-safety gate rejects for free and what parallel workers actually win
+all only exist once mutants have run.
 
-The plan's is arithmetic: every mutant costing one baseline, divided over
-the workers. It is an upper bound and usually a loose one — a mutant the
-compile-safety gate rejects runs no test at all, and `--select-by-coverage`
-runs a fraction of the suite per mutant. Nothing before the first mutant
-knows how much of either this run will get.
-
-The `left` on each progress line is measured: the wall time since the first
-mutant started, over the mutants finished in it, times the ones to come. It
-carries what the arithmetic cannot — what parallel workers actually win (two
-workers measured 17% faster, not twice as fast), what a selected command
-costs against the full one, how many candidates are rejected for free — and
-it moves as the run does.
+The `left` on each progress line is the one projection, and it is measured:
+the wall time since the first mutant started, over the mutants finished in
+it, times the ones to come. It moves as the run does.
 
 ### `--max-minutes`: stop rather than find out
 
-`--max-minutes <n>` ends a run that will not fit, scoring nothing. The
-plan's floor — every worker busy, nothing rejected, no selection — is a
-figure nothing can beat, so a run already over it is refused before a file
-is written. Past that the measured pace is compared against the limit, once
-enough mutants have finished for it to mean anything — eight per worker, so
-that a stretch of free rejections cannot pass for the pace of the rest — and
-a run that will not fit stops between mutants with the tree restored.
+`--max-minutes <n>` ends a run that will not fit, scoring nothing, as
+`over-budget`. The measured pace is compared against the limit once enough
+mutants have finished for it to mean anything — eight per worker, so that a
+stretch of free rejections cannot pass for the pace of the rest — and a run
+that will not fit stops between mutants. Nothing is refused up front: only
+the pace can say.
 
-There is no dry-run mode, and this is why: both numbers need the baseline,
-which is the run's own first step. A separate counting pass would run the
-suite an extra time to learn what the run itself learns on the way past.
+There is no dry-run mode, and this is why: the pace only exists once mutants
+have run. A separate counting pass would pay for what the run itself learns
+on the way past.
 
-The limit is on the mutants. The baseline, the coverage pass and the worker
-sandbox check come before the first one and are not counted against it —
-they are what makes any estimate possible.
+The limit is on the mutants. The baseline and the coverage pass come before
+the first one and are not counted against it. Compiling the test files
+happens among the mutants, and is.
 
 ### `--journal`: stop now, finish later
 
@@ -94,7 +86,8 @@ everything under `lib/` and `test/`, and the files given. Any change starts
 the file over, with a note on stderr saying which — an edit anywhere can
 change any verdict, so none is guessed at. So does a release that changes
 how a verdict is reached; other releases resume a journal an earlier one
-wrote. A file a test reads from outside `test/`, or a Dart SDK upgrade, is
+wrote. 0.9.0 is such a release, so a journal an earlier one wrote starts over
+once. A file a test reads from outside `test/`, or a Dart SDK upgrade, is
 not seen; delete the journal after changing one. A recorded timeout is
 always asked again: the budget decided it, and the next start may have a
 larger one.
@@ -159,10 +152,10 @@ clean.
 ## The compile-safety gate
 
 An AST-legal edit is not a type-legal one. A mutant that fails to compile
-still makes the test command exit non-zero, which — read naively — counts
-as "detected": a broken mutant would make the score go *up*, not down, for
-a file the mutation never actually ran against. Every mutant is checked
-against the analyzer before it is ever handed to the test command; one that
+still fails its test run, which — read naively — counts as "detected": a
+broken mutant would make the score go *up*, not down, for a file the
+mutation never actually ran against. Every mutant is checked against the
+analyzer before it ever runs; one that
 fails compiles is `invalid` and excluded from both the numerator and
 denominator of the score, not counted as caught.
 
@@ -184,8 +177,8 @@ side:
 - a lint **promoted** to an error does not make a mutant invalid — it still
   compiles and runs, so it is still measured;
 - a real compile error **downgraded** to a warning still does. `dart
-  analyze` accepts that file, the compiler does not, and the test command's
-  resulting failure would otherwise read as `detected`.
+  analyze` accepts that file, the compiler does not, and the resulting
+  failure would otherwise read as `detected`.
 
 Before anything is mutated, every target file that has mutants is put to
 the gate as it stands — the same rule as the baseline test run, applied to
@@ -206,7 +199,9 @@ your tests load, so a broken file no test imports passes it and lands here.
 
 To have your own analyzer command be the judge instead — its configuration,
 its exit code — pass it, and pay a process per mutant for it. Its
-configuration is exactly what then decides, including a downgraded error:
+configuration is exactly what then decides, including a downgraded error.
+It reads files from disk, so each mutant is written into a copy of the
+package for it to judge, never into the package itself:
 
 ```bash
 dart run dart_mutants --analyze-command "dart analyze" \
@@ -230,32 +225,30 @@ A mutant can turn a normal loop into an infinite one — sometimes the most
 real signal a mutation testing tool can produce. But `package:test`'s own
 per-test timeout is cooperative, built on the event loop, and cannot
 preempt a synchronous `while (true) {}` that never yields to it; this
-package's own subprocess would then wait on the test command forever. Every
-mutant's test run is bounded by a budget (below) and killed with `SIGKILL` —
-which cannot be ignored — if it does not finish in time. A timed-out mutant is scored
+package would then wait on the test process forever. Every run of a mutant
+against a test file is bounded by a budget (below) and killed with
+`SIGKILL` — which cannot be ignored — if it does not finish in time. A timed-out mutant is scored
 `timeout`, not `detected`: a hang is not the same evidence as an assertion
 actually catching the wrong output, and counting it as caught would inflate
 the score the same way an uncompilable mutant would.
 
 ### The budget follows the baseline
 
-Each mutant gets the larger of `--mutant-timeout` (default 30s) and
-`--baseline-factor` (default 4) times the baseline's own wall time in
-this run. The report carries both numbers, `baselineSeconds` and
-`mutantTimeoutSeconds`, so a caller can see what the budget actually was.
-`--baseline-factor 0` turns the derivation off and leaves the flat
-floor.
+A mutant gets a budget on each test file it runs against, worked out from
+that test file's own unmutated run in this run (see *How a mutant runs*):
+the larger of `--baseline-factor` (default 4) times that run, and that run
+plus `--mutant-timeout` (default 30s) plus 30s. `--baseline-factor 0` turns
+the multiple off and leaves the floor.
 
-The baseline is one sample, and the factor is there for load, not for
-compilation. Under `dart test` this package clears the kernel cache before
-the baseline and before every mutant, so every run compiles from scratch and
-`k × baseline` is not a generous allowance for a cold compile against warm
-ones.
-What it covers is the machine getting busier mid-run. The same unmodified
-suite, on a workstation running several sessions at once, took 9s at its
-quietest and 29s at its busiest, a 3.2× spread; 3 would not have covered
-that, so the default is 4. How cold a `flutter test` run is between mutants
-has not been measured here; the load argument applies either way.
+The extra 30s is `package:test`'s own per-test timeout. A test that awaits
+forever fails at 30s under the test runner, which is a detection; killed at
+that moment, the same mutant would read as `timeout`. A test file usually
+runs in a few seconds, so its budget is usually the floor.
+
+The unmutated run is one sample, and the factor is there for load: the
+machine getting busier mid-run. The same unmodified suite, on a workstation
+running several sessions at once, took 9s at its quietest and 29s at its
+busiest, a 3.2× spread; 3 would not have covered that, so the default is 4.
 
 A budget that is too small does not fail safe. A timeout moves the score in
 either direction (see the output contract below), but one harm is certain:
@@ -264,32 +257,29 @@ score and the undetected list, which is the survivor a caller most needed
 to see. A budget that is too large costs time on mutants that genuinely
 hang, each of which runs for the full budget, and memory (see below).
 
-Under `--select-by-coverage`, a mutant that runs only the tests that reach
-it gets a budget measured against those tests. The first mutant needing a
-given selection runs it once against unmodified code, and the budget is that
-time times the factor, never less than `--mutant-timeout` and never more
-than the full command's budget. Mutants sharing the selection reuse it.
-Before this, every mutant got the full suite's budget, so one that hung a
-two-second selection waited out a budget sized for the whole suite. On one
-consuming app's run, with a 190s baseline, that was 760s for each of eight
-hanging mutants, about 18% of a 9.4-hour run. A selection that does not pass
-unmodified, such as exit 79 when no test ran, keeps the full budget. Each
-mutant's budget is in its result, as `timeoutSeconds`.
+The report's `mutantTimeoutSeconds` is `--mutant-timeout`, the part of the
+floor a caller sets. Each mutant's own budget is in its result, as
+`timeoutSeconds`: the budget on the test file that decided it.
 
 The baseline itself gets `--baseline-timeout`, ten times `--mutant-timeout`
-by default. It used to get the mutant budget, so a green suite whose cold
-run took longer than one mutant's floor aborted the whole run as
-`baseline-timeout`, as if it had hung. Its only job is to tell a suite that
-finishes from one that does not.
+by default, and so does each test file's compile and its unmutated run. The
+baseline used to get the mutant budget, so a green suite whose cold run took
+longer than one mutant's floor aborted the whole run as `baseline-timeout`,
+as if it had hung. Its only job is to tell a suite that finishes from one
+that does not.
 
 ### The kill goes to the whole process tree
 
+A mutant runs in a `flutter_tester` or `dart` process this package starts
+itself, but the baseline and the coverage pass run your test command, and
 `flutter test` is three processes, not one — the `flutter` wrapper spawns
 `dartaotruntime`, which spawns the `flutter_tester` engine that actually runs
 the test. A signal to the wrapper does not propagate downward, and POSIX
 reparents an orphan to init rather than killing it, so killing the direct
 child left the engine **running the mutant's infinite loop forever**, with
-nothing that would ever reap it.
+nothing that would ever reap it. That was found when mutants still ran
+through `flutter test`; every process this package starts is killed the
+same way.
 
 Measured: one such orphan sat at 1.86 GB at the moment of the kill and 2.25 GB
 three seconds later — roughly 130 MB/s, indefinitely, from a single timed-out
@@ -304,76 +294,53 @@ supervisor, so killing the tester while its parent is still alive makes the
 parent spawn a replacement, which the arriving kill then orphans. Any process
 that still survives is named on stderr rather than left to leak silently.
 
-`SIGINT`/`SIGTERM` take the in-flight test command down the same way, so a
-Ctrl-C mid-run is not a second route to the same leak.
+`SIGINT`/`SIGTERM` take every running test process and compiler down the
+same way, so a Ctrl-C mid-run is not a second route to the same leak.
 
 ### Your timeout is also your memory budget
 
 The budget bounds how long a runaway mutant runs *before* the kill, and a
 mutant that allocates inside its loop allocates for that whole window. At
-the 30s default that is a bounded spike; at a 300s budget, whether passed as
-`--mutant-timeout 300` or derived from a 75s baseline, the same mutant has
-ten times as long to grow. Raising the budget to resolve timeouts
+the default floor, about a minute for a fast test file, that is a bounded
+spike; at a 300s budget, whether set through `--mutant-timeout` or derived
+from a 75s test file, the same mutant has five times as long to grow. Raising the budget to resolve timeouts
 is the right move for score accuracy (see the output contract below) and it
 buys that accuracy with peak memory — worth knowing before raising it on a
 machine that is also running other suites.
 
-## `--fail-fast` belongs in your test command
+## `--fail-fast` is accepted, and does nothing
 
-Runtime is mutant count times one test run, so the cheapest thing a caller
-can do is make that one run cheaper. This package only ever reads the test
-command's **exit code**; every test that runs after the first failure has
-already told it what it needed to know. Both `dart test` and `flutter test`
-support stopping there:
+Earlier releases recommended putting `--fail-fast` in the test command, so
+each mutant's run of the suite stopped at the first failure. Mutants no
+longer run the test command (see *How a mutant runs*), so there is nothing
+for it to shorten. It is accepted and ignored: each compiled test file runs
+to completion, and a mutant is settled as soon as one of its test files
+fails, without running the rest.
 
-```bash
-dart run dart_mutants \
-  --test-command "dart test --fail-fast" \
-  lib/foo.dart
-```
-
-Measured on `clock_anchor` over 40 detected mutants, timing the test
-command alone: mean wall time per run fell from **1.03s to 0.80s**, about a
-fifth. It does nothing for an undetected mutant — that one runs the whole
-suite either way — so the saving scales with your detection rate.
-
-**That saving depends on something this package does, and does not
-generalise.** Between mutants it deletes the test runner's incremental
-kernel cache under `.dart_tool/test/`, so every run starts cold. Measured
-the same way but with that deletion suppressed, the same flag takes the same
-suite from 0.81s to **12.54s** — the sign inverts. Why is not established;
-the measurement is four wall-clock means, and a run-to-run compilation
-effect is the obvious suspect rather than a demonstrated cause.
-
-Nothing exposed here can turn the deletion off, so the recommendation above
-holds as written. It is worth knowing anyway, because it says the benefit is
-a property of this package's inner loop rather than of `--fail-fast`: do not
-carry the number over to a mutation runner that reuses its kernel cache.
-
-For `flutter test`, add `--no-pub` as well. Without it every invocation
-re-checks dependencies first: measured at 0.17s a run on a small package
-here, and 0.5–0.6s on a single test file of a consuming app.
+`--no-pub` still helps under `flutter test`, for the runs that do use your
+command: the baseline and, under `--select-by-coverage`, the coverage pass,
+which is one run per test file. Without it every invocation re-checks
+dependencies first: measured at 0.17s a run on a small package here, and
+0.5–0.6s on a single test file of a consuming app.
 
 ## `--select-by-coverage`: run only the tests that reach the mutant
 
-Where a Flutter mutant's time goes, measured on a consuming app's real
-mutation scope — 44 test files, 314 tests: each `flutter test` took 23–24s,
-of which 22.3–22.7s was loading and compiling the 44 test files and 1.3–1.7s
-was tool startup. The tests themselves barely registered. Every mutant paid
-to load every test file in scope, whether or not any of them could reach the
-code it changed.
+Without the flag, every mutant runs against every test file the command
+runs, until one of them fails. Most of those runs can't reach the mutant at
+all, and a mutant no test reaches runs against every one of them before it
+survives.
 
 With `--select-by-coverage`, each test file is run once with coverage on,
 after the baseline, and that records which test files entered which
 functions. Each mutant then gets one of three answers, about the **function
 it sits in**:
 
-- **some test files entered it** — only those run;
+- **some test files entered it** — it runs against only those;
 - **no test file entered it** — the mutant is scored `undetected` without
   running anything, and marked `uncovered`: it needs a test that reaches the
   function at all, not a better assertion;
-- **coverage cannot say** — the mutant runs the full test command, as it
-  would without the flag. That covers code outside any function (field and
+- **coverage cannot say** — the mutant runs against every test file, as it
+  would without the flag, and is not marked `uncovered`. That covers code outside any function (field and
   top-level initializers), a `const` constructor (its initializers run at
   compile time), and a file no report mentions (one with no executable code
   is absent even when every test loads it).
@@ -388,67 +355,50 @@ test catches it. A function's entry is always instrumented.
 The coverage pass is `dart test` once, or `flutter test` once per test file,
 since `flutter test` writes one combined report per run. It needs a
 `--test-command` of `dart test …` or `flutter test …` whose test files it
-can list exactly as the runner would, and it refuses any command where it
-could not: one that collects coverage itself, uses `--`, runs on a platform
-other than the VM, or carries an argument it cannot place (such as
-`test/a_test.dart?name=x`), and a `dart_test.yaml` that sets `filename`,
-`include` or a platform, or `paths` for a command that names none. Any of
-those could make the coverage pass see different tests than the full
-command runs. `flutter test` is also refused when a test imports `lib/` by
-relative path, since its coverage drops that copy of the file; `dart test`
-handles it by collecting coverage unfiltered. A run in the pass that fails
-is run once more before the pass gives up. A refusal, or a pass that still
-fails, aborts the run before the first mutant, as `selection-unavailable`,
-rather than run every mutant against the full command: on a large suite
-that is a run many times longer than the one asked for — measured, 41 of
-831 mutants in over four hours. Under `flutter test`, a
-file containing `coverage:ignore` comments also runs its mutants in full:
-those comments delete lines from the report, and can delete a function's
-entry.
+can list exactly as the runner would. The commands it would refuse — one
+that collects coverage itself, uses `--`, runs on a platform other than the
+VM, or carries an argument it cannot place, and a `dart_test.yaml` that
+sets `filename`, `include` or a platform, or `paths` for a command that
+names none — are refused before the baseline now, since a switched run
+can't take them either (see *How a mutant runs*). `flutter test` is also
+refused when a test imports `lib/` by relative path, since its coverage
+drops that copy of the file; `dart test` handles it by collecting coverage
+unfiltered. A run in the pass that fails is run once more before the pass
+gives up. That refusal, or a pass that still fails, aborts the run before
+the first mutant, as `selection-unavailable`, rather than run every mutant
+against every test file: on a large suite that is a run many times longer
+than the one asked for — measured, 41 of 831 mutants in over four hours.
+Under `flutter test`, a file containing `coverage:ignore` comments also
+runs its mutants against every test file: those comments delete lines from
+the report, and can delete a function's entry.
 
-**It can only err low.** A test that fails in a selected run fails in the
-full command too, so selection can lose a detection and not invent one. A
-selected outcome that is neither a pass nor a failed test — exit 79 when the
-chosen files ran no test at all, as when a filter in the command skips
-them, or a tool error — is asked of the full command instead. The known
-ways it loses a detection:
+**It can only err low.** A test that fails in a selected test file fails
+when every test file runs too, so selection can lose a detection and not
+invent one. A selected test file in which no test runs, because the
+command's filters leave none, passes and decides nothing, as it would among
+the others under the test command. The known ways selection loses a
+detection:
 
 - a mutant that changes a declaration's inferred type can break the
-  compilation of a test file that never enters its function. Run in full,
-  that failure reads as `detected` — a detection by compile error, the kind
-  the gate exists to keep out of the score;
+  compilation of a test file that never enters its function. Run against
+  every test file, that failure reads as `detected` — a detection by compile
+  error, the kind the gate exists to keep out of the score;
 - code reached only from a subprocess or `Isolate.spawnUri`, whose coverage
   the test runner does not collect;
 - code whose execution depends on timing or randomness, which one coverage
   pass can miss.
 
-Measured on three packages here, twice each, every verdict identical with
-and without the flag, mutant by mutant. The two rounds ran at different
-times on a workstation doing other work, which is why the same full run
-moved by as much as 200s; read each round's pair together:
+The saving grows with how many test files a mutant's scope loads against how
+few of them enter its function, and with how many mutants sit in functions no
+test enters, which run nothing at all.
 
-| package | runner | mutants | round 1: full → selected | round 2: full → selected |
-|---|---|---|---|---|
-| `clock_anchor` | `dart test` | 430 | 343s → 281s | 328s → 236s |
-| `log_system` | `flutter test` | 182 | 317s → 174s | 260s → 185s |
-| `ui_kit` | `flutter test` | 243 | 556s → 145s | 356s → 103s |
+## How a mutant runs
 
-`clock_anchor`'s whole suite takes about a second, so there was little to
-cut. `ui_kit` saved the most because 118 of its 132 survivors sit in
-functions no test enters, and those are no longer run at all. The saving
-grows with how many test files a mutant's scope loads against how few of
-them enter its function; a 44-file scope like the one measured above is
-where it should matter most, and that has not been measured with the flag
-yet.
-
-## Switched files: one compile per test file
-
-Under `--select-by-coverage` and `flutter test`, a run compiles each
-selected test file once for all its mutants, instead of once per mutant.
-`flutter test` compiles every test file it runs, every time: 2–3.5s a file
-on a large app even when nothing changed, so a mutant that 30 test files
-reach spent over a minute compiling before any test ran. `--no-schemata`
-turns this off.
+Every mutant runs as a switched file; there is no other way. `dart test` and
+`flutter test` compile every test file they run, every time — 2–3.5s a file
+on a large app even when nothing changed — so when mutants ran through the
+test command, one that 30 test files reach spent over a minute compiling
+before any test ran. Here each test file is compiled once for the whole run.
 
 Every mutant of a target file that the gate accepts is written into that
 file at once, each behind a switch read from the `DART_MUTANTS_ID`
@@ -461,107 +411,146 @@ save();         →  if (_dmOn(7)) { ; } else { save(); }
 
 Unset, the file behaves as it did. The switch sits on the whole expression
 around the mutant, not just the part it changes, so a null check that
-promotes a variable later in the same expression stays in one piece. Each
-selected test file is then compiled once, with the compiler `flutter test`
-keeps running, and `flutter_tester` is started on the result directly: once
-with no mutant, and then once per mutant that reaches it, with that mutant's
-id. A mutant stops at the first test file that fails, as `flutter test`
-would.
+promotes a variable later in the same expression stays in one piece. The
+switched file has to pass the gate whole; a mutant that stops it compiling,
+typically one whose switch hides a null check that later code relies on, is
+left out of it.
 
-All of it happens in a temporary copy of the package, the same kind
-`--workers` makes (see below), so the package is never written to, and the
-copy goes with the run's other temporary directories, on an interrupt too.
-One test file's compiled program is about 100MB on a large app, so only one
-is on disk at a time.
+Each test file the mutants need is then compiled once, with the compiler the
+test runner itself keeps running — Flutter's frontend server under
+`flutter test`, the Dart SDK's, targeting the VM, under `dart test` — and
+the result is started directly, in `flutter_tester` or the `dart` VM: once
+with no mutant, which has to pass, and then once per mutant that runs
+against that file, with that mutant's id. The verdict comes from the exit
+code:
 
-Measured on a consuming app's review run, 172 mutants across 23 files with
-the baseline and coverage map taken from an earlier run's journal: the
-mutants took 1,079s, with 116 of them switched, 34 test files compiled in
-35s in all, and their unmutated runs 22s. The release before scored the same
-code's mutants at about 45s each, which is about 5,400s for the 120 that
-ran. Of the 95 mutants both runs scored, 93 got the same verdict; the other
-two timed out there and were `detected` here. Peak memory, the run's own
-process and its analyzer included, was 3.0GB, the resident compiler about
-1GB of it.
+- 0 on every one of a mutant's test files: `undetected`;
+- anything else on any of them: `detected`, and its other test files aren't
+  run. A crash or a load failure is a failed test under the test runner
+  too;
+- not finishing within the budget (see *The budget follows the baseline*):
+  `timeout`.
 
-**What makes the verdict trustworthy.** Three checks, each of which sends
-mutants back to `flutter test` rather than guess:
+**Compiled alone.** Some mutants can't be switched: one in a constant
+context, a whole local declaration, a statement that has to stay a block (a
+function's own body, say), a bare `$name` in a string, any mutant of a part
+file, and one that stops the file compiling beside the others. Each of those
+is written into the copy as it is, and each of its test files is compiled
+again around it and run. The compiler is told exactly which files changed
+since its last compile, so it never runs a stale one. A test file that no
+longer compiles with the mutant in is a `detected`, as a load failure is a
+failed test under the test command. That costs a compile per test file, for
+those mutants only; the statistics count them in `switched.alone`, with why
+in `switched.aloneReasons`.
 
-- the switched file must pass the gate whole. A mutant that stops it
-  compiling, typically one whose switch hides a null check that later code
-  relies on, is left out of it;
-- each test file must compile with the switched files in, and pass with no
-  mutant on, before any mutant runs against it;
-- a mutant's run must end in a pass or a failed test, not a crash.
+All of it happens in temporary copies of the package (see *Running mutants
+in parallel*), so the package is never written to, and the copies go with
+the run's other temporary directories, on an interrupt too. One test file's
+compiled program is about 100MB on a large app, so each worker keeps only
+one on disk at a time.
 
-A mutant's budget on one test file is the usual multiple of that file's own
-unmutated time, but never less than that time plus `--mutant-timeout` plus
-30s, `package:test`'s own per-test timeout. Killed any earlier, a mutant
-that makes a test await forever reads as `timeout`, where `flutter test`
-lets the test fail and reads it as `detected`.
+Measured with 0.8.0, which ran mutants this way under `flutter test` and
+`--select-by-coverage` and sent the rest through `flutter test`, on a
+consuming app's review run, 172 mutants across 23 files with the baseline
+and coverage map taken from an earlier run's journal: the mutants took
+1,079s, with 116 of them switched, 34 test files compiled in 35s in all, and
+their unmutated runs 22s. 0.7.0 scored the same code's mutants at about 45s
+each, which is about 5,400s for the 120 that ran. Of the 95 mutants both
+runs scored, 93 got the same verdict; the other two timed out there and were
+`detected` here. Peak memory, the run's own process and its analyzer
+included, was 3.0GB, the resident compiler about 1GB of it.
 
-**When it does not apply.** Left out of a switched file, and run through
-`flutter test` as before: a mutant in a constant context, a whole local
-declaration, a function's own body, a bare `$name` in a string, and any
-mutant of a part file. Not applied to the run at all, with the reason on
-stderr: a package that does not resolve `package:test_core` (the runner the
-switched program hands its tests to; `flutter_test` does not depend on it,
-so add it to `dev_dependencies`), `--analyze-command`, a `dart_test.yaml`
-(a switched run does not read it), a test-command flag other than
-`--no-pub`, `-j` or `-r`, and a Flutter SDK without `flutter_tester` for
-this host. `dart test` packages are not switched.
+**It runs a test file the way the test runner would.** A compiled test file
+starts in `package:dart_mutants/switched_suite.dart`, which reads the same
+configuration the test runner does: the global file (`DART_TEST_CONFIG`, or
+`~/.dart_test.yaml`), the package's `dart_test.yaml`, and the test command's
+own filtering options. It reads the test file's suite-level annotations —
+`@Tags`, `@Timeout`, `@Skip`, `@TestOn`, `@OnPlatform` — and applies the
+include and exclude tags and the name filters. Under `flutter test` it also
+wraps the test in the nearest `flutter_test_config.dart`, as `flutter test`
+does, and compares golden files without updating them. A test skipped or
+filtered out under the test command is skipped or filtered out here too. So
+the package under test has to resolve `package:dart_mutants` — have it in
+`dev_dependencies`, which running it with `dart run` needs anyway — and,
+under Flutter, `package:flutter_test`.
 
-**What it leans on.** The flags `flutter_tester` and the compiler are
-started with are copied from `flutter_tools`, and the program a test file
-runs as uses `package:test_core`'s `directRunTests`, which is not a public
-library. Neither is a stable interface. If either changes under a new
-Flutter, the unmutated run of each test file fails and its mutants go back
-to `flutter test`: slower, not wrong. The statistics' `schemata.brokenTestFiles`
-lists them.
+The test command's options fall into three groups:
+
+- passed on to every compiled test file: `-n`/`--name`,
+  `-N`/`--plain-name`, `-t`/`--tags`, `-x`/`--exclude-tags`, `--timeout`,
+  `-P`/`--preset` and `--run-skipped`;
+- ignored, since they only shape reporting or how many files run at once, or
+  only end a failing run sooner: `-j`/`--concurrency`, `-r`/`--reporter`,
+  `--file-reporter`, `--no-pub`, `--color`, `--no-color`, `--fail-fast`,
+  `--chain-stack-traces` and `--no-chain-stack-traces`;
+- anything else, such as `--dart-define` or `--total-shards`, stops the run.
+
+**What stops the run before the baseline**, as `switched-run-unavailable`,
+with nothing run: a command that isn't `dart test …` or `flutter test …`; one
+that uses `--`, collects coverage itself, runs on a platform other than the
+VM, names no `*_test.dart` file, or carries an argument it cannot place
+(such as `test/a_test.dart?name=x`); an option from the third group above; a
+`dart_test.yaml` that sets `filename`, `include` or a platform, or `paths`
+for a command that names none; a target file outside the package; a package
+that doesn't resolve `package:dart_mutants` (and `package:flutter_test`
+under Flutter); and a missing SDK piece, such as `flutter_tester`, where the
+reason says to run `flutter precache`. Under Flutter, `flutter_tester`
+exists for macOS and for Linux on x64 and arm64 only.
+
+**What stops it after.** Each test file has to compile, and pass with no
+mutant on, before any mutant runs against it. One that doesn't, though the
+test command passed with it, stops the whole run as `switched-run-failed`,
+naming the file, and nothing is scored: a run that doesn't run what the test
+command runs would read every mutant as detected.
+
+**What it leans on.** The flags the compiler, `flutter_tester` and the
+`dart` VM are started with are copied from what the test runners pass, and
+`switched_suite.dart` uses libraries of `package:test_core` and
+`package:test_api` that are not public. None of these is a stable
+interface. This package pins `test_core` and `test_api` to the ranges it was
+built against, but an SDK upgrade can still change the rest. When one of
+them changes, a test file fails to compile or fails unmutated, and the run
+stops as `switched-run-failed`, naming that file. It does not score
+mutants against the wrong tests.
 
 ## Running mutants in parallel
 
-`--workers N` (`-j N`) runs N mutants at once. The default, 1, writes each
-mutant into the package itself and puts the file back afterwards.
+`--workers N` (`-j N`) runs N lanes at once. Each lane has its own copy of
+the package, its own compiler and its own test process. Lanes take test
+files from a shared queue — each one compiled, run unmutated, and then run
+against every switched mutant still waiting on it — and then the mutants
+compiled alone. The package itself is never written to, at any number of
+workers, 1 included.
 
-With more than one, the package itself is never written to. Each worker gets
-a sandbox: a copy of the package made of symbolic links, in which only the
-target files are real copies. The directories on the way to them, and every
-directory under `lib/` and `test/`, are real directories full of links. Every
-other top-level directory is one link, top-level files are copied (tools
-rewrite some of them in place), and `.dart_tool/` holds a package config that
-resolves the package to the sandbox. `build/`, `.git/` and, under
-`flutter test`, the platform directories are left out. Under `flutter test`
-each worker's command also gets `--no-pub`.
+A lane's copy is a sandbox made of symbolic links, in which only the target
+files are real copies. The directories on the way to them, and every
+directory under `lib/` and `test/`, are real directories full of links.
+Every other top-level directory is one link, top-level files are copied
+(tools rewrite some of them in place), and `.dart_tool/` holds a package
+config that resolves the package to the sandbox. `build/`, `.git/` and,
+under `flutter test`, the platform directories are left out.
 
-So a sandbox costs a few kilobytes of its own, plus what the test command
-builds there: measured on a small Flutter package, 46MB of `build/` from
-`flutter test`, and about 30MB of compiled test runner in `.dart_tool/` from
-`dart test`. Each sandbox is deleted with the run's other temporary
-directories, and the statistics record how much each one held at the end.
+So a sandbox costs a few kilobytes of its own, plus the test entry it
+compiles. The compiled program goes to a work directory of its own. Each
+sandbox is deleted with the run's other temporary directories, and the
+statistics record how much each one held at the end.
 
 The compile-safety gate is shared: the default in-process analyzer judges a
 mutant's content in memory, one question at a time, so a mutant that does not
-compile is never written anywhere. `--analyze-command` still reads the
-mutant from the worker's copy.
+compile is never written anywhere. `--analyze-command` reads the mutant from
+a copy of the package kept for it alone.
 
-Before any mutant runs, the full test command runs once in the first sandbox
-against unmodified code. The baseline vouches for the package, not for a
-copy of it, and a copy the tools cannot work in would fail every command run
-there, which would read as every mutant `detected`. If that check fails, the
-run says why on stderr and goes on with one worker, in place.
+A copy the tools can't work in fails the unmutated run of the first test
+file a lane takes, which stops the run as `switched-run-failed` (see *How a
+mutant runs*). There is no fallback to running in the package.
 
-Memory is usually the limit, not processors: each worker runs its own test
-command, and a `flutter test` process can take a gigabyte or two.
+Memory is usually the limit, not processors: under Flutter, a lane's
+compiler and its `flutter_tester` can take a gigabyte or two each.
 
-Do not expect N times the speed. Measured on `log_system` here (182
-mutants, `--select-by-coverage`, a 10-core machine at a load average of
-about 2.3 both times), two workers gave the same verdicts, mutant by mutant,
-as one, in 727s against 872s. Each test run slowed from 5.7s to 8.2s on
-average, because a `flutter test` run compiles on several cores itself, so
-the two workers competed for them. The first sandbox's check added 20s. The
-baseline and the coverage pass still run once, in the package, before the
-workers start.
+Don't expect N times the speed: the lanes compete for the same cores and
+memory, and how much they win on a switched run has not been measured here
+yet. The baseline and the coverage pass still run once, in the package,
+before the lanes start.
 
 ## Run statistics
 
@@ -587,20 +576,21 @@ dart run dart_mutants --select-by-coverage \
   gives one. The same suite has taken 9s and 29s on one machine depending on
   what else ran, so a slow run needs this to be read at all;
 - `phases`: `baselineSeconds`, `gateCheckSeconds` (every target put to the
-  gate unmodified), `coveragePassSeconds`, `sandboxSetupSeconds` (making the
-  sandboxes and checking one) and `mutantsSeconds`. A phase that did not run
-  is absent;
-- `workers`: how many ran the mutants, and `workerDiskBytes`: what each
-  sandbox held of its own at the end;
+  gate unmodified), `coveragePassSeconds` and `mutantsSeconds`. A phase that
+  did not run is absent;
+- `workers`: how many lanes ran the mutants;
+- `switched`, when any mutant ran a test: how many mutants were `switched`
+  and how many compiled `alone`, with `aloneReasons` counting why;
+  `compiledTestFiles`; `switchSeconds` (writing the switched files),
+  `compileSeconds` and `unmutatedSeconds` (the test files' unmutated runs);
+  and `workerDiskBytes`, what each lane's copy held of its own at the end;
 - `verdicts` and `operators`: count and seconds for each, and for each
   operator its verdicts. `uncovered` is counted apart from `undetected`;
-- `selection`: how many mutants ran a selection, how many selections were
-  measured and for how long, and how many selected runs fell back to the
-  full command and what that cost;
+- `selection`: `selectedMutants`, how many mutants ran against test files
+  coverage chose;
 - `mutants`: one entry per mutant, `detected` ones included, with its
-  location, operator, verdict, the `worker` that ran it, `seconds`,
-  `gateSeconds`, whether it was
-  `selected`, and `measurementSeconds`, `testSeconds`, `retrySeconds` and
+  location, operator, verdict, the `worker` (lane) that settled it,
+  `seconds`, `gateSeconds`, whether it was `selected`, and `testSeconds` and
   `timeoutSeconds` where they apply.
 
 The statistics are for comparing runs. They are not part of the output
@@ -681,25 +671,30 @@ real CLI binary, not just the internal report types:
   this package deciding what a path should look like.
 - **An aborted run says which kind of abort it was, in `abortKind`** —
   `baseline-timeout`, `baseline-failed`, `gate-rejects-unmodified`,
-  `over-budget` or `selection-unavailable`. Branch
-  on that, never on `abortReason`, whose wording is for people and is free
-  to change. The kinds call for opposite responses — a red suite needs
-  fixing, a slow one needs a bigger `--baseline-timeout`, a rejected file needs a look at
-  both the file and the analyzer judging it — so a caller that guesses the
+  `over-budget`, `selection-unavailable`, `switched-run-unavailable` (the
+  mutants can't run as switched files; found before the baseline, nothing
+  run) or `switched-run-failed` (a test file didn't compile or pass
+  unmutated in the switched run, though the test command passed with it).
+  Branch on that, never on `abortReason`, whose wording is for people and is
+  free to change. The kinds call for opposite responses — a red suite needs
+  fixing, a slow one needs a bigger `--baseline-timeout`, a rejected file
+  needs a look at both the file and the analyzer judging it, a refused
+  command needs a different command — so a caller that guesses the
   kind from the prose gets
   the advice backwards the day the prose is reworded, and nothing goes red
   to say so. New kinds may be added; an existing name is never renamed.
-- **The budget each mutant got is in the report**, as
-  `mutantTimeoutSeconds`, next to `baselineSeconds`, the baseline's wall time
-  it was derived from. Neither is necessarily the `--mutant-timeout` a caller
-  passed (see *The budget follows the baseline*), and a caller reading
-  `timedOutMutants` needs to know what they timed out against. Both are
-  present on every run whose baseline passed; a red baseline has only
-  `baselineSeconds`, and a baseline that never finished has neither.
-  `mutantTimeoutSeconds` is the full command's budget. Every mutant that ran
-  a test also carries its own budget, `timeoutSeconds`, which is less for a
-  selected run (see *The budget follows the baseline*). An `invalid` or
-  `uncovered` mutant ran nothing and has no `timeoutSeconds`.
+- **The budget each mutant got is in the report.** Every mutant that ran a
+  test carries its own, `timeoutSeconds`: the budget on the test file that
+  decided it, derived from that file's unmutated run (see *The budget
+  follows the baseline*). It is not the `--mutant-timeout` a caller passed,
+  and a caller reading `timedOutMutants` needs to know what they timed out
+  against. An `invalid` or `uncovered` mutant ran nothing and has no
+  `timeoutSeconds`. Beside them, `mutantTimeoutSeconds` is the
+  `--mutant-timeout` the floor was built from, and `baselineSeconds` the
+  test command's wall time against unmodified code. Both are present on
+  every run whose baseline passed; a red baseline has only
+  `baselineSeconds`, and a baseline that never finished, or a run stopped
+  before it, has neither.
 - **A survivor no test ran is marked as one.** Under `--select-by-coverage`
   an undetected mutant in a function no test enters carries
   `uncovered: true`, and each file counts them in `uncovered`, a subset of
@@ -710,27 +705,15 @@ real CLI binary, not just the internal report types:
 ## Known limitations
 
 - **A verdict is not perfectly reproducible, and the error is one-sided.**
-  Observed once, and worth knowing before gating on a percentage: two runs
-  of the same 430-mutant corpus, same inputs, differed on one mutant. The
-  outlier said `detected` where hand-checking against a cold cache proves
-  the mutant is `undetected` — and a second mutant in the same run, deleting
-  the *enclosing* `if` rather than its body and so semantically identical,
-  was scored `undetected` in that very run.
-
-  It has not reproduced: 0 failures in 500 runs of unmodified code, 0
-  spurious failures in 150 targeted runs of exactly that mutant, and 0
-  non-assertion failures across three instrumented full runs — which is what
-  a cache clear colliding with the test command's startup would have looked
-  like. One flip in six full runs of 430 mutants is the only denominator
-  there is, so call it 1 in ~2,600 mutant evaluations and note that a run of
-  0 in 150 bounds the per-mutant rate no tighter than a few percent.
-
-  The cause is **unknown**, and with one event there is nothing to pin it
-  on. The flip landed in a per-mutant-clearing run — but three of the six
-  runs were per-mutant, so a single event lands there by chance alone, and
-  that run was also the first one executed. Three instrumented runs rule out
-  one mechanism by which the clearing could produce it, which neither clears
-  the clearing nor implicates it.
+  Observed once, before 0.9.0, when mutants still ran through the test
+  command: two runs of the same 430-mutant corpus, same inputs, differed on
+  one mutant. The outlier said `detected` where hand-checking proved the
+  mutant `undetected` — and a second mutant in the same run, deleting the
+  *enclosing* `if` rather than its body and so semantically identical, was
+  scored `undetected` in that very run. It did not reproduce: 0 failures in
+  500 runs of unmodified code and 0 spurious failures in 150 targeted runs of
+  exactly that mutant. The cause is **unknown**, and whether the way mutants
+  run now can produce it has not been measured.
 
   What makes it worth a bullet rather than a shrug is the **direction**.
   This package reads any non-zero exit as `detected`, so a spurious failure
@@ -747,25 +730,26 @@ real CLI binary, not just the internal report types:
   `>=` perturb different inputs, so a suite covering only `a == b` can
   legitimately catch one and miss the other — that pair disagrees for a good
   reason and is not evidence of anything.
-- **Parallel runs rest on symbolic links.** `--workers` above 1 keeps each
-  worker's mutants out of the others' way by giving it its own copy of the
-  package (see *Running mutants in parallel*), made of links. A tool that
-  writes to a linked file in place would write to the package itself; the
-  known ones are handled (top-level files are copied, platform directories
-  left out, `--no-pub` under Flutter), and the check in the first sandbox
-  catches a copy the tools cannot work in, but not a stray write. A test
-  that updates a checked-in file, such as a golden image, should not run
-  with more than one worker. Parallel runs are untested on Windows, where
-  creating a link can need extra privileges.
-- **`SIGKILL` cannot be caught.** `SIGINT`/`SIGTERM` restore whatever is
-  mutated, kill the in-flight test command's process tree and delete the
-  run's temporary directories before exiting (all tested against the real
-  CLI binary, not simulated); no process can catch `SIGKILL`, so a `kill -9`
-  or a timeout wrapper configured to skip straight to it is still a real
-  gap — and there it leaks in both directions at once, leaving a mutated
-  file on disk *and* an orphaned test process. Its temporary directories
-  are the one part that recovers: each is named `dart_mutants_<pid>_…`, and
-  the next run deletes those whose pid is no longer running.
+- **Every run rests on symbolic links.** Mutants run in copies of the
+  package (see *Running mutants in parallel*) made of links, at any number
+  of workers. This package never writes through one, but a tool or a test
+  that writes to a linked file in place would write to the package itself;
+  the known ones are handled (top-level files are copied, platform
+  directories left out, golden files compared and never updated), and a
+  copy the tools cannot work in stops the run, but a stray write is not
+  caught. A test that updates a checked-in file should not run under this
+  package. Runs are untested on Windows, where creating a link can need
+  extra privileges, and a Flutter package has no `flutter_tester` to run on
+  there at all.
+- **`SIGKILL` cannot be caught.** `SIGINT`/`SIGTERM` kill every running
+  test process and compiler and delete the run's temporary directories
+  before exiting (tested against the real CLI binary, not simulated); no
+  process can catch `SIGKILL`, so a `kill -9` or a timeout wrapper
+  configured to skip straight to it is still a real gap, and there it leaves
+  orphaned processes behind. It can't leave a mutated file: the package is
+  never written to. The temporary directories recover too: each is named
+  `dart_mutants_<pid>_…`, and the next run deletes those whose pid is no
+  longer running.
 - **Process enumeration is `ps`.** The tree kill needs it. On a platform
   without `ps` this says so on stderr and degrades to killing the direct
   child, which is the pre-0.2.3 behaviour and leaks a `flutter test` engine.
@@ -778,16 +762,12 @@ real CLI binary, not just the internal report types:
   package does not do, so they surface as survivors for a person to dismiss
   rather than being filtered out on a guess. A caller gating on a percentage
   should expect a small floor of these.
-- **A green baseline is not proof that tests ran.** The pre-flight check
-  confirms the test command exits 0 against unmodified code. It cannot
-  confirm the command actually *executed* anything — that would mean parsing
-  one specific runner's output, and this package deliberately accepts any
-  `--test-command`. The case is contained rather than prevented: a baseline
-  that runs nothing makes every mutant undetected, so the file scores 0% and
-  this binary exits 1. Wrong for the wrong reason, but it stops rather than
-  waving through. Reaching it takes a custom wrapper command, since `dart
-  test` (exit 79) and `flutter test` both refuse loudly on no tests.
-  A caller that wants this *named* rather than merely blocked should treat
+- **A green baseline is not proof that tests assert anything.** The
+  pre-flight check confirms the test command exits 0 against unmodified
+  code, and `dart test` and `flutter test` both exit 79 when no test ran at
+  all, which aborts as `baseline-failed`. A suite that runs tests asserting
+  nothing passes it, and every mutant survives, so the file scores 0% and
+  this binary exits 1. A caller that wants this *named* rather than merely blocked should treat
   "zero detected across every file" as ambiguous between "the suite asserts
   nothing" and "the suite never ran". Those are indistinguishable from this
   report, and this package does not guess between them.

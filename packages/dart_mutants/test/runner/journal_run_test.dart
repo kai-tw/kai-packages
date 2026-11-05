@@ -10,6 +10,8 @@ import 'package:dart_mutants/src/runner/run_plan.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/fixture_pubspec.dart';
+
 /// A real package: the journal's promise — a second start runs nothing the
 /// first one finished — is about which `dart test` runs happen, so it is
 /// checked against real ones. `pick.dart` has one ternary its test pins both
@@ -24,7 +26,7 @@ environment:
   sdk: ^3.8.0
 dev_dependencies:
   test: ^1.25.0
-''');
+$dartMutantsDevDependency''');
   Directory(p.join(dir.path, 'lib')).createSync();
   Directory(p.join(dir.path, 'test')).createSync();
   File(p.join(dir.path, 'lib', 'pick.dart')).writeAsStringSync(

@@ -2,31 +2,24 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:path/path.dart' as p;
-
-import 'flutter_sdk.dart';
 import 'process_command.dart';
 
-/// The compiler `flutter test` keeps running, compiling one entry at a time
-/// to a full kernel file at [outputDill].
+/// The compiler the test runners keep running, compiling one entry at a time
+/// to a full kernel file.
 ///
-/// One process for the whole run: after the first compile, each next one
+/// One process for a lane's whole run: after the first compile, each next one
 /// only reads what changed, about 1.5–3s for a test file of a large app
-/// where `flutter test` spends that on every run. A compile with errors
-/// stops the process, as `flutter test` does; the next compile starts a new
-/// one.
+/// where `flutter test` spends that on every run. What changed is said, never
+/// guessed: every compile names the files written since the last one, so a
+/// file rewritten within the same second is read again all the same. A
+/// compile with errors stops the process; the next compile starts a new one,
+/// which reads everything afresh.
 class TestCompiler {
-  TestCompiler(
-    this._sdk, {
-    required this.packageConfig,
-    required this.workingDirectory,
-    required this.outputDill,
-  });
+  TestCompiler(this._command, {required this.workingDirectory});
 
-  final FlutterSdk _sdk;
-  final String packageConfig;
+  /// The compiler's executable and its arguments.
+  final List<String> _command;
   final String workingDirectory;
-  final String outputDill;
 
   Process? _process;
   StreamSubscription<String>? _lines;
@@ -37,17 +30,30 @@ class TestCompiler {
   String? _boundary;
   int _requests = 0;
 
-  /// Compiles [entry]; `true` when [outputDill] now holds it, compiled
-  /// without errors, within [timeout].
-  Future<bool> compile(String entry, Duration timeout) async {
+  /// Compiles [entry]; `true` when the output holds it, compiled without
+  /// errors, within [timeout]. [changed] are the files written since the
+  /// last compile; [entry] counts as one whenever this is not the first.
+  Future<bool> compile(
+    String entry,
+    Duration timeout, {
+    Iterable<String> changed = const <String>[],
+  }) async {
     final bool fresh = _process == null;
     final Process process = _process ??= await _start();
     final String uri = Uri.file(entry).toString();
     final String key = 'dm${_requests++}';
     final Completer<bool> result = _pending = Completer<bool>();
-    process.stdin.write(
-      fresh ? 'compile $uri\n' : 'recompile $uri $key\n$uri\n$key\n',
-    );
+    if (fresh) {
+      process.stdin.write('compile $uri\n');
+    } else {
+      final Set<String> invalidated = <String>{
+        uri,
+        for (final String path in changed) Uri.file(path).toString(),
+      };
+      process.stdin.write(
+        'recompile $uri $key\n${invalidated.join('\n')}\n$key\n',
+      );
+    }
     final bool compiled = await result.future.timeout(
       timeout,
       onTimeout: () => false,
@@ -63,24 +69,11 @@ class TestCompiler {
   }
 
   Future<Process> _start() async {
-    final Process process = await Process.start(_sdk.dartAotRuntime, <String>[
-      _sdk.frontendServer,
-      '--sdk-root',
-      '${_sdk.patchedSdk}${p.separator}',
-      '--incremental',
-      '--no-print-incremental-dependencies',
-      '--target=flutter',
-      '--experimental-emit-debug-metadata',
-      '--output-dill',
-      outputDill,
-      '--packages',
-      packageConfig,
-      '-Ddart.vm.profile=false',
-      '-Ddart.vm.product=false',
-      '--enable-asserts',
-      '--track-widget-creation',
-      '--verbosity=error',
-    ], workingDirectory: workingDirectory);
+    final Process process = await Process.start(
+      _command.first,
+      _command.skip(1).toList(),
+      workingDirectory: workingDirectory,
+    );
     ProcessCommand.track(process.pid);
     unawaited(process.stderr.drain<void>());
     unawaited(_ignoreBrokenPipe(process));
