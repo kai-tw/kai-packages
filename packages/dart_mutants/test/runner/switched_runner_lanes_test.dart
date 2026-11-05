@@ -113,7 +113,7 @@ void main() {
     'get',
   ], workingDirectory: dir.path);
   if (pubGet.exitCode != 0) {
-    throw StateError('dart pub get failed:\n${pubGet.stdout}${pubGet.stderr}');
+    fail('dart pub get failed:\n${pubGet.stdout}${pubGet.stderr}');
   }
   return dir;
 }
