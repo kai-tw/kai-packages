@@ -140,6 +140,7 @@ void main() {
         'TMPDIR': temps.path,
       },
     );
+    addTearDown(() => process.kill(ProcessSignal.sigkill));
     // Drain stdio so the child cannot block on a full pipe buffer.
     process.stdout.drain<void>();
     process.stderr.drain<void>();
@@ -262,6 +263,7 @@ void main() {
           'TMPDIR': temps.path,
         },
       );
+      addTearDown(() => process.kill(ProcessSignal.sigkill));
       process.stdout.drain<void>();
       process.stderr.drain<void>();
 

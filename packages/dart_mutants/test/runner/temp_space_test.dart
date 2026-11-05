@@ -91,7 +91,7 @@ void main() {
       'live one kept', () async {
     final int dead = await _deadPid();
     final Process live = await Process.start('sleep', <String>['30']);
-    addTearDown(live.kill);
+    addTearDown(() => live.kill(ProcessSignal.sigkill));
     Directory(p.join(root.path, 'dart_mutants_${dead}_cov_x')).createSync();
     Directory(
       p.join(root.path, 'dart_mutants_${live.pid}_cov_x'),

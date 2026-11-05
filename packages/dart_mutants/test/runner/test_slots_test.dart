@@ -49,7 +49,7 @@ void main() {
       program.path,
       slotDir.path,
     ]);
-    addTearDown(process.kill);
+    addTearDown(() => process.kill(ProcessSignal.sigkill));
     final String first = await process.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())

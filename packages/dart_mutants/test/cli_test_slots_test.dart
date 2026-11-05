@@ -24,26 +24,32 @@ Future<Process> _start(
   required Directory slotDir,
   required int slots,
   String workers = '1',
-}) => Process.start(
-  'dart',
-  <String>[
-    'run',
-    _binPath,
-    '--test-command',
-    'dart test',
-    '--workers',
-    workers,
-    'lib/a.dart',
-  ],
-  workingDirectory: dir.path,
-  environment: <String, String>{
-    ...cliEnvironment,
-    'DART_MUTANTS_SLOT_DIR': slotDir.path,
-    'DART_MUTANTS_SLOTS': '$slots',
-    'DM_MARKER': marker.path,
-    'DM_ID': id,
-  },
-);
+}) async {
+  final Process process = await Process.start(
+    'dart',
+    <String>[
+      'run',
+      _binPath,
+      '--test-command',
+      'dart test',
+      '--workers',
+      workers,
+      'lib/a.dart',
+    ],
+    workingDirectory: dir.path,
+    environment: <String, String>{
+      ...cliEnvironment,
+      'DART_MUTANTS_SLOT_DIR': slotDir.path,
+      'DART_MUTANTS_SLOTS': '$slots',
+      'DM_MARKER': marker.path,
+      'DM_ID': id,
+    },
+  );
+  // Whatever the test does, the run must not outlive it: it may be left
+  // paused or waiting, which nothing else would ever end.
+  addTearDown(() => process.kill(ProcessSignal.sigkill));
+  return process;
+}
 
 void main() {
   useHermeticVersionCheck();

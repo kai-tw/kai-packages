@@ -63,6 +63,9 @@ Future<(Process, String)> _startRun(
       'DM_ID': 'run',
     },
   );
+  // Whatever the test does, the run must not outlive it: it may be left
+  // paused, which nothing else would ever end.
+  addTearDown(() => run.kill(ProcessSignal.sigkill));
   return (run, await appeared.future);
 }
 
@@ -261,7 +264,7 @@ void main() {
           '-f',
           '/dev/null',
         ]);
-        addTearDown(bystander.kill);
+        addTearDown(() => bystander.kill(ProcessSignal.sigkill));
         final File record =
             File(
               p.join(_runsDir().path, '${bystander.pid}.json'),
@@ -297,7 +300,7 @@ void main() {
           '-f',
           '/dev/null',
         ]);
-        addTearDown(run.kill);
+        addTearDown(() => run.kill(ProcessSignal.sigkill));
         final File record = File(p.join(_runsDir().path, '${run.pid}.json'))
           ..writeAsStringSync(
             jsonEncode(<String, String>{
@@ -328,8 +331,8 @@ void main() {
           '/dev/null',
         ]);
         addTearDown(() {
-          a.kill();
-          b.kill();
+          a.kill(ProcessSignal.sigkill);
+          b.kill(ProcessSignal.sigkill);
         });
         for (final Process fake in <Process>[a, b]) {
           File(p.join(_runsDir().path, '${fake.pid}.json')).writeAsStringSync(
