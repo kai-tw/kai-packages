@@ -100,7 +100,14 @@ class RunRecord {
     if (record == null) {
       return _RunFileOwner.unconfirmed;
     }
-    final DateTime? started = _processStart(pid);
+    final DateTime? started;
+    try {
+      started = _processStart(pid);
+    } on ProcessException {
+      // No `ps` to ask: the comparison below, which only guards against a
+      // reused pid, is skipped, and the process is taken for the run.
+      return _RunFileOwner.run;
+    }
     if (started == null) {
       return _RunFileOwner.unconfirmed;
     }
@@ -114,21 +121,18 @@ class RunRecord {
   }
 
   /// When process [pid] started, as `ps` gives it — to the second, rounded
-  /// down, so never after the real start — or `null` when `ps` cannot say.
+  /// down, so never after the real start — or `null` when `ps` ran but
+  /// cannot say. Throws [ProcessException] when `ps` cannot run at all.
   static DateTime? _processStart(int pid) {
-    try {
-      final ProcessResult result = Process.runSync(
-        'ps',
-        <String>['-o', 'lstart=', '-p', '$pid'],
-        // `lstart` is spelled in the locale's own words otherwise.
-        environment: <String, String>{'LC_ALL': 'C'},
-      );
-      return result.exitCode == 0
-          ? _parseStart((result.stdout as String).trim())
-          : null;
-    } on ProcessException {
-      return null;
-    }
+    final ProcessResult result = Process.runSync(
+      'ps',
+      <String>['-o', 'lstart=', '-p', '$pid'],
+      // `lstart` is spelled in the locale's own words otherwise.
+      environment: <String, String>{'LC_ALL': 'C'},
+    );
+    return result.exitCode == 0
+        ? _parseStart((result.stdout as String).trim())
+        : null;
   }
 
   static const List<String> _months = <String>[

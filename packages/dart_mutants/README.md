@@ -136,7 +136,9 @@ run in the current directory's package, and exits 2 when there is none or
 more than one. A file whose process has ended, or whose pid now belongs to a
 process that started after the file was written — the machine went down
 mid-run, and the pid has since been reused — is a leftover: it is deleted,
-and nothing is sent to that pid. The signals are `SIGUSR1`, `SIGUSR2` and
+and nothing is sent to that pid. That check asks `ps` when the process
+started; where `ps` is not installed it is skipped, and a live pid is taken
+for the run. The signals are `SIGUSR1`, `SIGUSR2` and
 `SIGTERM`, so `kill` does the same where the command cannot.
 
 ### `--lines` and `--per-line`: mutate what a change touched

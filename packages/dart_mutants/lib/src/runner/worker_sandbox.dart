@@ -52,7 +52,7 @@ class WorkerSandbox {
     final WorkerSandbox sandbox = WorkerSandbox._(
       id,
       source,
-      temps.create('worker$id').resolveSymbolicLinksSync(),
+      realPath(temps.create('worker$id').path),
     );
     final Set<String> mirrored = <String>{
       'lib',
