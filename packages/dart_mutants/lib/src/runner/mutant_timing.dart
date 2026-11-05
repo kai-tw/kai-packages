@@ -12,6 +12,7 @@ class MutantTiming {
     this.worker = 0,
     required this.gate,
     required this.selected,
+    this.switched = false,
     this.measurement,
     this.test,
     this.retry,
@@ -31,6 +32,11 @@ class MutantTiming {
   /// Whether the mutant ran only the test files selected for it. `false` for
   /// one that ran the full command, and for one that ran nothing.
   final bool selected;
+
+  /// Whether it ran in a switched file rather than through the test command
+  /// — see `SchemataRunner`. Its [test] is then its own runs alone; compiling
+  /// and the unmutated runs are shared, and counted in `RunStats.schemata`.
+  final bool switched;
 
   /// Measuring the selection's own budget, when this mutant was the first to
   /// need it — `null` otherwise.
@@ -57,6 +63,7 @@ class MutantTiming {
     'seconds': seconds(elapsed),
     'gateSeconds': seconds(gate),
     'selected': selected,
+    if (switched) 'switched': true,
     if (measurement != null) 'measurementSeconds': seconds(measurement!),
     if (test != null) 'testSeconds': seconds(test!),
     if (retry != null) 'retrySeconds': seconds(retry!),

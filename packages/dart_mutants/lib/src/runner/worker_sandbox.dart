@@ -184,7 +184,7 @@ class WorkerSandbox {
   void _writeDartTool() {
     final Directory tool = Directory(p.join(directory, '.dart_tool'))
       ..createSync();
-    final File? config = _packageConfigOf(root);
+    final File? config = packageConfigOf(root);
     if (config == null) {
       return;
     }
@@ -265,7 +265,7 @@ class WorkerSandbox {
   /// or — for a member of a pub workspace, whose `.dart_tool/` holds only a
   /// pointer — the workspace's. The worker gets a copy of its own either
   /// way, since the workspace root is not above the worker.
-  static File? _packageConfigOf(String root) {
+  static File? packageConfigOf(String root) {
     final File own = File(p.join(root, '.dart_tool', 'package_config.json'));
     if (own.existsSync()) {
       return own;

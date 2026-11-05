@@ -72,6 +72,17 @@ Future<void> main(List<String> arguments) async {
           'refuses, or a pass that fails, aborts the run before the first '
           'mutant (abortKind selection-unavailable).',
     )
+    ..addFlag(
+      'schemata',
+      defaultsTo: true,
+      help:
+          'With --select-by-coverage and "flutter test", write every mutant '
+          'of a file in at once behind a switch, compile each selected test '
+          'file once, and run each mutant by starting flutter_tester directly '
+          'in a temporary copy of the package. A mutant that cannot be run '
+          'that way, or a test file that fails unmutated there, goes through '
+          'the test command as before.',
+    )
     ..addMultiOption(
       'lines',
       valueHelp: 'file:ranges',
@@ -186,6 +197,11 @@ Future<void> main(List<String> arguments) async {
     baselineFactor: double.parse(args['baseline-factor'] as String),
     baselineTimeout: _optionalSeconds(args['baseline-timeout'] as String?),
     selectByCoverage: args['select-by-coverage'] as bool,
+    schemata: args['schemata'] as bool,
+    onSchemataUnavailable: (String reason) => stderr.writeln(
+      'note: --schemata was not applied ($reason), so every mutant runs '
+      'through the test command.',
+    ),
     workers: int.parse(args['workers'] as String),
     runBudget: _optionalBudget(args['max-minutes'] as String?),
     journalPath: args['journal'] as String?,

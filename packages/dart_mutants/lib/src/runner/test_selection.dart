@@ -30,23 +30,24 @@ class TestSelection {
     Mutant mutant,
     LineRange? scope,
     ProcessCommand fullCommand,
-  ) {
+  ) => switch (testsFor(mutant, scope)) {
+    null => fullCommand,
+    [] => null,
+    final List<String> tests => invocation.withTestFiles(tests),
+  };
+
+  /// The test files [commandFor] selects, relative to the package and
+  /// sorted: `null` for the full command, empty for none.
+  List<String>? testsFor(Mutant mutant, LineRange? scope) {
     if (scope == null) {
-      return fullCommand;
+      return null;
     }
     final String file = p.posix.joinAll(
       p.split(
         p.relative(_resolved(p.absolute(mutant.filePath)), from: _root),
       ),
     );
-    final Set<String>? tests = map.testsFor(file, scope.start, scope.end);
-    if (tests == null) {
-      return fullCommand;
-    }
-    if (tests.isEmpty) {
-      return null;
-    }
-    return invocation.withTestFiles(tests.toList()..sort());
+    return map.testsFor(file, scope.start, scope.end)?.toList()?..sort();
   }
 
   /// Whether this coverage can speak for a file whose content is [source].

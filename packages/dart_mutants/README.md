@@ -441,6 +441,84 @@ them enter its function; a 44-file scope like the one measured above is
 where it should matter most, and that has not been measured with the flag
 yet.
 
+## Switched files: one compile per test file
+
+Under `--select-by-coverage` and `flutter test`, a run compiles each
+selected test file once for all its mutants, instead of once per mutant.
+`flutter test` compiles every test file it runs, every time: 2–3.5s a file
+on a large app even when nothing changed, so a mutant that 30 test files
+reach spent over a minute compiling before any test ran. `--no-schemata`
+turns this off.
+
+Every mutant of a target file that the gate accepts is written into that
+file at once, each behind a switch read from the `DART_MUTANTS_ID`
+environment variable:
+
+```dart
+if (a > b) …    →  if ((_dmOn(3) ? (a >= b) : (a > b))) …
+save();         →  if (_dmOn(7)) { ; } else { save(); }
+```
+
+Unset, the file behaves as it did. The switch sits on the whole expression
+around the mutant, not just the part it changes, so a null check that
+promotes a variable later in the same expression stays in one piece. Each
+selected test file is then compiled once, with the compiler `flutter test`
+keeps running, and `flutter_tester` is started on the result directly: once
+with no mutant, and then once per mutant that reaches it, with that mutant's
+id. A mutant stops at the first test file that fails, as `flutter test`
+would.
+
+All of it happens in a temporary copy of the package, the same kind
+`--workers` makes (see below), so the package is never written to, and the
+copy goes with the run's other temporary directories, on an interrupt too.
+One test file's compiled program is about 100MB on a large app, so only one
+is on disk at a time.
+
+Measured on a consuming app's review run, 172 mutants across 23 files with
+the baseline and coverage map taken from an earlier run's journal: the
+mutants took 1,079s, with 116 of them switched, 34 test files compiled in
+35s in all, and their unmutated runs 22s. The release before scored the same
+code's mutants at about 45s each, which is about 5,400s for the 120 that
+ran. Of the 95 mutants both runs scored, 93 got the same verdict; the other
+two timed out there and were `detected` here. Peak memory, the run's own
+process and its analyzer included, was 3.0GB, the resident compiler about
+1GB of it.
+
+**What makes the verdict trustworthy.** Three checks, each of which sends
+mutants back to `flutter test` rather than guess:
+
+- the switched file must pass the gate whole. A mutant that stops it
+  compiling, typically one whose switch hides a null check that later code
+  relies on, is left out of it;
+- each test file must compile with the switched files in, and pass with no
+  mutant on, before any mutant runs against it;
+- a mutant's run must end in a pass or a failed test, not a crash.
+
+A mutant's budget on one test file is the usual multiple of that file's own
+unmutated time, but never less than that time plus `--mutant-timeout` plus
+30s, `package:test`'s own per-test timeout. Killed any earlier, a mutant
+that makes a test await forever reads as `timeout`, where `flutter test`
+lets the test fail and reads it as `detected`.
+
+**When it does not apply.** Left out of a switched file, and run through
+`flutter test` as before: a mutant in a constant context, a whole local
+declaration, a function's own body, a bare `$name` in a string, and any
+mutant of a part file. Not applied to the run at all, with the reason on
+stderr: a package that does not resolve `package:test_core` (the runner the
+switched program hands its tests to; `flutter_test` does not depend on it,
+so add it to `dev_dependencies`), `--analyze-command`, a `dart_test.yaml`
+(a switched run does not read it), a test-command flag other than
+`--no-pub`, `-j` or `-r`, and a Flutter SDK without `flutter_tester` for
+this host. `dart test` packages are not switched.
+
+**What it leans on.** The flags `flutter_tester` and the compiler are
+started with are copied from `flutter_tools`, and the program a test file
+runs as uses `package:test_core`'s `directRunTests`, which is not a public
+library. Neither is a stable interface. If either changes under a new
+Flutter, the unmutated run of each test file fails and its mutants go back
+to `flutter test`: slower, not wrong. The statistics' `schemata.brokenTestFiles`
+lists them.
+
 ## Running mutants in parallel
 
 `--workers N` (`-j N`) runs N mutants at once. The default, 1, writes each
