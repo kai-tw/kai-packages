@@ -78,6 +78,26 @@ void main() {
   );
 
   test(
+    '[S5] a wait for a slot that is given up on ends with no slot, and takes '
+    'none when one frees later',
+    () async {
+      final (Process holder, String first) = await startHolder();
+      expect(first, 'locked');
+      final TestSlots slots = TestSlots(slotDir, 1);
+      final Completer<void> giveUp = Completer<void>();
+
+      final Future<TestSlot?> waiting = slots.acquire(until: giveUp.future);
+      giveUp.complete();
+
+      expect(await waiting.timeout(const Duration(seconds: 1)), isNull);
+      // Freed afterwards, the slot is nobody's: the abandoned wait took none.
+      holder.kill(ProcessSignal.sigkill);
+      await holder.exitCode;
+      expect(slots.free(), 1);
+    },
+  );
+
+  test(
     '[S5] a process that holds a slot keeps it when it counts the free ones',
     () async {
       final TestSlots slots = TestSlots(slotDir, 1);

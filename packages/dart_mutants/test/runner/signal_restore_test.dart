@@ -5,10 +5,10 @@ import 'package:test/test.dart';
 
 import '../support/fixture_pubspec.dart';
 
-/// Regression coverage for a real incident: a `mutation_test` run killed by
-/// a timeout once left a parameter-swap mutation sitting in a NovelGlide
-/// file's working tree — noticed only because that particular mutant
-/// happened not to compile. Mutants now run only in copies of the package,
+/// Regression coverage for a real incident: a mutation run killed by a
+/// timeout once left a parameter-swap mutation sitting in a consumer's
+/// working tree, noticed only because that particular mutant happened not to
+/// compile. Mutants now run only in copies of the package,
 /// so what is left to prove is that an interrupt takes the run's child
 /// processes and copies with it. This drives the actual CLI binary as a real
 /// subprocess and sends it a real `SIGTERM` while a mutant is running,

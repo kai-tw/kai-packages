@@ -252,6 +252,68 @@ void main() {
     );
 
     test(
+      '[S4] a run file whose pid now belongs to a process started after the '
+      'file was written is deleted as a leftover, and the process is left '
+      'alone',
+      () async {
+        final Directory dir = await fixture();
+        final Process bystander = await Process.start('tail', <String>[
+          '-f',
+          '/dev/null',
+        ]);
+        addTearDown(bystander.kill);
+        final File record =
+            File(
+              p.join(_runsDir().path, '${bystander.pid}.json'),
+            )..writeAsStringSync(
+              jsonEncode(<String, String>{
+                'packagePath': dir.resolveSymbolicLinksSync(),
+                'startedAt': DateTime.now()
+                    .subtract(const Duration(hours: 1))
+                    .toUtc()
+                    .toIso8601String(),
+              }),
+            );
+
+        final ProcessResult r = await _control('stop', dir);
+
+        expect(r.exitCode, 2, reason: '${r.stderr}');
+        expect(record.existsSync(), isFalse);
+        // A stop that reached it would have ended it by now.
+        final int exit = await bystander.exitCode.timeout(
+          const Duration(milliseconds: 500),
+          onTimeout: () => -1,
+        );
+        expect(exit, -1, reason: 'the bystander was signalled');
+      },
+    );
+
+    test(
+      "[S4] a run file written after its process started is that process's "
+      'run: it is found and kept',
+      () async {
+        final Directory dir = await fixture();
+        final Process run = await Process.start('tail', <String>[
+          '-f',
+          '/dev/null',
+        ]);
+        addTearDown(run.kill);
+        final File record = File(p.join(_runsDir().path, '${run.pid}.json'))
+          ..writeAsStringSync(
+            jsonEncode(<String, String>{
+              'packagePath': dir.resolveSymbolicLinksSync(),
+              'startedAt': DateTime.now().toUtc().toIso8601String(),
+            }),
+          );
+
+        final ProcessResult r = await _control('pause', dir);
+
+        expect(r.exitCode, 0, reason: '${r.stderr}');
+        expect(record.existsSync(), isTrue);
+      },
+    );
+
+    test(
       '[S4] two runs in this package: without a pid exit 2, naming one acts',
       () async {
         final Directory dir = await fixture();
