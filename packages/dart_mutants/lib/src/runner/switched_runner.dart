@@ -7,6 +7,7 @@ import '../mutant.dart';
 import 'compile_safety_gate.dart';
 import 'mutant_result.dart';
 import 'mutant_verdict.dart';
+import 'run_control.dart';
 import 'switched_file.dart';
 import 'switched_job.dart';
 import 'switched_stats.dart';
@@ -49,6 +50,7 @@ class SwitchedRunner {
     required this.budgetFrom,
     required this.onResult,
     required this.stats,
+    required this.control,
     this.workers = 1,
     this.arguments = const <String>[],
     this.shouldStop,
@@ -89,6 +91,10 @@ class SwitchedRunner {
   /// Checked between runs; `true` ends the run, leaving every mutant without
   /// a result.
   final bool Function()? shouldStop;
+
+  /// Checked between runs too: while it is paused, a lane closes its
+  /// compiler and waits — see [_waitOutPause].
+  final RunControl control;
 
   /// The test files each mutant still has to pass on, by id. A mutant whose
   /// set empties survived.
@@ -271,6 +277,10 @@ class SwitchedRunner {
   /// alone.
   Future<void> _drain(_Lane lane) async {
     while (!_stopped) {
+      await _waitOutPause(lane);
+      if (_stopped) {
+        return;
+      }
       if (_nextFile < _files.length) {
         await _runFile(lane, _files[_nextFile++]);
       } else if (_nextAlone < _alone.length) {
@@ -291,11 +301,12 @@ class SwitchedRunner {
     }
     final Duration budget = budgetFrom(unmutated);
     for (final SwitchedJob job in _switched.values.toList()) {
-      if (_stopped) {
-        return;
-      }
       if (_settled.contains(job.id) || !_remaining[job.id]!.contains(file)) {
         continue;
+      }
+      await _waitOutPause(lane);
+      if (_stopped) {
+        return;
       }
       final int? exitCode = await _timed(
         job,
@@ -372,6 +383,7 @@ class SwitchedRunner {
     try {
       for (final String test in _remaining[job.id]!.toList()..sort()) {
         final Duration? unmutated = await _unmutated[test]!.future;
+        await _waitOutPause(lane);
         if (unmutated == null || _stopped || _settled.contains(job.id)) {
           return;
         }
@@ -389,6 +401,18 @@ class SwitchedRunner {
       }
     } finally {
       lane.release(file);
+    }
+  }
+
+  /// Waits while [control] is paused, [lane]'s compiler closed meanwhile so
+  /// a paused run holds no compiler's memory; the lane's next compile starts
+  /// a new one. Called only between runs, so a pause never cuts a test
+  /// file's run short, and no run's budget counts the time paused. Anything
+  /// else a lane should not hold while paused belongs here too.
+  Future<void> _waitOutPause(_Lane lane) async {
+    while (control.isPaused) {
+      await lane.compiler.close();
+      await control.resumed;
     }
   }
 

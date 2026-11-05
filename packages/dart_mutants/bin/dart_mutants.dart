@@ -14,6 +14,7 @@ import 'package:dart_mutants/src/runner/mutation_test_runner.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
 import 'package:dart_mutants/src/runner/run_budget.dart';
 import 'package:dart_mutants/src/runner/run_plan.dart';
+import 'package:dart_mutants/src/runner/run_record.dart';
 import 'package:dart_mutants/src/runner/wait_span.dart';
 import 'package:dart_mutants/src/version_check.dart';
 import 'package:path/path.dart' as p;
@@ -23,6 +24,10 @@ import 'package:path/path.dart' as p;
 /// is deliberately not this binary's concern — that is the caller's job,
 /// one layer up.
 Future<void> main(List<String> arguments) async {
+  if (_RunSignalCommand.parse(arguments) case final _RunSignalCommand command) {
+    exitCode = command.send(arguments.skip(1).toList());
+    return;
+  }
   final ArgResults? args = _parseAndValidate(arguments, _buildParser());
   if (args == null) {
     return;
@@ -49,6 +54,73 @@ Future<void> main(List<String> arguments) async {
     return;
   }
   exitCode = await _runAndReport(args, scope);
+}
+
+/// `dart_mutants pause|resume|stop [<pid>]`: the signal each sends to a run
+/// in progress — see [RunRecord] for how one is found.
+enum _RunSignalCommand {
+  pause(ProcessSignal.sigusr1),
+  resume(ProcessSignal.sigusr2),
+  stop(ProcessSignal.sigterm);
+
+  const _RunSignalCommand(this.signal);
+
+  final ProcessSignal signal;
+
+  /// The command [arguments] start with, or `null` for a run's arguments.
+  static _RunSignalCommand? parse(List<String> arguments) {
+    for (final _RunSignalCommand command in values) {
+      if (arguments.isNotEmpty && arguments.first == command.name) {
+        return command;
+      }
+    }
+    return null;
+  }
+
+  /// Sends [signal] to the run [rest] names by pid, or else to the one run
+  /// in the current directory's package; the exit code — 2 when there is no
+  /// single such run.
+  int send(List<String> rest) {
+    final int? pid = rest.length == 1 ? int.tryParse(rest.single) : null;
+    if (rest.length > 1 || (rest.isNotEmpty && pid == null)) {
+      stderr.writeln('usage: dart_mutants $name [<pid>]');
+      return 64; // EX_USAGE
+    }
+    final RunRecord? run = _target(pid);
+    if (run == null) {
+      return 2;
+    }
+    if (!Process.killPid(run.pid, signal)) {
+      stderr.writeln('dart_mutants $name: run ${run.pid} has already ended.');
+      return 2;
+    }
+    return 0;
+  }
+
+  /// The run with [pid], or without one the single run in the current
+  /// directory's package — or `null`, having said on stderr why there is no
+  /// single one.
+  RunRecord? _target(int? pid) {
+    final String package = RunRecord.packageOf(Directory.current.path);
+    final List<RunRecord> runs = RunRecord.live()
+        .where(
+          (RunRecord r) =>
+              pid == null ? r.packagePath == package : r.pid == pid,
+        )
+        .toList();
+    if (runs.length == 1) {
+      return runs.single;
+    }
+    final String where = pid == null ? 'in $package' : 'with pid $pid';
+    stderr.writeln(
+      runs.isEmpty
+          ? 'dart_mutants $name: no run $where is going.'
+          : 'dart_mutants $name: ${runs.length} runs are going $where (pids '
+                '${runs.map((RunRecord r) => r.pid).join(', ')}) — name one: '
+                'dart_mutants $name <pid>.',
+    );
+    return null;
+  }
 }
 
 /// The scope --diff names, or `null` without --diff.
@@ -110,12 +182,32 @@ Future<int> _runAndReport(ArgResults args, DiffScope? scope) async {
   // stdout is the JSON report's under --json, and nothing else may share it.
   final bool jsonOnStdout = args['json'] as bool;
 
+  bool emit(MutationRunReport report) => _emitReport(
+    report,
+    jsonOnStdout: jsonOnStdout,
+    outputPath: args['output'] as String?,
+    historyPath: args['history'] as String?,
+  );
+
+  RunRecord? record;
+  final MutationTestRunner runner = _runner(
+    args,
+    scope,
+    gates,
+    quiet: jsonOnStdout,
+    onStopped: (MutationRunReport stopped) {
+      emit(stopped);
+      record?.delete();
+    },
+  );
   final MutationRunReport report;
   try {
-    report = await _runner(args, scope, gates, quiet: jsonOnStdout).run(
-      targets,
-    );
+    // Announced right before run(), which catches the signals the record
+    // invites before it first waits on anything.
+    record = _announce();
+    report = await runner.run(targets);
   } finally {
+    record?.delete();
     await gates.close();
   }
 
@@ -124,16 +216,26 @@ Future<int> _runAndReport(ArgResults args, DiffScope? scope) async {
   // never suppress it. A caller scoring per-file at a threshold other than
   // "zero undetected" depends on reading the JSON even when this process's
   // own exit code disagrees with their verdict.
-  final bool written = _emitReport(
-    report,
-    jsonOnStdout: jsonOnStdout,
-    outputPath: args['output'] as String?,
-    historyPath: args['history'] as String?,
-  );
+  final bool written = emit(report);
   if (!written || report.aborted) {
     return 1;
   }
   return _verdict(report, args, quiet: jsonOnStdout);
+}
+
+/// This run's [RunRecord], or `null` when it cannot be written — the run
+/// goes on, said to be out of reach of pause, resume and stop.
+RunRecord? _announce() {
+  try {
+    return RunRecord.start(RunRecord.packageOf(Directory.current.path));
+  } on FileSystemException catch (e) {
+    stderr.writeln(
+      'note: could not record this run for dart_mutants pause, resume and '
+      'stop (${e.message}: ${e.path}). `kill -USR1 $pid` still pauses it, '
+      '`kill -USR2 $pid` resumes it and `kill $pid` stops it.',
+    );
+    return null;
+  }
 }
 
 MutationTestRunner _runner(
@@ -141,7 +243,9 @@ MutationTestRunner _runner(
   DiffScope? scope,
   _Gates gates, {
   required bool quiet,
+  required void Function(MutationRunReport stopped) onStopped,
 }) => MutationTestRunner(
+  onStopped: onStopped,
   testCommand: _parseCommand(args['test-command'] as String),
   compileSafetyGate: gates.gate,
   fallbackCompileSafetyGate: gates.fallback,
@@ -390,7 +494,15 @@ ArgResults? _parseAndValidate(List<String> arguments, ArgParser parser) {
   }
 
   if (args['help'] as bool) {
-    stdout.writeln(parser.usage);
+    stdout
+      ..writeln('dart_mutants --test-command "<command>" [options] <files>')
+      ..writeln(
+        'dart_mutants pause|resume|stop [<pid>]   pause a run between test '
+        'file runs, resume it, or stop it scoring nothing; without a pid, the '
+        'one run in this package',
+      )
+      ..writeln()
+      ..writeln(parser.usage);
     return null;
   }
 

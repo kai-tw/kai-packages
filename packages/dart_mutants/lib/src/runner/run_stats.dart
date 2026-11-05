@@ -23,7 +23,7 @@ class RunStats {
   /// `MutationTestRunner.run` for the keys.
   final Map<String, Object?> environment;
 
-  final HostLoad? loadAtStart;
+  HostLoad? loadAtStart;
   HostLoad? loadAtEnd;
 
   Duration? baseline;

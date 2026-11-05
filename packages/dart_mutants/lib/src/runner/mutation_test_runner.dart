@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:analyzer/dart/analysis/results.dart';
@@ -26,6 +27,7 @@ import 'mutated_file_registry.dart';
 import 'mutation_run_report.dart';
 import 'process_command.dart';
 import 'run_budget.dart';
+import 'run_control.dart';
 import 'run_journal.dart';
 import 'run_plan.dart';
 import 'run_stats.dart';
@@ -66,6 +68,7 @@ class MutationTestRunner {
     this.selectByCoverage = false,
     this.onPlan,
     this.onProgress,
+    this.onStopped,
     TempSpace? tempSpace,
     this.workers = 1,
     this.runBudget,
@@ -139,6 +142,15 @@ class MutationTestRunner {
 
   /// Called after every mutant, in the order they finish.
   final void Function(MutantProgress progress)? onProgress;
+
+  /// Called instead of [run] returning, when `SIGINT` or `SIGTERM` stops the
+  /// run: with its [AbortKind.stopped] report, after every child process is
+  /// killed and every temporary directory deleted, right before the process
+  /// exits 1.
+  ///
+  /// It must be **synchronous**, for the reason
+  /// [MutatedFileRegistry.armSignalRestore] gives.
+  final void Function(MutationRunReport stopped)? onStopped;
 
   final List<MutationOperator> operators;
 
@@ -216,13 +228,21 @@ class MutationTestRunner {
   /// package, so there is nothing to put back.
   final MutatedFileRegistry _signals = MutatedFileRegistry();
 
+  /// Pauses the lanes between test-file runs on `SIGUSR1`, and resumes them
+  /// on `SIGUSR2` — see [SwitchedRunner].
+  final RunControl _control = RunControl();
+
   int _completed = 0;
   int _planned = 0;
 
   /// Wall time over the mutants alone — started when the first one does, so
   /// the baseline and the coverage pass stay out of the pace they are used
-  /// to project. See [runBudget].
+  /// to project, and stopped while the run is paused. See [runBudget].
   final Stopwatch _mutantClock = Stopwatch();
+
+  /// Whether the mutants have started, so a resume knows to start
+  /// [_mutantClock] again.
+  bool _mutantsStarted = false;
 
   /// Why the run stopped between mutants, once [runBudget] says the pace
   /// will not fit it. Non-null means no lane takes another job.
@@ -270,9 +290,14 @@ class MutationTestRunner {
         .where((String path) => !isGeneratedFile(path))
         .toList();
 
-    // Armed before the baseline runs, not after: the baseline is a full test
-    // command like any other, so a Ctrl-C during it orphans a subprocess tree
-    // exactly the same way.
+    final RunStats stats = _stats = RunStats(
+      startedAt: DateTime.now(),
+      environment: _environment(),
+    );
+    // Armed before the first await, so a caller that announces the run just
+    // before calling this can be sure every signal it invites is caught; and
+    // before the baseline, which is a full test command like any other, so a
+    // Ctrl-C during it orphans a subprocess tree exactly the same way.
     //
     // Processes before directories: a test run killed mid-write would
     // otherwise be writing into a directory being deleted.
@@ -280,15 +305,16 @@ class MutationTestRunner {
       beforeExit: () {
         ProcessCommand.killAllRunning();
         tempSpace.deleteAll();
+        onStopped?.call(_stoppedReport());
       },
     );
-    tempSpace.sweepStale();
-    final RunStats stats = _stats = RunStats(
-      startedAt: DateTime.now(),
-      environment: _environment(),
-      loadAtStart: await HostLoad.read(),
+    _control.arm();
+    final StreamSubscription<bool> pauses = _control.changes.listen(
+      _onPauseChange,
     );
+    tempSpace.sweepStale();
     try {
+      stats.loadAtStart = await HostLoad.read();
       final _Switched? switched = _switchedSetup(targets);
       if (switched == null) {
         return MutationRunReport.aborted(
@@ -381,6 +407,8 @@ class MutationTestRunner {
         stats: await _finished(stats),
       );
     } finally {
+      await pauses.cancel();
+      await _control.disarm();
       _signals.restoreAll();
       tempSpace.deleteAll();
       await _signals.disarm();
@@ -872,9 +900,11 @@ class MutationTestRunner {
     List<_Job> jobs,
   ) async {
     _overBudget = null;
-    _mutantClock
-      ..reset()
-      ..start();
+    _mutantClock.reset();
+    _mutantsStarted = true;
+    if (!_control.isPaused) {
+      _mutantClock.start();
+    }
     _stats.workers = workers;
     final Map<int, _Job> runnable = await _sortPending(pending);
     if (runnable.isEmpty || _overBudget != null) {
@@ -896,6 +926,7 @@ class MutationTestRunner {
       budgetFrom: _budgetFrom,
       stats: stats,
       shouldStop: () => _overBudget != null,
+      control: _control,
       onResult:
           (SwitchedJob job, MutantResult result, int lane, Duration tests) {
             final _Job owner = runnable[job.id]!;
@@ -909,6 +940,26 @@ class MutationTestRunner {
         SwitchedJob(e.key, e.value.mutant, e.value.source, e.value.tests),
     ]);
   }
+
+  /// Keeps a pause out of the pace [runBudget] is judged by.
+  void _onPauseChange(bool paused) {
+    if (paused) {
+      _mutantClock.stop();
+    } else if (_mutantsStarted) {
+      _mutantClock.start();
+    }
+  }
+
+  /// What a run stopped by a signal reports — built synchronously, since
+  /// the process exits right after.
+  MutationRunReport _stoppedReport() => MutationRunReport.aborted(
+    stats: _stats..finishedAt = DateTime.now(),
+    AbortKind.stopped,
+    'the run was stopped after $_completed of $_planned mutants, and scored '
+    'none of them: a score over part of a file is not that file\'s score.'
+    '${journalPath == null ? '' : ' The ones that finished are in the '
+              'journal; run again with it to run only the rest.'}',
+  );
 
   /// Records [result] as [job]'s, in the journal and the statistics,
   /// reports it as progress, and checks the pace against [runBudget].

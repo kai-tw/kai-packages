@@ -124,7 +124,6 @@ void main() {
       }
       expect(File(p.join(_runsDir().path, '$pid.json')).existsSync(), isFalse);
     },
-    skip: 'not implemented yet',
     timeout: const Timeout(Duration(minutes: 6)),
   );
 
@@ -146,7 +145,6 @@ void main() {
       await run.$1.exitCode;
       expect(File(p.join(_runsDir().path, '$pid.json')).existsSync(), isFalse);
     },
-    skip: 'not implemented yet',
     timeout: const Timeout(Duration(minutes: 4)),
   );
 
@@ -163,7 +161,6 @@ void main() {
 
       expect(File(p.join(_runsDir().path, '$pid.json')).existsSync(), isFalse);
     },
-    skip: 'not implemented yet',
     timeout: const Timeout(Duration(minutes: 4)),
   );
 
@@ -177,7 +174,6 @@ void main() {
           expect(r.exitCode, 2, reason: '$verb: ${r.stderr}');
         }
       },
-      skip: 'not implemented yet',
     );
 
     test(
@@ -187,7 +183,6 @@ void main() {
         final ProcessResult r = await _control('pause', dir, '999999');
         expect(r.exitCode, 2, reason: '${r.stderr}');
       },
-      skip: 'not implemented yet',
     );
 
     test(
@@ -222,7 +217,6 @@ void main() {
         final ProcessResult named = await _control('pause', dir, '${a.pid}');
         expect(named.exitCode, isNot(2), reason: '${named.stderr}');
       },
-      skip: 'not implemented yet',
     );
   });
 }

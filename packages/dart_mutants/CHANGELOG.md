@@ -38,6 +38,14 @@ alike, with or without `--select-by-coverage`. Breaking:
 - **`--workers` runs test files at once**, each worker with its own copy of
   the package, compiler and test process. The package is never written to,
   at any number of workers.
+- **`dart_mutants pause`, `resume` and `stop [<pid>]`** act on a run in
+  progress, found by the file it keeps at
+  `<cache>/dart_mutants/runs/<pid>.json` while it runs. A paused run
+  finishes the test file runs it is on, then waits with its compilers
+  closed; the time paused counts against no budget and no pace. A run
+  stopped this way, by `SIGTERM` or by Ctrl-C, ends with the new abortKind
+  `stopped`, exit 1, its report still written to `--output` and
+  `--history`.
 - **Gone:** `--schemata`, the clearing of `dart test`'s kernel cache before
   every run, a selected command's measured budget, the full-command retry of
   a selected run that ran no test, the plan's time estimate and the

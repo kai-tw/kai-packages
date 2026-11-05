@@ -97,6 +97,29 @@ the mutants that will run, names how many more were reused, and says when
 the baseline or the coverage map came from the journal; the report's
 `reusedMutants` gives the count.
 
+### `pause`, `resume` and `stop`: a run in progress
+
+```bash
+dart run dart_mutants pause    # in the package the run is in
+dart run dart_mutants resume
+dart run dart_mutants stop 4242   # or name the run by its pid
+```
+
+A paused run lets each test file's run it is on finish, then starts no new
+one, and each worker closes its compiler; on resume each compiles again where
+it needs to and carries on. The time paused counts neither against a
+mutant's budget nor against the pace `--max-minutes` is judged by. A stopped
+run kills its test processes, deletes its copies of the package and ends as
+`stopped`, exit 1, scoring nothing — the mutants that finished are in the
+journal, if it has one.
+
+A run finds itself by a file it keeps at
+`$XDG_CACHE_HOME/dart_mutants/runs/<pid>.json` (`~/.cache` without
+`XDG_CACHE_HOME`) while it runs. Without a pid, the command acts on the one
+run in the current directory's package, and exits 2 when there is none or
+more than one. The signals are `SIGUSR1`, `SIGUSR2` and `SIGTERM`, so `kill`
+does the same where the command cannot.
+
 ### `--lines` and `--per-line`: mutate what a change touched
 
 A file given on the command line is mutated whole. For a review, that is
@@ -673,8 +696,9 @@ real CLI binary, not just the internal report types:
   `baseline-timeout`, `baseline-failed`, `gate-rejects-unmodified`,
   `over-budget`, `selection-unavailable`, `switched-run-unavailable` (the
   mutants can't run as switched files; found before the baseline, nothing
-  run) or `switched-run-failed` (a test file didn't compile or pass
-  unmutated in the switched run, though the test command passed with it).
+  run), `switched-run-failed` (a test file didn't compile or pass
+  unmutated in the switched run, though the test command passed with it)
+  or `stopped` (`dart_mutants stop`, `SIGTERM` or Ctrl-C ended it).
   Branch on that, never on `abortReason`, whose wording is for people and is
   free to change. The kinds call for opposite responses — a red suite needs
   fixing, a slow one needs a bigger `--baseline-timeout`, a rejected file

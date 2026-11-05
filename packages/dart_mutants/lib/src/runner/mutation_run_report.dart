@@ -45,7 +45,13 @@ enum AbortKind {
   /// pass itself failed. Refused after the coverage pass, before the first
   /// mutant — every mutant against the full command instead would be a run
   /// the caller did not ask for, many times longer than the one they did.
-  selectionUnavailable('selection-unavailable');
+  selectionUnavailable('selection-unavailable'),
+
+  /// The run was stopped from outside — `dart_mutants stop`, `SIGTERM` or
+  /// Ctrl-C — before it finished. The mutants that did finish are in the
+  /// journal, when there is one, and a run started again with it runs only
+  /// the rest.
+  stopped('stopped');
 
   const AbortKind(this.wireName);
 

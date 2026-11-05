@@ -18,7 +18,7 @@ import 'package:path/path.dart' as p;
 class TempSpace {
   TempSpace({Directory? root, bool Function(int pid)? isRunning})
     : root = root ?? Directory.systemTemp,
-      _isRunning = isRunning ?? _pidIsRunning;
+      _isRunning = isRunning ?? pidIsRunning;
 
   static const String prefix = 'dart_mutants_';
 
@@ -104,7 +104,7 @@ class TempSpace {
 
   /// `true` unless `ps` says [pid] is not running. Where `ps` is missing,
   /// every pid counts as running, so nothing is swept.
-  static bool _pidIsRunning(int pid) {
+  static bool pidIsRunning(int pid) {
     try {
       return Process.runSync('ps', <String>['-p', '$pid']).exitCode == 0;
     } on ProcessException {

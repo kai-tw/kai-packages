@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'cache_directory.dart';
 import 'outdated_engine_exception.dart';
 import 'version.dart';
 
@@ -116,12 +117,8 @@ class VersionCheck {
     return latest;
   }
 
-  static String _defaultCachePath() {
-    final Map<String, String> env = Platform.environment;
-    final String base =
-        env['XDG_CACHE_HOME'] ?? p.join(env['HOME'] ?? '.', '.cache');
-    return p.join(base, 'dart_mutants', 'latest_release.json');
-  }
+  static String _defaultCachePath() =>
+      p.join(cacheDirectory(), 'latest_release.json');
 
   /// The newest `dart_mutants-v*` tag, or `null` without an answer in 15s.
   static Future<String?> _fromGit() async {
