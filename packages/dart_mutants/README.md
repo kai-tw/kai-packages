@@ -575,6 +575,39 @@ memory, and how much they win on a switched run has not been measured here
 yet. The baseline and the coverage pass still run once, in the package,
 before the lanes start.
 
+### Test slots: every run on the machine shares them
+
+Several runs at once — one per package, or one per branch — would each open
+their own lanes and together run out of memory. So every dart_mutants run on
+the machine shares one set of test slots:
+
+- each lane holds a slot only while it compiles or runs a test file, and
+  waits for a free one before it does; it never fails for want of one;
+- the baseline and the coverage pass hold one slot for as long as they run;
+- a paused run gives its slots back, and takes them again on resume;
+- a run gives its slots back when it ends, aborts or is stopped, and a run
+  that is killed outright gives them back too: a slot is a lock the
+  operating system holds for the process, and drops with it.
+
+The time spent waiting for a slot counts neither against a mutant's budget
+nor against the pace `--max-minutes` is judged by.
+
+`--workers auto` opens one lane per slot free when the mutants start, and at
+least one. A number keeps meaning that many lanes, each still waiting for a
+slot of its own — `--workers 4` with two slots runs two at a time.
+
+Two environment variables set them:
+
+| Variable | Default | What it sets |
+| --- | --- | --- |
+| `DART_MUTANTS_SLOTS` | one per 4 GB of memory beyond the first 8, at least 1 | how many slots there are |
+| `DART_MUTANTS_SLOT_DIR` | `$XDG_CACHE_HOME/dart_mutants/slots` (`~/.cache` without `XDG_CACHE_HOME`) | the directory the slots are in |
+
+Runs share slots only when they agree on both: two runs given different
+directories don't limit each other, and a run counts only the slots its own
+`DART_MUTANTS_SLOTS` names. A test process anything other than dart_mutants
+starts takes no slot.
+
 ## Run statistics
 
 Every report carries `stats`: what the run cost and where the time went, so
@@ -601,7 +634,8 @@ dart run dart_mutants --select-by-coverage \
 - `phases`: `baselineSeconds`, `gateCheckSeconds` (every target put to the
   gate unmodified), `coveragePassSeconds` and `mutantsSeconds`. A phase that
   did not run is absent;
-- `workers`: how many lanes ran the mutants;
+- `workers`: how many lanes ran the mutants — under `--workers auto`, how
+  many it opened;
 - `switched`, when any mutant ran a test: how many mutants were `switched`
   and how many compiled `alone`, with `aloneReasons` counting why;
   `compiledTestFiles`; `switchSeconds` (writing the switched files),

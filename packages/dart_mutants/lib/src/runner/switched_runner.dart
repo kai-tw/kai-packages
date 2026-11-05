@@ -14,6 +14,8 @@ import 'switched_stats.dart';
 import 'switched_toolchain.dart';
 import 'temp_space.dart';
 import 'test_compiler.dart';
+import 'test_slot.dart';
+import 'test_slots.dart';
 import 'worker_sandbox.dart';
 
 /// Runs mutants as switched files: every mutant of a file written in at
@@ -36,6 +38,10 @@ import 'worker_sandbox.dart';
 /// written to. The copies go when the run ends, or with the run's other
 /// temporary directories when it is interrupted or killed.
 ///
+/// A lane holds one of [slots] while it compiles or runs a test file, and
+/// waits for one before it does; it gives it back while paused, while it
+/// waits on another lane, and when it has nothing left to run.
+///
 /// A test file has to compile and pass with no mutant on before any mutant
 /// runs against it. One that does not means this run would not run what the
 /// test command runs, so the whole run stops, naming the file — scoring
@@ -51,6 +57,8 @@ class SwitchedRunner {
     required this.onResult,
     required this.stats,
     required this.control,
+    required this.slots,
+    this.onSlotWait,
     this.workers = 1,
     this.arguments = const <String>[],
     this.shouldStop,
@@ -95,6 +103,22 @@ class SwitchedRunner {
   /// Checked between runs too: while it is paused, a lane closes its
   /// compiler and waits — see [_waitOutPause].
   final RunControl control;
+
+  /// The test slots the lanes share with every other run on the machine;
+  /// `null` puts no limit on them.
+  final TestSlots? slots;
+
+  /// Called with `true` when the run starts waiting for a slot — a lane
+  /// waiting for one, and none holding one — and with `false` when that
+  /// wait ends, so a clock can leave the wait out.
+  final void Function(bool waiting)? onSlotWait;
+
+  /// Lanes holding a slot, and lanes waiting for one.
+  int _holding = 0;
+  int _waitingForSlot = 0;
+
+  /// What [onSlotWait] was last told.
+  bool _slotWaitReported = false;
 
   /// The test files each mutant still has to pass on, by id. A mutant whose
   /// set empties survived.
@@ -163,9 +187,11 @@ class SwitchedRunner {
     return _outcome(jobs);
   }
 
-  /// [lanes] closed and their directories deleted, their disk use kept.
+  /// [lanes] closed, their slots given back and their directories deleted,
+  /// their disk use kept.
   Future<void> _closeLanes(List<_Lane> lanes) async {
     for (final _Lane lane in lanes) {
+      _giveBackSlot(lane);
       await lane.compiler.close();
       temps
         ..delete(lane.work)
@@ -276,18 +302,23 @@ class SwitchedRunner {
   /// [lane] takes test files until none is left, then mutants to compile
   /// alone.
   Future<void> _drain(_Lane lane) async {
-    while (!_stopped) {
-      await _waitOutPause(lane);
-      if (_stopped) {
-        return;
+    try {
+      while (!_stopped) {
+        await _readyToRun(lane);
+        // Stopped while it waited: [run] reports why.
+        if (_stopped) {
+          return;
+        }
+        if (_nextFile < _files.length) {
+          await _runFile(lane, _files[_nextFile++]);
+        } else if (_nextAlone < _alone.length) {
+          await _runAlone(lane, _alone[_nextAlone++]);
+        } else {
+          return;
+        }
       }
-      if (_nextFile < _files.length) {
-        await _runFile(lane, _files[_nextFile++]);
-      } else if (_nextAlone < _alone.length) {
-        await _runAlone(lane, _alone[_nextAlone++]);
-      } else {
-        return;
-      }
+    } finally {
+      _giveBackSlot(lane);
     }
   }
 
@@ -304,7 +335,7 @@ class SwitchedRunner {
       if (_settled.contains(job.id) || !_remaining[job.id]!.contains(file)) {
         continue;
       }
-      await _waitOutPause(lane);
+      await _readyToRun(lane);
       if (_stopped) {
         return;
       }
@@ -382,8 +413,14 @@ class SwitchedRunner {
     lane.hold(file, job.mutant.applyTo(job.source));
     try {
       for (final String test in _remaining[job.id]!.toList()..sort()) {
-        final Duration? unmutated = await _unmutated[test]!.future;
-        await _waitOutPause(lane);
+        final Completer<Duration?> unmutatedRun = _unmutated[test]!;
+        // Another lane is still running [test] unmutated, and may need this
+        // very slot to do it.
+        if (!unmutatedRun.isCompleted) {
+          _giveBackSlot(lane);
+        }
+        final Duration? unmutated = await unmutatedRun.future;
+        await _readyToRun(lane);
         if (unmutated == null || _stopped || _settled.contains(job.id)) {
           return;
         }
@@ -404,15 +441,53 @@ class SwitchedRunner {
     }
   }
 
-  /// Waits while [control] is paused, [lane]'s compiler closed meanwhile so
-  /// a paused run holds no compiler's memory; the lane's next compile starts
-  /// a new one. Called only between runs, so a pause never cuts a test
-  /// file's run short, and no run's budget counts the time paused. Anything
-  /// else a lane should not hold while paused belongs here too.
+  /// Waits until [lane] may run: the run not paused, and [lane] holding a
+  /// slot. Called only between runs, so neither a pause nor a wait for a
+  /// slot cuts a test file's run short, and no run's budget counts either.
+  Future<void> _readyToRun(_Lane lane) async {
+    await _waitOutPause(lane);
+    final TestSlots? shared = slots;
+    while (shared != null && lane.slot == null && !_stopped) {
+      _waitingForSlot += 1;
+      _reportSlotWait();
+      lane.slot = await shared.acquire();
+      _waitingForSlot -= 1;
+      _holding += 1;
+      _reportSlotWait();
+      // A pause that came during the wait gives the slot straight back.
+      await _waitOutPause(lane);
+    }
+  }
+
+  /// Waits while [control] is paused, [lane]'s slot given back and its
+  /// compiler closed meanwhile, so a paused run holds neither; the lane's
+  /// next compile starts a new compiler.
   Future<void> _waitOutPause(_Lane lane) async {
     while (control.isPaused) {
+      _giveBackSlot(lane);
       await lane.compiler.close();
       await control.resumed;
+    }
+  }
+
+  /// [lane]'s slot back to [slots]. A lane holding none — it has not
+  /// taken one yet, or already gave it back to wait — has nothing to give.
+  void _giveBackSlot(_Lane lane) {
+    final TestSlot? slot = lane.slot;
+    if (slot == null) {
+      return;
+    }
+    slot.release();
+    lane.slot = null;
+    _holding -= 1;
+    _reportSlotWait();
+  }
+
+  void _reportSlotWait() {
+    final bool waiting = _holding == 0 && _waitingForSlot > 0;
+    if (waiting != _slotWaitReported) {
+      _slotWaitReported = waiting;
+      onSlotWait?.call(waiting);
     }
   }
 
@@ -513,6 +588,10 @@ class _Lane {
 
   /// Files written since the last compile, which the next one reads again.
   final Set<String> _changed = <String>{};
+
+  /// The test slot this lane holds, or `null` — see
+  /// [SwitchedRunner._readyToRun].
+  TestSlot? slot;
 
   int get diskBytes =>
       Directory(box.directory).existsSync() ? box.diskBytes() : 0;

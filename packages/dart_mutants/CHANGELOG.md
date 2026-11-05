@@ -46,6 +46,15 @@ alike, with or without `--select-by-coverage`. Breaking:
   stopped this way, by `SIGTERM` or by Ctrl-C, ends with the new abortKind
   `stopped`, exit 1, its report still written to `--output` and
   `--history`.
+- **Test slots, shared by every run on the machine.** A worker holds one
+  while it compiles or runs a test file, and waits for a free one before it
+  does; the baseline and the coverage pass hold one while they run, and a
+  paused run gives its slots back. `$DART_MUTANTS_SLOTS` sets how many there
+  are (by default one per 4 GB of memory beyond the first 8, at least one),
+  `$DART_MUTANTS_SLOT_DIR` where (by default `<cache>/dart_mutants/slots`).
+  A slot whose run was killed comes free with it. `--workers auto` opens one
+  worker per free slot, and at least one. The time spent waiting for a slot
+  counts against no budget and no pace.
 - **Gone:** `--schemata`, the clearing of `dart test`'s kernel cache before
   every run, a selected command's measured budget, the full-command retry of
   a selected run that ran no test, the plan's time estimate and the

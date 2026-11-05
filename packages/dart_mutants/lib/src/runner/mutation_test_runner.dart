@@ -38,6 +38,8 @@ import 'switched_toolchain.dart';
 import 'temp_space.dart';
 import 'test_invocation.dart';
 import 'test_selection.dart';
+import 'test_slot.dart';
+import 'test_slots.dart';
 import 'wait_span.dart';
 import 'worker_sandbox.dart';
 
@@ -71,6 +73,7 @@ class MutationTestRunner {
     this.onStopped,
     TempSpace? tempSpace,
     this.workers = 1,
+    this.slots,
     this.runBudget,
     this.journalPath,
     this.onJournalDiscarded,
@@ -85,7 +88,7 @@ class MutationTestRunner {
        tempSpace = tempSpace ?? TempSpace(),
        operators = operators ?? defaultOperators(),
        baselineTimeout = baselineTimeout ?? mutantTimeout * 10 {
-    if (workers < 1) {
+    if (workers case final int lanes when lanes < 1) {
       throw ArgumentError.value(workers, 'workers', 'must be 1 or more');
     }
     if (baselineFactor.isNaN ||
@@ -162,7 +165,20 @@ class MutationTestRunner {
   /// How many lanes run mutants at once, each with its own copy of the
   /// package, compiler and test process. Memory is the usual limit: a
   /// Flutter compiler and `flutter_tester` can take a gigabyte or two each.
-  final int workers;
+  /// `null` opens one lane per free slot of [slots] as the mutants start,
+  /// and at least one.
+  final int? workers;
+
+  /// The test slots this run shares with every other run on the machine:
+  /// the baseline and the coverage pass hold one while they run, and each
+  /// lane one while it compiles or runs a test file — see [SwitchedRunner].
+  /// A wait for one counts toward no mutant's budget, nor toward the pace
+  /// [runBudget] judges. `null` puts no limit on the run.
+  final TestSlots? slots;
+
+  /// The lanes this run opens: [workers], or what `null` there resolves
+  /// to as the mutants start.
+  int _lanes = 1;
 
   /// How long the mutants may take, after which the run stops without
   /// scoring anything. `null`, the default, lets a run take as long as it
@@ -243,6 +259,10 @@ class MutationTestRunner {
   /// Whether the mutants have started, so a resume knows to start
   /// [_mutantClock] again.
   bool _mutantsStarted = false;
+
+  /// Whether the lanes are waiting for a test slot with none of them
+  /// holding one, which [_mutantClock] leaves out as it does a pause.
+  bool _waitingForSlot = false;
 
   /// Why the run stopped between mutants, once [runBudget] says the pace
   /// will not fit it. Non-null means no lane takes another job.
@@ -371,6 +391,7 @@ class MutationTestRunner {
         switched,
       );
       final List<MutantResult?> recalled = _recall(jobs);
+      _lanes = _laneCount();
       _completed = 0;
       _planned = recalled.where((MutantResult? r) => r == null).length;
       final RunPlan runPlan = RunPlan(
@@ -379,7 +400,7 @@ class MutationTestRunner {
         reused: jobs.length - _planned,
         baseline: baseline,
         budget: mutantTimeout,
-        workers: workers,
+        workers: _lanes,
         baselineReused: baselineRun.reused,
         coverageReused: _coverageReused,
       );
@@ -627,8 +648,10 @@ class MutationTestRunner {
     }
     return switched.copyGates[gate] ??= _CopyGate(
       gate,
+      // Named apart from the lanes, which count up from 0, whenever their
+      // count is already known.
       WorkerSandbox.create(
-        id: workers,
+        id: workers ?? 0,
         root: switched.root,
         targets: targets,
         temps: tempSpace,
@@ -643,8 +666,11 @@ class MutationTestRunner {
     if (_journal?.baseline case final Duration recorded) {
       return _Baseline(0, recorded, reused: true);
     }
-    final Stopwatch clock = Stopwatch()..start();
-    final int? exitCode = await testCommand.run(timeout: baselineTimeout);
+    final Stopwatch clock = Stopwatch();
+    final int? exitCode = await _holdingSlot(() {
+      clock.start();
+      return testCommand.run(timeout: baselineTimeout);
+    });
     final Duration wallTime = clock.elapsed;
     if (exitCode == 0) {
       _journal?.recordBaseline(wallTime);
@@ -708,14 +734,18 @@ class MutationTestRunner {
         _coverageReused = true;
         return TestSelection(invocation, recorded);
       }
-      final TestSelection? selection = await collectCoverage(
-        invocation,
-        timeout: baselineTimeout,
-        onFailure: (String reason) => _selectionUnavailable = reason,
-        temps: tempSpace,
-        recorded: _journal?.suites,
-        onSuite: _journal?.recordSuite,
-      );
+      final TestSelection? selection = await _holdingSlot(() {
+        // The wait for the slot is not the pass's own time.
+        clock.reset();
+        return collectCoverage(
+          invocation,
+          timeout: baselineTimeout,
+          onFailure: (String reason) => _selectionUnavailable = reason,
+          temps: tempSpace,
+          recorded: _journal?.suites,
+          onSuite: _journal?.recordSuite,
+        );
+      });
       if (selection != null) {
         _journal?.recordCoverage(selection.map);
       }
@@ -758,7 +788,7 @@ class MutationTestRunner {
     'baselineFactor': baselineFactor,
     'baselineTimeoutSeconds': MutantTiming.seconds(baselineTimeout),
     'selectByCoverage': selectByCoverage,
-    'workers': workers,
+    'workers': workers ?? 'auto',
     'operators': operators.map((MutationOperator o) => o.name).toList(),
   };
 
@@ -902,10 +932,9 @@ class MutationTestRunner {
     _overBudget = null;
     _mutantClock.reset();
     _mutantsStarted = true;
-    if (!_control.isPaused) {
-      _mutantClock.start();
-    }
-    _stats.workers = workers;
+    _waitingForSlot = false;
+    _syncMutantClock();
+    _stats.workers = _lanes;
     final Map<int, _Job> runnable = await _sortPending(pending);
     if (runnable.isEmpty || _overBudget != null) {
       return null;
@@ -920,7 +949,9 @@ class MutationTestRunner {
       root: switched.root,
       gateFor: (String file) => _gateOf(gates, file),
       temps: tempSpace,
-      workers: workers,
+      workers: _lanes,
+      slots: slots,
+      onSlotWait: _onSlotWait,
       arguments: switched.arguments,
       testFileTimeout: baselineTimeout,
       budgetFrom: _budgetFrom,
@@ -942,12 +973,44 @@ class MutationTestRunner {
   }
 
   /// Keeps a pause out of the pace [runBudget] is judged by.
-  void _onPauseChange(bool paused) {
-    if (paused) {
-      _mutantClock.stop();
-    } else if (_mutantsStarted) {
+  void _onPauseChange(bool paused) => _syncMutantClock();
+
+  /// Keeps a wait for a test slot out of that pace too.
+  void _onSlotWait(bool waiting) {
+    _waitingForSlot = waiting;
+    _syncMutantClock();
+  }
+
+  /// [_mutantClock] running while the mutants are under way, and stopped
+  /// while the run is paused or waiting for a test slot.
+  void _syncMutantClock() {
+    if (_mutantsStarted && !_control.isPaused && !_waitingForSlot) {
       _mutantClock.start();
+    } else {
+      _mutantClock.stop();
     }
+  }
+
+  /// [run]'s result, run holding one of [slots] when there are any.
+  Future<TResult> _holdingSlot<TResult>(
+    Future<TResult> Function() run,
+  ) async {
+    final TestSlot? slot = await slots?.acquire();
+    try {
+      return await run();
+    } finally {
+      slot?.release();
+    }
+  }
+
+  /// How many lanes to open as the mutants start: [workers], or for `null`
+  /// one per free slot, and at least one.
+  int _laneCount() {
+    if (workers case final int lanes) {
+      return lanes;
+    }
+    final int free = slots?.free() ?? 1;
+    return free < 1 ? 1 : free;
   }
 
   /// What a run stopped by a signal reports — built synchronously, since
@@ -998,7 +1061,7 @@ class MutationTestRunner {
         elapsed: elapsed,
         completed: _completed,
         planned: _planned,
-        workers: workers,
+        workers: _lanes,
       )) {
         return;
       }

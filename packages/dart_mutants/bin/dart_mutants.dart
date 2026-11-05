@@ -15,6 +15,7 @@ import 'package:dart_mutants/src/runner/process_command.dart';
 import 'package:dart_mutants/src/runner/run_budget.dart';
 import 'package:dart_mutants/src/runner/run_plan.dart';
 import 'package:dart_mutants/src/runner/run_record.dart';
+import 'package:dart_mutants/src/runner/test_slots.dart';
 import 'package:dart_mutants/src/runner/wait_span.dart';
 import 'package:dart_mutants/src/version_check.dart';
 import 'package:path/path.dart' as p;
@@ -30,6 +31,14 @@ Future<void> main(List<String> arguments) async {
   }
   final ArgResults? args = _parseAndValidate(arguments, _buildParser());
   if (args == null) {
+    return;
+  }
+  final TestSlots slots;
+  try {
+    slots = await TestSlots.fromEnvironment();
+  } on FormatException catch (e) {
+    stderr.writeln('dart_mutants: ${e.message}, not "${e.source}".');
+    exitCode = 64; // EX_USAGE
     return;
   }
 
@@ -53,7 +62,7 @@ Future<void> main(List<String> arguments) async {
     exitCode = _nothingToMutate(args);
     return;
   }
-  exitCode = await _runAndReport(args, scope);
+  exitCode = await _runAndReport(args, scope, slots);
 }
 
 /// `dart_mutants pause|resume|stop [<pid>]`: the signal each sends to a run
@@ -176,7 +185,11 @@ class _Gates {
 }
 
 /// Runs [scope] (or the files given) and prints the report; the exit code.
-Future<int> _runAndReport(ArgResults args, DiffScope? scope) async {
+Future<int> _runAndReport(
+  ArgResults args,
+  DiffScope? scope,
+  TestSlots slots,
+) async {
   final List<String> targets = scope?.files ?? args.rest;
   final _Gates gates = _Gates.of(args['analyze-command'] as String?, targets);
   // stdout is the JSON report's under --json, and nothing else may share it.
@@ -194,6 +207,7 @@ Future<int> _runAndReport(ArgResults args, DiffScope? scope) async {
     args,
     scope,
     gates,
+    slots,
     quiet: jsonOnStdout,
     onStopped: (MutationRunReport stopped) {
       emit(stopped);
@@ -241,7 +255,8 @@ RunRecord? _announce() {
 MutationTestRunner _runner(
   ArgResults args,
   DiffScope? scope,
-  _Gates gates, {
+  _Gates gates,
+  TestSlots slots, {
   required bool quiet,
   required void Function(MutationRunReport stopped) onStopped,
 }) => MutationTestRunner(
@@ -262,7 +277,10 @@ MutationTestRunner _runner(
   baselineFactor: double.parse(args['baseline-factor'] as String),
   baselineTimeout: _optionalSeconds(args['baseline-timeout'] as String?),
   selectByCoverage: args['select-by-coverage'] as bool,
-  workers: int.parse(args['workers'] as String),
+  // `auto` is the one value that is not a number: null opens a lane per
+  // free slot.
+  workers: int.tryParse(args['workers'] as String),
+  slots: slots,
   runBudget: _optionalBudget(args['max-minutes'] as String?),
   journalPath: args['journal'] as String?,
   lines: scope?.lines ?? _lines(args),
@@ -385,11 +403,15 @@ ArgParser _buildParser() {
       'workers',
       abbr: 'j',
       defaultsTo: '1',
+      valueHelp: 'n|auto',
       help:
           'How many test files run at once. Each worker has its own copy of '
           'the package made of links, a few megabytes, plus its own compiler '
-          'and test process; the package itself is never written to. Memory '
-          'is the usual limit.',
+          'and test process; the package itself is never written to. Each '
+          'worker also waits for a test slot, which every dart_mutants run on '
+          'this machine shares, before it compiles or runs a test file — see '
+          r'$DART_MUTANTS_SLOTS in the README. `auto` opens one worker per '
+          'slot free when the mutants start, and at least one.',
     )
     ..addOption(
       'max-minutes',
@@ -690,9 +712,10 @@ bool _writeReport(String path, String json) {
 }
 
 String? _workersOptionError(ArgResults args) {
-  final int? workers = int.tryParse(args['workers'] as String);
-  return workers == null || workers < 1
-      ? '--workers must be a whole number, 1 or more'
+  final String given = args['workers'] as String;
+  final int? workers = int.tryParse(given);
+  return given != 'auto' && (workers == null || workers < 1)
+      ? '--workers must be a whole number, 1 or more, or auto'
       : null;
 }
 
