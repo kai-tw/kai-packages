@@ -140,6 +140,9 @@ class TestInvocation {
 
   String get root => _command.workingDirectory ?? Directory.current.path;
 
+  /// `dart` or `flutter`, as the command names it.
+  String get executable => _command.executable;
+
   void _split() {
     bool valueExpected = false;
     for (final String arg in _command.arguments.skip(1)) {

@@ -1,5 +1,6 @@
 import 'host_load.dart';
 import 'mutant_timing.dart';
+import 'schemata_stats.dart';
 
 /// What one run cost, and where the time went — collected as the run goes,
 /// and kept with its report so later runs have something to compare
@@ -42,6 +43,9 @@ class RunStats {
   /// links not counted. Empty when the mutants ran in the package itself.
   List<int>? workerDiskBytes;
 
+  /// The switched-file pass, when one ran — see `SchemataRunner`.
+  SchemataStats? schemata;
+
   final List<MutantTiming> mutants = <MutantTiming>[];
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -61,6 +65,7 @@ class RunStats {
     'selection': _selection(),
     if (workers != null) 'workers': workers,
     if (workerDiskBytes != null) 'workerDiskBytes': workerDiskBytes,
+    if (schemata != null) 'schemata': schemata!.toJson(),
     'mutants': mutants.map((MutantTiming m) => m.toJson()).toList(),
   };
 

@@ -13,7 +13,9 @@ import '../version.dart';
 import 'compile_safety_gate.dart';
 import 'coverage_map.dart';
 import 'file_mutation_report.dart';
+import 'flutter_sdk.dart';
 import 'host_load.dart';
+import 'line_range.dart';
 import 'mutant_filter.dart';
 import 'mutant_progress.dart';
 import 'mutant_result.dart';
@@ -27,6 +29,9 @@ import 'run_budget.dart';
 import 'run_journal.dart';
 import 'run_plan.dart';
 import 'run_stats.dart';
+import 'schemata_job.dart';
+import 'schemata_runner.dart';
+import 'schemata_stats.dart';
 import 'temp_space.dart';
 import 'test_compilation_cache.dart';
 import 'test_invocation.dart';
@@ -63,6 +68,8 @@ class MutationTestRunner {
     this.onJournalDiscarded,
     Map<String, Set<int>>? lines,
     this.perLine,
+    this.schemata = true,
+    this.onSchemataUnavailable,
   }) : lines = lines == null
            ? null
            : <String, Set<int>>{
@@ -201,6 +208,15 @@ class MutationTestRunner {
   final int? perLine;
 
   static String _pathKey(String path) => p.normalize(p.absolute(path));
+
+  /// Run the selected mutants of a `flutter test` package as switched files
+  /// — see [SchemataRunner] — instead of one `flutter test` each. Applies
+  /// only with [selectByCoverage]; a mutant it cannot handle, and every one
+  /// when it cannot apply at all, runs through `flutter test` as before.
+  final bool schemata;
+
+  /// Called with the reason [schemata] could not apply to this run.
+  final void Function(String reason)? onSchemataUnavailable;
 
   /// Called with the reason a journal already at [journalPath] was started
   /// over rather than reused.
@@ -431,7 +447,7 @@ class MutationTestRunner {
         plan: plan,
         jobs: jobs,
         recalled: recalled,
-        selected: selection != null,
+        selection: selection,
         lanes: lanes,
         runPlan: runPlan,
         stats: stats,
@@ -457,11 +473,12 @@ class MutationTestRunner {
     required List<_PlannedFile> plan,
     required List<_Job> jobs,
     required List<MutantResult?> recalled,
-    required bool selected,
+    required TestSelection? selection,
     required List<_Lane> lanes,
     required RunPlan runPlan,
     required RunStats stats,
   }) async {
+    final bool selected = selection != null;
     if (runBudget case final RunBudget b when runPlan.floor > b.limit) {
       return MutationRunReport.aborted(
         stats: await _finished(stats),
@@ -477,16 +494,17 @@ class MutationTestRunner {
         mutantTimeout: runPlan.budget,
       );
     }
-    final List<MutantResult> ran = await _execute(
+    final List<MutantResult>? ran = await _runPending(
       _pending(jobs, recalled),
+      selection,
       lanes,
       runPlan.budget,
     );
-    if (_overBudget case final String reason) {
+    if (ran == null) {
       return MutationRunReport.aborted(
         stats: await _finished(stats),
         AbortKind.overBudget,
-        reason,
+        _overBudget!,
         baselineDuration: runPlan.baseline,
         mutantTimeout: runPlan.budget,
       );
@@ -499,6 +517,44 @@ class MutationTestRunner {
       reusedMutants: _journal == null ? null : runPlan.reused,
       stats: await _finished(stats),
     );
+  }
+
+  /// Runs [pending]: as switched files where it can (see [schemata]), the
+  /// rest across [lanes]. Their results in [pending]'s order, or `null` once
+  /// the pace is over [runBudget] — the reason is then in [_overBudget].
+  Future<List<MutantResult>?> _runPending(
+    List<_Job> pending,
+    TestSelection? selection,
+    List<_Lane> lanes,
+    Duration budget,
+  ) async {
+    _overBudget = null;
+    _mutantClock
+      ..reset()
+      ..start();
+    final Map<_Job, MutantResult> switched = await _switched(
+      pending,
+      selection,
+    );
+    if (_overBudget != null) {
+      return null;
+    }
+    final List<MutantResult> others = await _execute(
+      <_Job>[
+        for (final _Job job in pending)
+          if (!switched.containsKey(job)) job,
+      ],
+      lanes,
+      budget,
+    );
+    if (_overBudget != null) {
+      return null;
+    }
+    final Iterator<MutantResult> other = others.iterator;
+    return <MutantResult>[
+      for (final _Job job in pending)
+        switched[job] ?? (other..moveNext()).current,
+    ];
   }
 
   /// Each job's result from the journal, or `null` where it has to run.
@@ -555,6 +611,9 @@ class MutationTestRunner {
           ? gate.analyzeCommand.toString()
           : gate.runtimeType.toString(),
       'selectByCoverage': selectByCoverage,
+      // Only where it can change a verdict, so a journal without coverage
+      // selection stays valid across this option's arrival.
+      if (selectByCoverage && schemata) 'schemata': true,
       'fingerprint': RunJournal.fingerprint(
         testCommand.workingDirectory ?? Directory.current.path,
         targets,
@@ -649,6 +708,7 @@ class MutationTestRunner {
     'baselineFactor': baselineFactor,
     'baselineTimeoutSeconds': MutantTiming.seconds(baselineTimeout),
     'selectByCoverage': selectByCoverage,
+    'schemata': schemata,
     'workers': workers,
     'operators': operators.map((MutationOperator o) => o.name).toList(),
   };
@@ -777,8 +837,35 @@ class MutationTestRunner {
         : parseString(content: file.source, throwIfDiagnostics: false);
     return <_Job>[
       for (final Mutant mutant in file.mutants)
-        _Job(mutant, file.source, gate, _commandFor(mutant, selection, parsed)),
+        _jobFor(mutant, file.source, gate, selection, parsed),
     ];
+  }
+
+  /// [mutant]'s job: [testCommand] without a selection or a parse to scope
+  /// it by, otherwise whatever the selection says — no command for "no test
+  /// enters it".
+  _Job _jobFor(
+    Mutant mutant,
+    String source,
+    CompileSafetyGate gate,
+    TestSelection? selection,
+    ParseStringResult? parsed,
+  ) {
+    if (selection == null || parsed == null) {
+      return _Job(mutant, source, gate, testCommand);
+    }
+    final LineRange? scope = executableScope(
+      parsed.unit,
+      parsed.lineInfo,
+      mutant.offset,
+    );
+    return _Job(
+      mutant,
+      source,
+      gate,
+      selection.commandFor(mutant, scope, testCommand),
+      tests: selection.testsFor(mutant, scope),
+    );
   }
 
   /// Runs [jobs] across [lanes], each lane taking the next job as it
@@ -792,10 +879,6 @@ class MutationTestRunner {
     Duration budget,
   ) async {
     _stats.workers = lanes.length;
-    _overBudget = null;
-    _mutantClock
-      ..reset()
-      ..start();
     final List<MutantResult?> results = List<MutantResult?>.filled(
       jobs.length,
       null,
@@ -832,8 +915,14 @@ class MutationTestRunner {
     final Stopwatch clock = Stopwatch()..start();
     final _Timing timing = _Timing(lane.id);
     final MutantResult result = await _runOne(job, lane, budget, timing);
+    _finish(result, timing, clock.elapsed);
+    return result;
+  }
+
+  /// Records [result] in the journal and the statistics, reports it as
+  /// progress, and checks the pace against [runBudget].
+  void _finish(MutantResult result, _Timing timing, Duration elapsed) {
     _journal?.record(result);
-    final Duration elapsed = clock.elapsed;
     _stats.mutants.add(timing.build(result, elapsed));
     _completed++;
     final Duration remaining = _projectedRemaining();
@@ -847,8 +936,183 @@ class MutationTestRunner {
       ),
     );
     _checkPace(remaining);
-    return result;
   }
+
+  /// Runs what it can of [pending] as switched files — see [schemata] — and
+  /// returns those jobs' results; the rest are left to [_execute]. A mutant
+  /// the gate rejects is scored `invalid` here, as [_runOne] would.
+  Future<Map<_Job, MutantResult>> _switched(
+    List<_Job> pending,
+    TestSelection? selection,
+  ) async {
+    final Map<_Job, MutantResult> results = <_Job, MutantResult>{};
+    final List<_Job> candidates = <_Job>[
+      for (final _Job job in pending)
+        if (job.tests?.isNotEmpty ?? false) job,
+    ];
+    if (selection == null || !_mightSwitch(selection, candidates)) {
+      return results;
+    }
+    final FlutterSdk? sdk = _schemataSdk(
+      selection.invocation,
+      candidates.first.gate,
+    );
+    if (sdk == null) {
+      return results;
+    }
+    final SourceCompileSafetyGate gate =
+        candidates.first.gate as SourceCompileSafetyGate;
+    final _SwitchedJobs jobs = await _switchable(candidates, gate, results);
+    final SchemataStats stats = _stats.schemata = SchemataStats();
+    await SchemataRunner(
+      sdk: sdk,
+      root: p.normalize(p.absolute(selection.invocation.root)),
+      gate: gate,
+      temps: tempSpace,
+      testFileTimeout: baselineTimeout,
+      budgetFrom: _switchedBudget,
+      stats: stats,
+      shouldStop: () => _overBudget != null,
+      onResult: (SchemataJob job, MutantResult result, Duration tests) {
+        final _Timing timing = jobs.timings[job.id]!
+          ..switched = true
+          ..test = tests;
+        results[jobs.owners[job.id]!] = result;
+        _finish(result, timing, timing.gate + tests);
+      },
+    ).run(jobs.runnable);
+    return results;
+  }
+
+  /// Whether [schemata] has anything to do: it is on, [selection] runs
+  /// `flutter test`, and some of [candidates] have test files selected.
+  bool _mightSwitch(TestSelection selection, List<_Job> candidates) =>
+      schemata &&
+      candidates.isNotEmpty &&
+      selection.invocation.runner == TestRunner.flutter;
+
+  /// [candidates] judged by [gate] one by one, as [_runOne] would: a mutant
+  /// it rejects is scored `invalid` into [results], and the rest are what
+  /// can be switched. A candidate a fallback gate judges is left out, for
+  /// [_execute].
+  Future<_SwitchedJobs> _switchable(
+    List<_Job> candidates,
+    SourceCompileSafetyGate gate,
+    Map<_Job, MutantResult> results,
+  ) async {
+    final _SwitchedJobs jobs = _SwitchedJobs();
+    for (final _Job job in candidates.where(
+      (_Job j) => identical(j.gate, gate),
+    )) {
+      final Stopwatch clock = Stopwatch()..start();
+      final _Timing timing = _Timing(0)..selected = true;
+      final bool compiles = await gate.compilesSource(
+        job.mutant.filePath,
+        job.mutant.applyTo(job.source),
+      );
+      timing.gate = clock.elapsed;
+      if (compiles) {
+        jobs.add(job, timing);
+        continue;
+      }
+      final MutantResult invalid = MutantResult(
+        mutant: job.mutant,
+        verdict: MutantVerdict.invalid,
+      );
+      results[job] = invalid;
+      _finish(invalid, timing..selected = false, clock.elapsed);
+    }
+    return jobs;
+  }
+
+  /// A switched mutant's budget on one test file that took [unmutated]: the
+  /// usual [_budgetFrom], but never less than [unmutated] plus
+  /// [mutantTimeout] plus `package:test`'s own 30s per-test timeout.
+  ///
+  /// One test file runs in a few seconds, so its derived budget is usually
+  /// the [mutantTimeout] floor, 30s by default — the same 30s after which
+  /// `package:test` fails a test that awaits forever. Measured on a large
+  /// app: killed at that moment, two mutants `flutter test` scored
+  /// `detected`, through that very timeout, read as `timeout`.
+  Duration _switchedBudget(Duration unmutated) {
+    final Duration derived = _budgetFrom(unmutated);
+    final Duration floor =
+        unmutated + mutantTimeout + const Duration(seconds: 30);
+    return derived > floor ? derived : floor;
+  }
+
+  /// The SDK to run a `flutter test` package's switched files with, or
+  /// `null` once [onSchemataUnavailable] has been told why not.
+  FlutterSdk? _schemataSdk(TestInvocation invocation, CompileSafetyGate gate) {
+    final String? refusal = _schemataRefusal(invocation, gate);
+    if (refusal != null) {
+      onSchemataUnavailable?.call(refusal);
+      return null;
+    }
+    return FlutterSdk.locate(
+      invocation.executable,
+      onMissing: (String reason) => onSchemataUnavailable?.call(reason),
+    );
+  }
+
+  /// Why [invocation]'s package cannot run switched files, or `null`.
+  static String? _schemataRefusal(
+    TestInvocation invocation,
+    CompileSafetyGate gate,
+  ) {
+    if (gate is! SourceCompileSafetyGate) {
+      return 'the compile-safety gate cannot judge code in memory';
+    }
+    final String root = p.normalize(p.absolute(invocation.root));
+    if (File(p.join(root, 'dart_test.yaml')).existsSync()) {
+      return 'dart_test.yaml can change which tests run, and a switched run '
+          'does not read it';
+    }
+    return _unpassableFlag(invocation.flags) ?? _missingPackage(root);
+  }
+
+  /// The first of [flags] a switched run cannot do without, said as a
+  /// reason, or `null`.
+  static String? _unpassableFlag(List<String> flags) {
+    for (int i = 0; i < flags.length; i++) {
+      final String name = flags[i].split('=').first;
+      if (_passThroughFlags.contains(name)) {
+        continue;
+      }
+      if (!_ignoredValueFlags.contains(name)) {
+        return 'the test command passes ${flags[i]}, which it cannot pass on';
+      }
+      if (!flags[i].contains('=')) {
+        i++;
+      }
+    }
+    return null;
+  }
+
+  /// The package a switched run needs and the package at [root] does not
+  /// resolve, said as a reason, or `null`.
+  static String? _missingPackage(String root) {
+    final String packages =
+        WorkerSandbox.packageConfigOf(root)?.readAsStringSync() ?? '';
+    for (final String package in <String>['flutter_test', 'test_core']) {
+      if (!packages.contains('"name": "$package"')) {
+        return 'the package does not resolve package:$package';
+      }
+    }
+    return null;
+  }
+
+  /// Flags of the test command a switched run can do without.
+  static const Set<String> _passThroughFlags = <String>{'--no-pub'};
+
+  /// Options whose value only shapes how `flutter test` reports or how
+  /// many files it runs at once.
+  static const Set<String> _ignoredValueFlags = <String>{
+    '-j',
+    '--concurrency',
+    '-r',
+    '--reporter',
+  };
 
   /// What the mutants still to come cost at the pace held so far — see
   /// [MutantProgress.projectedRemaining].
@@ -968,24 +1232,6 @@ class MutationTestRunner {
       mutants,
       lines: lines?[_pathKey(filePath)],
       perLine: perLine,
-    );
-  }
-
-  /// What [mutant] runs: [testCommand] without a selection or a parse to
-  /// scope it by, otherwise whatever the selection says — `null` for "no
-  /// test enters it".
-  ProcessCommand? _commandFor(
-    Mutant mutant,
-    TestSelection? selection,
-    ParseStringResult? parsed,
-  ) {
-    if (selection == null || parsed == null) {
-      return testCommand;
-    }
-    return selection.commandFor(
-      mutant,
-      executableScope(parsed.unit, parsed.lineInfo, mutant.offset),
-      testCommand,
     );
   }
 
@@ -1194,6 +1440,7 @@ class _Timing {
   final int worker;
   Duration gate = Duration.zero;
   bool selected = false;
+  bool switched = false;
   Duration? measurement;
   Duration? test;
   Duration? retry;
@@ -1204,15 +1451,31 @@ class _Timing {
     elapsed: elapsed,
     gate: gate,
     selected: selected,
+    switched: switched,
     measurement: measurement,
     test: test,
     retry: retry,
   );
 }
 
+/// The mutants [MutationTestRunner._switched] hands to a [SchemataRunner],
+/// each under the id it gets there, with the job and timing it came from.
+class _SwitchedJobs {
+  final List<SchemataJob> runnable = <SchemataJob>[];
+  final Map<int, _Job> owners = <int, _Job>{};
+  final Map<int, _Timing> timings = <int, _Timing>{};
+
+  void add(_Job job, _Timing timing) {
+    final int id = runnable.length;
+    owners[id] = job;
+    timings[id] = timing;
+    runnable.add(SchemataJob(id, job.mutant, job.source, job.tests!));
+  }
+}
+
 /// One mutant with what it needs to run.
 class _Job {
-  const _Job(this.mutant, this.source, this.gate, this.command);
+  const _Job(this.mutant, this.source, this.gate, this.command, {this.tests});
 
   final Mutant mutant;
 
@@ -1223,6 +1486,10 @@ class _Job {
 
   /// What it runs, rooted in the package — `null` when no test reaches it.
   final ProcessCommand? command;
+
+  /// The test files [command] selects, relative to the package — `null`
+  /// when it is the full test command.
+  final List<String>? tests;
 }
 
 /// Where one worker runs mutants: the package itself when [sandbox] is

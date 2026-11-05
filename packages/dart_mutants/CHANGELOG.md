@@ -1,3 +1,32 @@
+## 0.8.0
+
+**`--schemata`, on by default: a `flutter test` package compiles each
+selected test file once for the whole run, not once per mutant.** Under
+`--select-by-coverage`, every mutant of a file the gate accepts is written
+into it at once, each behind a switch read from `DART_MUTANTS_ID`; each
+selected test file is compiled once with Flutter's own compiler, run
+unmutated, and then run once per mutant by starting `flutter_tester`
+directly with that mutant's id. `flutter test` spends 2–3.5s compiling each
+test file of a large app on every run, so a mutant that 30 test files reach
+used to cost over a minute before any test ran.
+
+It all happens in a temporary copy of the package, deleted when the run
+ends, so the package itself is never written to. A mutant that cannot be
+switched (a constant context, a local declaration, a part file, or one that
+stops the file compiling beside the others), a test file that fails to
+compile or fails unmutated in the copy, and a run that ends in anything but
+a pass or a failed test all go through the test command as before. Nothing
+switches without a `test_core` the package resolves, without a gate that
+can judge code in memory, with a `dart_test.yaml`, or with a test-command
+flag it cannot pass on; the run says which on stderr. `--no-schemata` turns
+it off.
+
+A journal written with `--select-by-coverage` by an earlier release is
+started over once, since its header now records `schemata`.
+
+`ProcessCommand` gains `environment`; `RunStats` gains `schemata`, and each
+`MutantTiming` says whether it was `switched`.
+
 ## 0.7.0
 
 **`--lines <file>:<ranges>` and `--per-line <n>`: mutate what a change

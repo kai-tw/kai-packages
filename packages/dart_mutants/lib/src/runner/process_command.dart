@@ -15,6 +15,7 @@ class ProcessCommand {
     this.executable,
     this.arguments, {
     this.workingDirectory,
+    this.environment = const <String, String>{},
   });
 
   final String executable;
@@ -23,12 +24,21 @@ class ProcessCommand {
   /// Defaults to the current process's working directory when `null`.
   final String? workingDirectory;
 
+  /// Set for the child on top of this process's own environment.
+  final Map<String, String> environment;
+
   /// Every child started by [run] that has not yet exited.
   ///
   /// Exists so an interrupt can kill them. Sequential execution means this
   /// holds at most one pid today, but it is a set rather than a field because
   /// "at most one" is a property of the current runner, not of this class.
   static final Set<int> _running = <int>{};
+
+  /// Tracks [pid], a long-lived child [run] did not start, so
+  /// [killAllRunning] kills it on an interrupt too; [untrack] once it exits.
+  static void track(int pid) => _running.add(pid);
+
+  static void untrack(int pid) => _running.remove(pid);
 
   /// A snapshot of [_running], for tests only — production code has no
   /// legitimate reason to read what this class is tracking; [killAllRunning]
@@ -77,6 +87,7 @@ class ProcessCommand {
       arguments,
       workingDirectory: workingDirectory,
       environment: <String, String>{
+        ...environment,
         'TMPDIR': tmp.path,
         'TMP': tmp.path,
         'TEMP': tmp.path,
