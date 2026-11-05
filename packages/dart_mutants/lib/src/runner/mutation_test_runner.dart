@@ -23,13 +23,13 @@ import 'mutant_result.dart';
 import 'mutant_scope.dart';
 import 'mutant_timing.dart';
 import 'mutant_verdict.dart';
-import 'mutated_file_registry.dart';
 import 'mutation_run_report.dart';
 import 'process_command.dart';
 import 'run_budget.dart';
 import 'run_control.dart';
 import 'run_journal.dart';
 import 'run_plan.dart';
+import 'run_signal_handler.dart';
 import 'run_stats.dart';
 import 'switched_job.dart';
 import 'switched_runner.dart';
@@ -152,7 +152,7 @@ class MutationTestRunner {
   /// exits 1.
   ///
   /// It must be **synchronous**, for the reason
-  /// [MutatedFileRegistry.armSignalRestore] gives.
+  /// [RunSignalHandler.arm] gives.
   final void Function(MutationRunReport stopped)? onStopped;
 
   final List<MutationOperator> operators;
@@ -242,7 +242,7 @@ class MutationTestRunner {
   /// Kills every running process and deletes the run's temporary
   /// directories on `SIGINT`/`SIGTERM`. Nothing is ever written to the
   /// package, so there is nothing to put back.
-  final MutatedFileRegistry _signals = MutatedFileRegistry();
+  final RunSignalHandler _signals = RunSignalHandler();
 
   /// Pauses the lanes between test-file runs on `SIGUSR1`, and resumes them
   /// on `SIGUSR2` — see [SwitchedRunner].
@@ -321,7 +321,7 @@ class MutationTestRunner {
     //
     // Processes before directories: a test run killed mid-write would
     // otherwise be writing into a directory being deleted.
-    _signals.armSignalRestore(
+    _signals.arm(
       beforeExit: () {
         ProcessCommand.killAllRunning();
         tempSpace.deleteAll();
@@ -430,7 +430,6 @@ class MutationTestRunner {
     } finally {
       await pauses.cancel();
       await _control.disarm();
-      _signals.restoreAll();
       tempSpace.deleteAll();
       await _signals.disarm();
     }
@@ -991,11 +990,19 @@ class MutationTestRunner {
     }
   }
 
-  /// [run]'s result, run holding one of [slots] when there are any.
+  /// [run]'s result, run while the run is not paused, holding one of [slots]
+  /// when there are any. A pause that comes during the wait for a slot
+  /// gives the slot straight back, so a paused run holds none.
   Future<TResult> _holdingSlot<TResult>(
     Future<TResult> Function() run,
   ) async {
-    final TestSlot? slot = await slots?.acquire();
+    await _control.resumed;
+    TestSlot? slot = await slots?.acquire();
+    while (_control.isPaused) {
+      slot?.release();
+      await _control.resumed;
+      slot = await slots?.acquire();
+    }
     try {
       return await run();
     } finally {

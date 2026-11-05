@@ -68,6 +68,30 @@ alike, with or without `--select-by-coverage`. Breaking:
 - **New dependencies: `test_core` and `test_api`**, whose own libraries the
   in-test runner uses. A Flutter package no longer has to add `test_core`
   itself; it has to resolve `dart_mutants`.
+- **Breaking: a run on an outdated release exits 2 before it runs
+  anything.** Each run reads the newest `dart_mutants-v<version>` tag with
+  `git ls-remote`, kept for a day under `<cache>/dart_mutants/`; on an older
+  release it names the one to move the ref to. A run that gets no answer
+  from the network, with none kept from the last day, exits 2 too: it cannot
+  tell an up-to-date release from an outdated one. There is no option to
+  skip the check.
+
+Also new:
+
+- **Review mode: `--diff <ref>`, `--review <file>` and
+  `--fail-on-survivors`.** `--diff` mutates only the lines changed since the
+  merge base of the ref and `HEAD`, uncommitted edits included, at most
+  `--per-line` mutants a line (1 unless given); with no files given, every
+  Dart file under `lib/` the change touched. `--review` writes each survivor
+  a test runs past to a JSON list of `{path, line, body}`, ready to post on
+  a pull request, and the run then exits 0 whatever the scores, unless
+  `--fail-on-survivors`. A change that only deletes lines has nothing new to
+  mutate: the review file gets `[]`, and the run exits 0.
+- **A swap that leaves the code as it was is not proposed** — a ternary or
+  two switch arms whose branches are the same text. No test could detect
+  it.
+- **`.config.dart` and `.gen.dart` files count as generated**, like
+  `.g.dart`, and are never mutated.
 
 A journal from an earlier release is started over once: its `format` is
 now 2.

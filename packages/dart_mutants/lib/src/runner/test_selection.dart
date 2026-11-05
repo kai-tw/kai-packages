@@ -10,12 +10,12 @@ import 'mutant_scope.dart';
 import 'suite_coverage.dart';
 import 'temp_space.dart';
 import 'test_invocation.dart';
+import 'worker_sandbox.dart';
 
 /// A [CoverageMap] and the invocation it was collected through: together,
 /// how to run only the tests that cover a given mutant.
 class TestSelection {
-  TestSelection(this.invocation, this.map)
-    : _root = _resolved(p.absolute(invocation.root));
+  TestSelection(this.invocation, this.map) : _root = realPath(invocation.root);
 
   final TestInvocation invocation;
   final CoverageMap map;
@@ -31,7 +31,7 @@ class TestSelection {
     }
     final String file = p.posix.joinAll(
       p.split(
-        p.relative(_resolved(p.absolute(mutant.filePath)), from: _root),
+        p.relative(realPath(mutant.filePath), from: _root),
       ),
     );
     return map.testsFor(file, scope.start, scope.end)?.toList()?..sort();
@@ -44,18 +44,6 @@ class TestSelection {
   bool speaksFor(String source) =>
       invocation.runner == TestRunner.dart ||
       !source.contains('coverage:ignore');
-
-  /// [path] with symlinks resolved when it exists — `/tmp` against
-  /// `/private/tmp` on macOS would otherwise miss every key, silently.
-  static String _resolved(String path) {
-    final FileSystemEntityType type = FileSystemEntity.typeSync(path);
-    if (type == FileSystemEntityType.notFound) {
-      return p.normalize(path);
-    }
-    return type == FileSystemEntityType.directory
-        ? Directory(path).resolveSymbolicLinksSync()
-        : File(path).resolveSymbolicLinksSync();
-  }
 }
 
 /// Runs the coverage pass: every test file of [invocation], with coverage

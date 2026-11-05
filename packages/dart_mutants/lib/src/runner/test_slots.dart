@@ -142,12 +142,28 @@ class TestSlots {
 
   /// A slot, once one is free: at once when one is, or else when another
   /// lane or another run gives one back. Never fails for want of one.
-  Future<TestSlot> acquire() async {
+  ///
+  /// `null` when [until] completes first: the caller no longer wants a
+  /// slot, and nothing is left waiting for one.
+  Future<TestSlot?> acquire({Future<void>? until}) async {
     directory.createSync(recursive: true);
     if (_tryAcquire() case final TestSlot slot) {
       return slot;
     }
     final StreamController<void> wake = StreamController<void>();
+    bool givenUp = false;
+    // Not awaited: it only wakes the wait below, and [until] — a signal the
+    // caller completes, never with an error — has no failure to observe. A
+    // completion after the wait ended changes nothing.
+    if (until != null) {
+      unawaited(() async {
+        await until;
+        givenUp = true;
+        if (!wake.isClosed) {
+          wake.add(null);
+        }
+      }());
+    }
     final List<StreamSubscription<void>> sources = <StreamSubscription<void>>[
       _released.stream.listen(wake.add),
       _watchReleases(wake),
@@ -162,6 +178,9 @@ class TestSlots {
       // the first try and now is not waited past.
       TestSlot? slot = _tryAcquire();
       while (slot == null) {
+        if (givenUp) {
+          return null;
+        }
         await next.moveNext();
         slot = _tryAcquire();
       }

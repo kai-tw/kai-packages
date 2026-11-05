@@ -34,6 +34,22 @@ mutant as it finishes, then the text report:
 `--json` prints the JSON report to stdout instead, with no progress lines, so
 stdout parses as a whole.
 
+## An outdated release does not run
+
+Before anything else, a run checks that it is the newest release: it reads
+the newest `dart_mutants-v<version>` tag from this repository with
+`git ls-remote`, and keeps the answer for a day under
+`$XDG_CACHE_HOME/dart_mutants/` (`~/.cache` without `XDG_CACHE_HOME`), so it
+asks the network at most once a day. A project pins this package by tag, and
+nothing moves that pin forward but someone changing it; a run on an older
+release scores mutants the way that release did, with nothing to say so.
+
+So a run on an older release exits 2 before it runs anything, naming the
+release to move the ref to. So does a run that gets no answer from the
+network and has none kept from the last day: it cannot tell an up-to-date
+release from an outdated one. There is no option to skip the check — an
+outdated release is updated, not run.
+
 ## How long it will take
 
 The plan line doesn't say, because nothing before the first mutant knows. A
@@ -117,8 +133,11 @@ A run finds itself by a file it keeps at
 `$XDG_CACHE_HOME/dart_mutants/runs/<pid>.json` (`~/.cache` without
 `XDG_CACHE_HOME`) while it runs. Without a pid, the command acts on the one
 run in the current directory's package, and exits 2 when there is none or
-more than one. The signals are `SIGUSR1`, `SIGUSR2` and `SIGTERM`, so `kill`
-does the same where the command cannot.
+more than one. A file whose process has ended, or whose pid now belongs to a
+process that started after the file was written — the machine went down
+mid-run, and the pid has since been reused — is a leftover: it is deleted,
+and nothing is sent to that pid. The signals are `SIGUSR1`, `SIGUSR2` and
+`SIGTERM`, so `kill` does the same where the command cannot.
 
 ### `--lines` and `--per-line`: mutate what a change touched
 
@@ -138,6 +157,35 @@ names that isn't among the files given is a usage error. Which mutants a line
 keeps is fixed by a hash of each mutant, not by order, so the same code always
 keeps the same ones and `--journal` still finds them on a restart. The report
 counts only the mutants kept.
+
+### `--diff` and `--review`: review mode
+
+`--diff <ref>` works the lines out for you: it mutates only the lines changed
+since the merge base of `<ref>` and `HEAD`, uncommitted edits to tracked
+files included, with at most `--per-line` mutants a line (1 unless given).
+With no files on the command line it takes every Dart file under the
+package's `lib/` that the change touched, generated files left out; a file
+whose change only deleted lines has nothing new to mutate and is skipped.
+`--diff` and `--lines` both choose the lines, so they cannot be given
+together.
+
+```bash
+dart run dart_mutants --diff origin/main --review build/review.json \
+  --test-command "flutter test"
+```
+
+`--review <file>` (it needs `--diff`) writes each survivor that some test runs
+past without failing as a JSON list of `{path, line, body}`, ready to post as
+pull-request comments; `path` is relative to the git repository's top level.
+A survivor on a line no test executes is left out: that is line coverage's
+finding, not this one's. A review run exits 0 whatever the scores once the
+file is written — the comments are the finding — and
+`--fail-on-survivors` makes it exit 1 when any mutant survived, on a covered
+line or not.
+
+A change that only deletes lines, or touches no Dart file under `lib/`, says
+there is nothing new to mutate, writes an empty list (`[]`) to the review
+file, and exits 0. A ref git cannot resolve exits 2 with nothing measured.
 
 ## What it mutates
 

@@ -151,10 +151,18 @@ class SwitchedRunner {
   int _nextFile = 0;
   int _nextAlone = 0;
 
-  /// Why the run cannot be trusted, once a lane finds out.
+  /// Why the run cannot be trusted, once a lane finds out — see [_fail].
   String? _failure;
 
   bool get _stopped => _failure != null || (shouldStop?.call() ?? false);
+
+  /// Whether a test file or a mutant compiled alone is still unclaimed.
+  bool get _workLeft => _nextFile < _files.length || _nextAlone < _alone.length;
+
+  /// Each lane's wait for a slot, completed to end the wait once its
+  /// condition holds — see [_readyToRun].
+  final Map<Completer<void>, bool Function()> _slotWaits =
+      <Completer<void>, bool Function()>{};
 
   /// Runs [jobs]: `null` when each got a result or [shouldStop] ended the
   /// run, otherwise why the run stopped.
@@ -301,20 +309,31 @@ class SwitchedRunner {
 
   /// [lane] takes test files until none is left, then mutants to compile
   /// alone.
+  ///
+  /// It stops waiting for a slot once the other lanes have claimed the
+  /// last of the work, or the run stops: a slot that comes free hours later,
+  /// after another run on the machine is done with it, would otherwise hold
+  /// back a run whose results are all in.
   Future<void> _drain(_Lane lane) async {
     try {
-      while (!_stopped) {
-        await _readyToRun(lane);
-        // Stopped while it waited: [run] reports why.
-        if (_stopped) {
-          return;
+      while (!_stopped && _workLeft) {
+        final bool ready = await _readyToRun(
+          lane,
+          giveUpWhen: () => _stopped || !_workLeft,
+        );
+        // Stopped, or the work all claimed, while it waited: the loop's
+        // test ends it, and [run] reports why.
+        if (!ready || _stopped) {
+          continue;
         }
         if (_nextFile < _files.length) {
-          await _runFile(lane, _files[_nextFile++]);
+          final String file = _files[_nextFile++];
+          _wakeSlotWaits();
+          await _runFile(lane, file);
         } else if (_nextAlone < _alone.length) {
-          await _runAlone(lane, _alone[_nextAlone++]);
-        } else {
-          return;
+          final SwitchedJob job = _alone[_nextAlone++];
+          _wakeSlotWaits();
+          await _runAlone(lane, job);
         }
       }
     } finally {
@@ -325,8 +344,8 @@ class SwitchedRunner {
   /// [file] compiled and run unmutated, then once per switched mutant still
   /// waiting on it.
   Future<void> _runFile(_Lane lane, String file) async {
-    final Duration? unmutated = await _prepare(lane, file);
-    _unmutated[file]!.complete(unmutated);
+    final Duration? unmutated = await _unmutatedRun(lane, file);
+    // [_failure] says why, and the run stops with it.
     if (unmutated == null) {
       return;
     }
@@ -335,8 +354,8 @@ class SwitchedRunner {
       if (_settled.contains(job.id) || !_remaining[job.id]!.contains(file)) {
         continue;
       }
-      await _readyToRun(lane);
-      if (_stopped) {
+      // Stopped: [run] reports why.
+      if (!await _readyToRun(lane, giveUpWhen: () => _stopped) || _stopped) {
         return;
       }
       final int? exitCode = await _timed(
@@ -345,6 +364,30 @@ class SwitchedRunner {
       );
       _settle(job, file, exitCode, budget, lane.id);
     }
+  }
+
+  /// [_prepare]'s answer for [file], given to every lane waiting on it — an
+  /// environment failure on the way included, as `null` with [_failure]
+  /// saying why, so no lane waits on [file] forever.
+  Future<Duration?> _unmutatedRun(_Lane lane, String file) async {
+    Duration? unmutated;
+    try {
+      unmutated = await _prepare(lane, file);
+    } on FileSystemException catch (e) {
+      // Writing the lane's copy or the test entry failed: a full disk, say.
+      _fail(
+        '$file could not be written for a switched run: ${e.message} '
+        '(${e.path})',
+      );
+    } on ProcessException catch (e) {
+      _fail(
+        '$file could not be run in a switched run: ${e.executable} would not '
+        'start (${e.message})',
+      );
+    } finally {
+      _unmutated[file]!.complete(unmutated);
+    }
+    return unmutated;
   }
 
   /// Compiles [file] in [lane] and runs it unmutated: how long that run
@@ -362,20 +405,22 @@ class SwitchedRunner {
     final bool compiled = await _compileUnswitching(lane, file);
     stats.compiling += clock.elapsed;
     if (!compiled) {
-      _failure ??=
-          '$file does not compile in a switched run, though the test command '
-          'passed with it';
+      _fail(
+        '$file does not compile in a switched run, though the test command '
+        'passed with it',
+      );
       return null;
     }
     clock.reset();
     final int? exitCode = await lane.run(toolchain, null, testFileTimeout);
     stats.unmutated += clock.elapsed;
     if (exitCode != 0) {
-      _failure ??=
-          '$file ${exitCode == null ? 'did not finish within '
-                    '${testFileTimeout.inSeconds}s' : 'failed (exit $exitCode)'} '
-          'unmutated in a switched run, though the test command passed with '
-          'it';
+      _fail(
+        '$file ${exitCode == null ? 'did not finish within '
+                  '${testFileTimeout.inSeconds}s' : 'failed (exit $exitCode)'} '
+        'unmutated in a switched run, though the test command passed with '
+        'it',
+      );
       return null;
     }
     return clock.elapsed;
@@ -420,8 +465,10 @@ class SwitchedRunner {
           _giveBackSlot(lane);
         }
         final Duration? unmutated = await unmutatedRun.future;
-        await _readyToRun(lane);
-        if (unmutated == null || _stopped || _settled.contains(job.id)) {
+        if (unmutated == null ||
+            !await _readyToRun(lane, giveUpWhen: () => _stopped) ||
+            _stopped ||
+            _settled.contains(job.id)) {
           return;
         }
         final Duration budget = budgetFrom(unmutated);
@@ -442,21 +489,57 @@ class SwitchedRunner {
   }
 
   /// Waits until [lane] may run: the run not paused, and [lane] holding a
-  /// slot. Called only between runs, so neither a pause nor a wait for a
-  /// slot cuts a test file's run short, and no run's budget counts either.
-  Future<void> _readyToRun(_Lane lane) async {
+  /// slot — `true` then, or `false` once [giveUpWhen] holds while it waits
+  /// for a slot. Called only between runs, so neither a pause nor a wait for
+  /// a slot cuts a test file's run short, and no run's budget counts either.
+  Future<bool> _readyToRun(
+    _Lane lane, {
+    required bool Function() giveUpWhen,
+  }) async {
     await _waitOutPause(lane);
     final TestSlots? shared = slots;
-    while (shared != null && lane.slot == null && !_stopped) {
+    while (shared != null && lane.slot == null) {
+      if (giveUpWhen()) {
+        return false;
+      }
+      final Completer<void> giveUp = Completer<void>();
+      _slotWaits[giveUp] = giveUpWhen;
       _waitingForSlot += 1;
       _reportSlotWait();
-      lane.slot = await shared.acquire();
+      final TestSlot? slot = await shared.acquire(until: giveUp.future);
+      _slotWaits.remove(giveUp);
       _waitingForSlot -= 1;
+      if (slot == null) {
+        _reportSlotWait();
+        return false;
+      }
+      lane.slot = slot;
       _holding += 1;
       _reportSlotWait();
       // A pause that came during the wait gives the slot straight back.
       await _waitOutPause(lane);
     }
+    return true;
+  }
+
+  /// Ends each wait for a slot whose condition now holds. Called wherever
+  /// one can come to hold: work claimed, a mutant settled — which can stop
+  /// the run through [shouldStop] — and the run failing.
+  void _wakeSlotWaits() {
+    for (final MapEntry<Completer<void>, bool Function()> wait
+        in _slotWaits.entries.toList()) {
+      if (wait.value()) {
+        _slotWaits.remove(wait.key);
+        wait.key.complete();
+      }
+    }
+  }
+
+  /// Records why the run cannot be trusted — the first reason only — and
+  /// ends every lane's wait for a slot.
+  void _fail(String reason) {
+    _failure ??= reason;
+    _wakeSlotWaits();
   }
 
   /// Waits while [control] is paused, [lane]'s slot given back and its
@@ -527,6 +610,7 @@ class SwitchedRunner {
       lane,
       _spent[job.id] ?? Duration.zero,
     );
+    _wakeSlotWaits();
   }
 
   /// [jobs]' file switched with as many of them as still compile together:
