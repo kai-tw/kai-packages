@@ -90,9 +90,8 @@ void main() {
 
       // Both finish: the second waited for the slot, it was not refused.
       expect(codes, everyElement(anyOf(0, 1)));
-      expect(marker.readAsLinesSync(), contains('start one'));
-      expect(marker.readAsLinesSync(), contains('start two'));
-      expect(peakConcurrency(marker), 1);
+      expect(startedIds(marker), containsAll(<String>['one', 'two']));
+      expect(peakProcesses(marker), 1);
     },
     timeout: const Timeout(Duration(minutes: 4)),
   );
@@ -119,9 +118,9 @@ void main() {
       );
       await Future.wait(<Future<int>>[first.exitCode, second.exitCode]);
 
-      expect(peakConcurrency(marker), 2);
+      // Distinct test processes, not test files: one slot is one process.
+      expect(peakProcesses(marker), 2);
     },
-    skip: 'not implemented yet',
     timeout: const Timeout(Duration(minutes: 4)),
   );
 
@@ -139,9 +138,11 @@ void main() {
         workers: 'auto',
       );
       expect(await wide.exitCode, anyOf(0, 1));
-      expect(peakConcurrency(marker), 3);
+      // The baseline is one process running three files; the mutant phase
+      // opens one process per free slot.
+      expect(peakProcesses(marker), 3);
 
-      marker.writeAsStringSync('');
+      clearMarkers(marker);
       final Process narrow = await _start(
         three,
         marker: marker,
@@ -151,9 +152,8 @@ void main() {
         workers: 'auto',
       );
       expect(await narrow.exitCode, anyOf(0, 1));
-      expect(peakConcurrency(marker), 1);
+      expect(peakProcesses(marker), 1);
     },
-    skip: 'not implemented yet',
     timeout: const Timeout(Duration(minutes: 6)),
   );
 
@@ -172,7 +172,7 @@ void main() {
         );
         expect(await run.exitCode, anyOf(0, 1), reason: id);
       }
-      expect(marker.readAsLinesSync(), contains('start again2'));
+      expect(startedIds(marker), contains('again2'));
     },
     timeout: const Timeout(Duration(minutes: 4)),
   );
