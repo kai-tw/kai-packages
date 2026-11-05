@@ -149,19 +149,85 @@ void main() {
   );
 
   test(
-    '[S4] stop ends the run before the remaining mutants are scored, and '
-    'removes its run file',
+    '[S4] stop ends the run with exit 1 and a report that says it was '
+    'stopped, and removes its run file',
     () async {
       final Directory dir = await fixture();
-      final (Process, String) run = await _startRun(dir, marker);
+      final String output = p.join(scratch.path, 'stopped.json');
+      final (Process, String) run = await _startRun(
+        dir,
+        marker,
+        output: output,
+      );
       final String pid = run.$2;
 
       expect((await _control('stop', dir)).exitCode, 0);
-      await run.$1.exitCode;
+      expect(await run.$1.exitCode, 1);
 
+      final Map<String, Object?> report =
+          jsonDecode(File(output).readAsStringSync()) as Map<String, Object?>;
+      expect(report['abortKind'], 'stopped');
+      expect(report['abortReason'], contains('stopped after'));
       expect(File(p.join(_runsDir().path, '$pid.json')).existsSync(), isFalse);
     },
     timeout: const Timeout(Duration(minutes: 4)),
+  );
+
+  test(
+    '[S4] a paused run starts no new test file until it is resumed',
+    () async {
+      final Directory dir = await fixture();
+      final String output = p.join(scratch.path, 'held.json');
+
+      // Completes once [done] holds for the markers on disk.
+      Future<void> until(bool Function(List<MarkerEvent>) done) async {
+        final Completer<void> reached = Completer<void>();
+        void check() {
+          if (!reached.isCompleted && done(readMarkers(marker))) {
+            reached.complete();
+          }
+        }
+
+        final StreamSubscription<FileSystemEvent> watch = scratch
+            .watch()
+            .listen((_) => check());
+        try {
+          check();
+          await reached.future;
+        } finally {
+          await watch.cancel();
+        }
+      }
+
+      int starts() =>
+          readMarkers(marker).where((MarkerEvent e) => e.start).length;
+      bool idle(List<MarkerEvent> events) =>
+          events.where((MarkerEvent e) => e.start).length ==
+          events.where((MarkerEvent e) => !e.start).length;
+
+      final (Process, String) run = await _startRun(
+        dir,
+        marker,
+        output: output,
+      );
+      // Past the baseline and the coverage pass, which run in a process of
+      // their own each: from the third process on, mutants are being scored.
+      await until(
+        (List<MarkerEvent> e) =>
+            e.map((MarkerEvent x) => x.pid).toSet().length >= 3,
+      );
+      expect((await _control('pause', dir)).exitCode, 0);
+      // The test files already running finish; nothing new may begin.
+      await until(idle);
+      final int whenPaused = starts();
+      await Future<void>.delayed(const Duration(seconds: 5));
+      expect(starts(), whenPaused, reason: 'a test file began while paused');
+
+      expect((await _control('resume', dir)).exitCode, 0);
+      expect(await run.$1.exitCode, anyOf(0, 1));
+      expect(starts(), greaterThan(whenPaused));
+    },
+    timeout: const Timeout(Duration(minutes: 6)),
   );
 
   group('no single run to act on', () {

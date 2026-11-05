@@ -1,5 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:dart_mutants/src/runner/test_slot.dart';
+import 'package:dart_mutants/src/runner/test_slots.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -175,5 +178,69 @@ void main() {
       expect(startedIds(marker), contains('again2'));
     },
     timeout: const Timeout(Duration(minutes: 4)),
+  );
+
+  test(
+    '[S4] a run paused while it waits for a slot does not start its '
+    'baseline when the slot frees, only once it is resumed',
+    () async {
+      final Directory dir = await fixture('slot_paused');
+      final Directory runs = Directory(
+        p.join(cliEnvironment['XDG_CACHE_HOME']!, 'dart_mutants', 'runs'),
+      )..createSync(recursive: true);
+
+      // This process holds the only slot, so the run has to wait for it.
+      final TestSlot? held = await TestSlots(slotDir, 1).acquire();
+      expect(held, isNotNull);
+
+      final Completer<void> appeared = Completer<void>();
+      final StreamSubscription<FileSystemEvent> watch = runs.watch().listen((
+        FileSystemEvent e,
+      ) {
+        if (e is FileSystemCreateEvent &&
+            e.path.endsWith('.json') &&
+            !appeared.isCompleted) {
+          appeared.complete();
+        }
+      });
+      addTearDown(watch.cancel);
+      final Process run = await _start(
+        dir,
+        marker: marker,
+        id: 'waiting',
+        slotDir: slotDir,
+        slots: 1,
+      );
+      await appeared.future;
+      // Let the run get as far as waiting for the slot.
+      await Future<void>.delayed(const Duration(seconds: 6));
+
+      final ProcessResult pause = await Process.run(
+        'dart',
+        <String>['run', _binPath, 'pause'],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
+      expect(pause.exitCode, 0, reason: '${pause.stderr}');
+
+      held!.release();
+      await Future<void>.delayed(const Duration(seconds: 8));
+      expect(
+        startedIds(marker),
+        isEmpty,
+        reason: 'the baseline started while the run was paused',
+      );
+
+      final ProcessResult resume = await Process.run(
+        'dart',
+        <String>['run', _binPath, 'resume'],
+        workingDirectory: dir.path,
+        environment: cliEnvironment,
+      );
+      expect(resume.exitCode, 0, reason: '${resume.stderr}');
+      expect(await run.exitCode, anyOf(0, 1));
+      expect(startedIds(marker), contains('waiting'));
+    },
+    timeout: const Timeout(Duration(minutes: 5)),
   );
 }
