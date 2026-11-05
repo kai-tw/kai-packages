@@ -45,7 +45,11 @@ alike, with or without `--select-by-coverage`. Breaking:
   closed; the time paused counts against no budget and no pace. A run
   stopped this way, by `SIGTERM` or by Ctrl-C, ends with the new abortKind
   `stopped`, exit 1, its report still written to `--output` and
-  `--history`.
+  `--history`. A run file whose process has ended, or whose pid now belongs
+  to a process that started after the file was written, is deleted and
+  nothing is signalled. Where `ps` cannot run, every run file is taken for a
+  live run, so one left behind by a run that ended has to be deleted by
+  hand.
 - **Test slots, shared by every run on the machine.** A worker holds one
   while it compiles or runs a test file, and waits for a free one before it
   does; the baseline and the coverage pass hold one while they run, and a
