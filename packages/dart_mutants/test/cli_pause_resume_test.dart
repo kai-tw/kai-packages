@@ -326,14 +326,12 @@ void main() {
           '-f',
           '/dev/null',
         ]);
+        addTearDown(() => a.kill(ProcessSignal.sigkill));
         final Process b = await Process.start('tail', <String>[
           '-f',
           '/dev/null',
         ]);
-        addTearDown(() {
-          a.kill(ProcessSignal.sigkill);
-          b.kill(ProcessSignal.sigkill);
-        });
+        addTearDown(() => b.kill(ProcessSignal.sigkill));
         for (final Process fake in <Process>[a, b]) {
           File(p.join(_runsDir().path, '${fake.pid}.json')).writeAsStringSync(
             jsonEncode(<String, String>{
