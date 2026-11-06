@@ -70,6 +70,7 @@ void main() {
             'switchedRunUnavailable': 'switched-run-unavailable',
             'switchedRunFailed': 'switched-run-failed',
             'selectionUnavailable': 'selection-unavailable',
+            'stopped': 'stopped',
           },
         );
       },
