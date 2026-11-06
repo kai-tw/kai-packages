@@ -1,6 +1,6 @@
 import 'host_load.dart';
 import 'mutant_timing.dart';
-import 'schemata_stats.dart';
+import 'switched_stats.dart';
 
 /// What one run cost, and where the time went — collected as the run goes,
 /// and kept with its report so later runs have something to compare
@@ -23,7 +23,7 @@ class RunStats {
   /// `MutationTestRunner.run` for the keys.
   final Map<String, Object?> environment;
 
-  final HostLoad? loadAtStart;
+  HostLoad? loadAtStart;
   HostLoad? loadAtEnd;
 
   Duration? baseline;
@@ -33,18 +33,11 @@ class RunStats {
 
   Duration? coveragePass;
 
-  /// Making the workers' sandboxes — see `MutationTestRunner.workers`.
-  Duration? sandboxSetup;
-
   /// How many workers ran the mutants.
   int? workers;
 
-  /// Each sandboxed worker's own disk use when the last mutant finished,
-  /// links not counted. Empty when the mutants ran in the package itself.
-  List<int>? workerDiskBytes;
-
-  /// The switched-file pass, when one ran — see `SchemataRunner`.
-  SchemataStats? schemata;
+  /// The switched run, when one ran — see `SwitchedRunner`.
+  SwitchedStats? switched;
 
   final List<MutantTiming> mutants = <MutantTiming>[];
 
@@ -64,8 +57,7 @@ class RunStats {
     'operators': _breakdown((MutantTiming m) => m.result.mutant.operatorName),
     'selection': _selection(),
     if (workers != null) 'workers': workers,
-    if (workerDiskBytes != null) 'workerDiskBytes': workerDiskBytes,
-    if (schemata != null) 'schemata': schemata!.toJson(),
+    if (switched != null) 'switched': switched!.toJson(),
     'mutants': mutants.map((MutantTiming m) => m.toJson()).toList(),
   };
 
@@ -75,7 +67,6 @@ class RunStats {
       'baselineSeconds': baseline,
       'gateCheckSeconds': gateCheck,
       'coveragePassSeconds': coveragePass,
-      'sandboxSetupSeconds': sandboxSetup,
     }.entries)
       if (phase.value case final Duration took) phase.key: _s(took),
     'mutantsSeconds': _s(_sum(mutants, (MutantTiming m) => m.elapsed)),
@@ -98,25 +89,9 @@ class RunStats {
     };
   }
 
-  Map<String, Object?> _selection() {
-    final List<MutantTiming> measured = mutants
-        .where((MutantTiming m) => m.measurement != null)
-        .toList();
-    final List<MutantTiming> retried = mutants
-        .where((MutantTiming m) => m.retry != null)
-        .toList();
-    return <String, Object?>{
-      'selectedMutants': mutants.where((MutantTiming m) => m.selected).length,
-      'measuredSelections': measured.length,
-      'measurementSeconds': _s(
-        _sum(measured, (MutantTiming m) => m.measurement ?? Duration.zero),
-      ),
-      'fullCommandRetries': retried.length,
-      'retrySeconds': _s(
-        _sum(retried, (MutantTiming m) => m.retry ?? Duration.zero),
-      ),
-    };
-  }
+  Map<String, Object?> _selection() => <String, Object?>{
+    'selectedMutants': mutants.where((MutantTiming m) => m.selected).length,
+  };
 
   static Map<String, int> _counts(List<MutantTiming> group) {
     final Map<String, int> counts = <String, int>{};

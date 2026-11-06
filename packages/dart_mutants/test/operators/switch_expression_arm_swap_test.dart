@@ -44,6 +44,23 @@ String f(int x) => switch (x) {
     },
   );
 
+  test(
+    '[boundary] two arms with one result propose nothing — the swap would '
+    'leave the code byte-identical, a survivor no test could catch',
+    () {
+      expect(
+        _mutate('''
+String f(int x) => switch (x) {
+  1 => 'small',
+  2 => 'small',
+  _ => 'big',
+};
+''').map((Mutant m) => m.description),
+        everyElement(isNot(contains("'small' replaced with 'small'"))),
+      );
+    },
+  );
+
   test('[boundary] a single-arm switch expression has no neighbour', () {
     expect(
       _mutate('''

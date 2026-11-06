@@ -32,6 +32,14 @@ void main() {
     expect(m.operatorName, 'ternary_swap');
   });
 
+  test(
+    '[boundary] a ternary whose two branches read the same proposes '
+    'nothing — swapped, the code would be byte-identical',
+    () {
+      expect(_mutate('int f(bool a) => a ? 1 : 1;'), isEmpty);
+    },
+  );
+
   test('[boundary] a non-ternary conditional expression is untouched', () {
     expect(_mutate('bool f(bool a, bool b) => a && b;'), isEmpty);
   });

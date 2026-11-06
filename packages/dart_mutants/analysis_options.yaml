@@ -1,3 +1,14 @@
 # Extends the workspace configuration rather than replacing it, so this package
 # is held to the same rules as everything else here.
 include: ../../analysis_options.yaml
+
+analyzer:
+  errors:
+    # dart_mutants compiles every test file it scores into a program that
+    # drives `package:test_core` and `package:test_api` through their own
+    # `src/` libraries (see `switched_suite.dart`): there is no public
+    # interface that runs a test file in-process the way `dart test` does.
+    # The reach is confined to that library and `mutation_test_runner.dart`,
+    # and a release of either dependency that moves them fails the compile
+    # of the entry before the first mutant runs.
+    implementation_imports: ignore

@@ -1,10 +1,6 @@
 import 'mutant_result.dart';
 
-/// Where one mutant's time went.
-///
-/// Kept for every mutant, `detected` ones included, because a run's
-/// statistics are there to be compared across runs: which mutants are
-/// slow, which operators produce `invalid` ones, what a selection saves.
+/// Where one mutant's time went, for [RunStats](run_stats.dart).
 class MutantTiming {
   const MutantTiming({
     required this.result,
@@ -12,45 +8,25 @@ class MutantTiming {
     this.worker = 0,
     required this.gate,
     required this.selected,
-    this.switched = false,
-    this.measurement,
     this.test,
-    this.retry,
   });
 
   final MutantResult result;
 
-  /// Which worker ran it, numbered from 0.
+  /// The lane that ran it; 0 for one that never ran a test.
   final int worker;
 
-  /// Everything: writing the mutant, the gate, any test runs, the restore.
+  /// Its gate check plus its own test runs.
   final Duration elapsed;
 
-  /// The compile-safety gate's answer.
   final Duration gate;
 
-  /// Whether the mutant ran only the test files selected for it. `false` for
-  /// one that ran the full command, and for one that ran nothing.
+  /// Whether coverage chose its test files.
   final bool selected;
 
-  /// Whether it ran in a switched file rather than through the test command
-  /// — see `SchemataRunner`. Its [test] is then its own runs alone; compiling
-  /// and the unmutated runs are shared, and counted in `RunStats.schemata`.
-  final bool switched;
-
-  /// Measuring the selection's own budget, when this mutant was the first to
-  /// need it — `null` otherwise.
-  final Duration? measurement;
-
-  /// The first test run — `null` when none ran.
+  /// Its own test runs, summed; `null` when it ran none.
   final Duration? test;
 
-  /// The full-command run asked after a selected run that ended without a
-  /// verdict — `null` when there was none.
-  final Duration? retry;
-
-  /// The bucket a statistic counts this mutant under: its verdict's name, or
-  /// `uncovered` for an undetected mutant no test enters.
   String get bucket => result.uncovered ? 'uncovered' : result.verdict.name;
 
   Map<String, Object?> toJson() => <String, Object?>{
@@ -63,13 +39,9 @@ class MutantTiming {
     'seconds': seconds(elapsed),
     'gateSeconds': seconds(gate),
     'selected': selected,
-    if (switched) 'switched': true,
-    if (measurement != null) 'measurementSeconds': seconds(measurement!),
     if (test != null) 'testSeconds': seconds(test!),
-    if (retry != null) 'retrySeconds': seconds(retry!),
     if (result.timeout != null) 'timeoutSeconds': seconds(result.timeout!),
   };
 
-  /// Millisecond precision, the same as the rest of the report.
   static double seconds(Duration d) => d.inMilliseconds / 1000;
 }

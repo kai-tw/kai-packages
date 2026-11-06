@@ -108,6 +108,7 @@ void main() {
           '-c',
           _spawnerScript(pidFile),
         ]);
+        addTearDown(() => process.kill(ProcessSignal.sigkill));
         unawaited(process.stdout.drain<void>());
         unawaited(process.stderr.drain<void>());
         final int grandchild = await recordedGrandchildPid();
@@ -282,6 +283,7 @@ void main() {
         '-c',
         _spawnerScript(pidFile),
       ]);
+      addTearDown(() => process.kill(ProcessSignal.sigkill));
       unawaited(process.stdout.drain<void>());
       unawaited(process.stderr.drain<void>());
       final File file = File(pidFile);
@@ -334,6 +336,7 @@ void main() {
         '-c',
         _spawnerScript(pidFile),
       ]);
+      addTearDown(() => process.kill(ProcessSignal.sigkill));
       unawaited(process.stdout.drain<void>());
       unawaited(process.stderr.drain<void>());
       final File file = File(pidFile);

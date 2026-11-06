@@ -7,44 +7,31 @@ import '../mutant.dart';
 import 'coverage_map.dart';
 import 'line_range.dart';
 import 'mutant_scope.dart';
-import 'process_command.dart';
 import 'suite_coverage.dart';
 import 'temp_space.dart';
 import 'test_invocation.dart';
+import 'worker_sandbox.dart';
 
 /// A [CoverageMap] and the invocation it was collected through: together,
 /// how to run only the tests that cover a given mutant.
 class TestSelection {
-  TestSelection(this.invocation, this.map)
-    : _root = _resolved(p.absolute(invocation.root));
+  TestSelection(this.invocation, this.map) : _root = realPath(invocation.root);
 
   final TestInvocation invocation;
   final CoverageMap map;
   final String _root;
 
-  /// The command for [mutant], whose enclosing function spans [scope] (see
-  /// [executableScope]), or `null` to mean no test enters that function and
-  /// the mutant needs no run at all. [fullCommand] when there is no scope,
-  /// or coverage says nothing about it.
-  ProcessCommand? commandFor(
-    Mutant mutant,
-    LineRange? scope,
-    ProcessCommand fullCommand,
-  ) => switch (testsFor(mutant, scope)) {
-    null => fullCommand,
-    [] => null,
-    final List<String> tests => invocation.withTestFiles(tests),
-  };
-
-  /// The test files [commandFor] selects, relative to the package and
-  /// sorted: `null` for the full command, empty for none.
+  /// The test files that enter the function around [mutant], which spans
+  /// [scope] (see [executableScope]), relative to the package and sorted:
+  /// empty when no test enters it, and `null` when there is no scope or
+  /// coverage says nothing about it.
   List<String>? testsFor(Mutant mutant, LineRange? scope) {
     if (scope == null) {
       return null;
     }
     final String file = p.posix.joinAll(
       p.split(
-        p.relative(_resolved(p.absolute(mutant.filePath)), from: _root),
+        p.relative(realPath(mutant.filePath), from: _root),
       ),
     );
     return map.testsFor(file, scope.start, scope.end)?.toList()?..sort();
@@ -57,18 +44,6 @@ class TestSelection {
   bool speaksFor(String source) =>
       invocation.runner == TestRunner.dart ||
       !source.contains('coverage:ignore');
-
-  /// [path] with symlinks resolved when it exists — `/tmp` against
-  /// `/private/tmp` on macOS would otherwise miss every key, silently.
-  static String _resolved(String path) {
-    final FileSystemEntityType type = FileSystemEntity.typeSync(path);
-    if (type == FileSystemEntityType.notFound) {
-      return p.normalize(path);
-    }
-    return type == FileSystemEntityType.directory
-        ? Directory(path).resolveSymbolicLinksSync()
-        : File(path).resolveSymbolicLinksSync();
-  }
 }
 
 /// Runs the coverage pass: every test file of [invocation], with coverage
@@ -159,7 +134,7 @@ String? _refusal(
     return 'the test command names no *_test.dart files';
   }
   return _commandRefusal(invocation) ??
-      _configRefusal(invocation) ??
+      configRefusal(invocation) ??
       (invocation.runner == TestRunner.flutter &&
               _importsLibByPath(invocation.root, testFiles)
           ? 'a test imports lib/ by relative path, whose coverage '
@@ -186,7 +161,7 @@ String? _commandRefusal(TestInvocation invocation) {
 
 /// `dart_test.yaml` keys that change which files run, or where. `paths`
 /// only matters when the command names none of its own.
-String? _configRefusal(TestInvocation invocation) {
+String? configRefusal(TestInvocation invocation) {
   final File config = File(p.join(invocation.root, 'dart_test.yaml'));
   if (!config.existsSync()) {
     return null;

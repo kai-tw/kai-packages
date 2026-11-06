@@ -54,53 +54,43 @@ void main() {
   tearDown(() => root.deleteSync(recursive: true));
 
   test(
-    '[partition] a scope some tests entered runs exactly those, sorted, '
-    'with the command\'s own flags kept',
+    '[partition] a scope some tests entered selects exactly those, '
+    'sorted',
     () {
-      final ProcessCommand command = selection.commandFor(
-        _mutantIn(p.join(root.path, 'lib', 'foo.dart')),
-        const LineRange(1, 3),
-        full,
-      )!;
-
-      expect(command.arguments, <String>[
-        'test',
-        '--fail-fast',
-        'test/a_test.dart',
-        'test/b_test.dart',
-      ]);
-      expect(command.workingDirectory, root.path);
+      expect(
+        selection.testsFor(
+          _mutantIn(p.join(root.path, 'lib', 'foo.dart')),
+          const LineRange(1, 3),
+        ),
+        <String>['test/a_test.dart', 'test/b_test.dart'],
+      );
     },
   );
 
-  test('[partition] a scope nobody entered needs no run — null', () {
+  test('[partition] a scope nobody entered selects nothing', () {
     expect(
-      selection.commandFor(
+      selection.testsFor(
         _mutantIn(p.join(root.path, 'lib', 'foo.dart')),
         const LineRange(5, 6),
-        full,
       ),
-      isNull,
+      isEmpty,
     );
   });
 
   test(
-    '[boundary] no scope, or a scope nothing reported, runs the full command',
+    '[boundary] no scope, or a scope nothing reported, selects nothing it can '
+    'vouch for — null, so the mutant runs every test file',
     () {
       final Mutant mutant = _mutantIn(p.join(root.path, 'lib', 'foo.dart'));
 
-      expect(selection.commandFor(mutant, null, full), same(full));
+      expect(selection.testsFor(mutant, null), isNull);
+      expect(selection.testsFor(mutant, const LineRange(20, 30)), isNull);
       expect(
-        selection.commandFor(mutant, const LineRange(20, 30), full),
-        same(full),
-      );
-      expect(
-        selection.commandFor(
+        selection.testsFor(
           _mutantIn(p.join(root.path, 'lib', 'other.dart')),
           const LineRange(1, 3),
-          full,
         ),
-        same(full),
+        isNull,
       );
     },
   );
@@ -115,12 +105,10 @@ void main() {
 
       expect(
         selection
-            .commandFor(
+            .testsFor(
               _mutantIn(p.join('lib', 'foo.dart')),
               const LineRange(1, 3),
-              full,
             )!
-            .arguments
             .last,
         'test/b_test.dart',
       );
@@ -130,7 +118,7 @@ void main() {
   test(
     '[boundary] a mutant reached through a symlinked path still finds its '
     'key — /tmp against /private/tmp would otherwise miss every one, and '
-    'every mutant would silently run in full',
+    'every mutant would silently run every test file',
     () {
       final Directory links = Directory.systemTemp.createTempSync(
         'test_selection_link_',
@@ -138,14 +126,13 @@ void main() {
       addTearDown(() => links.deleteSync(recursive: true));
       final Link link = Link(p.join(links.path, 'pkg'))..createSync(root.path);
 
-      final ProcessCommand? command = selection.commandFor(
-        _mutantIn(p.join(link.path, 'lib', 'foo.dart')),
-        const LineRange(1, 3),
-        full,
+      expect(
+        selection.testsFor(
+          _mutantIn(p.join(link.path, 'lib', 'foo.dart')),
+          const LineRange(1, 3),
+        ),
+        isNotEmpty,
       );
-
-      expect(command, isNot(same(full)));
-      expect(command, isNotNull);
     },
   );
 }

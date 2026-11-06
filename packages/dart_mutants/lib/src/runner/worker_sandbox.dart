@@ -3,7 +3,6 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
-import 'process_command.dart';
 import 'temp_space.dart';
 
 /// A package directory for one parallel worker, made almost entirely of
@@ -27,14 +26,13 @@ import 'temp_space.dart';
 /// test on the VM does not read and Flutter's tooling may write to.
 ///
 /// Measured on a small Flutter package: the worker's own files came to a few
-/// kilobytes, and `flutter test` then wrote 46MB of its own `build/` into
-/// it. A `dart test` worker's `.dart_tool/` grows by the compiled test
-/// runner, about 30MB on a small package, and by the kernel cache that is
-/// cleared before every mutant anyway.
+/// kilobytes. A switched run compiles into a directory of its own, so the
+/// copy grows only by the one test entry it writes.
 ///
 /// Nothing is ever written through a link: [write] refuses one.
 class WorkerSandbox {
-  WorkerSandbox._(this.id, this.root, this.directory);
+  WorkerSandbox._(this.id, this.root, this.directory)
+    : _realRoot = realPath(root);
 
   /// Creates worker [id] for the package at [root], with a real copy of each
   /// of [targets] (paths under [root]), in a directory from [temps].
@@ -54,13 +52,13 @@ class WorkerSandbox {
     final WorkerSandbox sandbox = WorkerSandbox._(
       id,
       source,
-      temps.create('worker$id').resolveSymbolicLinksSync(),
+      realPath(temps.create('worker$id').path),
     );
     final Set<String> mirrored = <String>{
       'lib',
       'test',
       for (final String target in targets)
-        p.split(p.relative(p.absolute(target), from: source)).first,
+        p.split(p.relative(realPath(target), from: realPath(source))).first,
     };
     sandbox
       .._linkTopLevel(mirrored, skip: flutter ? _flutterSkipped : _skipped)
@@ -94,34 +92,16 @@ class WorkerSandbox {
   /// The real package's directory.
   final String root;
 
+  /// [root] with its symbolic links resolved, which [pathFor] maps from.
+  final String _realRoot;
+
   /// This worker's copy of it.
   final String directory;
 
-  /// Where [path], a file of the real package, is in this worker.
+  /// Where [path], a file of the real package, is in this worker — whether
+  /// or not it was given through a symbolic link.
   String pathFor(String path) =>
-      p.join(directory, p.relative(p.absolute(path), from: root));
-
-  /// [command] run in this worker instead of the real package: the working
-  /// directory moved, any argument naming a path inside the package moved
-  /// with it, and — under `flutter test` — `--no-pub`, since the copied
-  /// `pubspec.yaml` would otherwise look newer than the package config and
-  /// send Flutter to `pub get` in the middle of the run.
-  ProcessCommand commandFor(ProcessCommand command, {required bool flutter}) =>
-      ProcessCommand(
-        command.executable,
-        <String>[
-          // Absolute paths only. A relative one already resolves against the
-          // worker, and `p.isWithin` would read one against this process's
-          // working directory — which, run from the package, turns the
-          // `test` subcommand itself into a path.
-          for (final String argument in command.arguments)
-            p.isAbsolute(argument) && p.isWithin(root, argument)
-                ? pathFor(argument)
-                : argument,
-          if (flutter && !command.arguments.contains('--no-pub')) '--no-pub',
-        ],
-        workingDirectory: directory,
-      );
+      p.join(directory, p.relative(realPath(path), from: _realRoot));
 
   /// Writes [content] to [path], a file in this worker. Refuses a link:
   /// writing through one would change the real package.
@@ -291,4 +271,28 @@ class WorkerSandbox {
     );
     return shared.existsSync() ? shared : null;
   }
+}
+
+/// [path], absolute and normalised, with every symbolic link in the part of
+/// it that exists resolved: `/var/…` and `/private/var/…` name one file on
+/// macOS, and a package's own directory is often given one way and its
+/// files the other.
+String realPath(String path) {
+  final String absolute = p.normalize(p.absolute(path));
+  // A file's own link is kept: only the directories it sits in are
+  // resolved, so a linked target stays a file of this package.
+  if (FileSystemEntity.isFileSync(absolute)) {
+    return p.join(realPath(p.dirname(absolute)), p.basename(absolute));
+  }
+  final List<String> missing = <String>[];
+  String existing = absolute;
+  while (FileSystemEntity.typeSync(existing) == FileSystemEntityType.notFound &&
+      p.dirname(existing) != existing) {
+    missing.insert(0, p.basename(existing));
+    existing = p.dirname(existing);
+  }
+  return p.joinAll(<String>[
+    Directory(existing).resolveSymbolicLinksSync(),
+    ...missing,
+  ]);
 }

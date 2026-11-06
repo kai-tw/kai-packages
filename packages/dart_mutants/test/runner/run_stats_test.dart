@@ -4,6 +4,7 @@ import 'package:dart_mutants/src/runner/mutant_result.dart';
 import 'package:dart_mutants/src/runner/mutant_timing.dart';
 import 'package:dart_mutants/src/runner/mutant_verdict.dart';
 import 'package:dart_mutants/src/runner/run_stats.dart';
+import 'package:dart_mutants/src/runner/switched_stats.dart';
 import 'package:test/test.dart';
 
 Mutant _mutant(String operatorName, int line) => Mutant(
@@ -24,8 +25,6 @@ MutantTiming _timing(
   required int ms,
   bool uncovered = false,
   bool selected = false,
-  int? measurementMs,
-  int? retryMs,
   int worker = 0,
 }) => MutantTiming(
   worker: worker,
@@ -40,13 +39,9 @@ MutantTiming _timing(
   elapsed: Duration(milliseconds: ms),
   gate: const Duration(milliseconds: 5),
   selected: selected,
-  measurement: measurementMs == null
-      ? null
-      : Duration(milliseconds: measurementMs),
   test: verdict == MutantVerdict.invalid || uncovered
       ? null
       : Duration(milliseconds: ms - 5),
-  retry: retryMs == null ? null : Duration(milliseconds: retryMs),
 );
 
 RunStats _stats() =>
@@ -57,9 +52,13 @@ RunStats _stats() =>
       )
       ..baseline = const Duration(milliseconds: 1500)
       ..gateCheck = const Duration(milliseconds: 40)
-      ..sandboxSetup = const Duration(milliseconds: 250)
       ..workers = 2
-      ..workerDiskBytes = <int>[1024, 2048]
+      ..switched = (SwitchedStats()
+        ..switched = 3
+        ..alone = 1
+        ..aloneFor('constant context')
+        ..compiledTestFiles = 2
+        ..workerDiskBytes = <int>[1024, 2048])
       ..finishedAt = DateTime.utc(2026, 9, 17, 1, 0, 10)
       ..mutants.addAll(<MutantTiming>[
         _timing(
@@ -67,7 +66,6 @@ RunStats _stats() =>
           MutantVerdict.detected,
           ms: 2000,
           selected: true,
-          measurementMs: 900,
           worker: 1,
         ),
         _timing('ternary_swap', MutantVerdict.invalid, ms: 10),
@@ -76,7 +74,6 @@ RunStats _stats() =>
           MutantVerdict.undetected,
           ms: 3000,
           selected: true,
-          retryMs: 1200,
         ),
         _timing(
           'statement_deletion',
@@ -108,7 +105,6 @@ void main() {
     expect(json['phases'], <String, Object?>{
       'baselineSeconds': 1.5,
       'gateCheckSeconds': 0.04,
-      'sandboxSetupSeconds': 0.25,
       'mutantsSeconds': 35.017,
     });
   });
@@ -146,14 +142,8 @@ void main() {
     );
   });
 
-  test('[partition] what selection cost and how often it fell back', () {
-    expect(json['selection'], <String, Object?>{
-      'selectedMutants': 2,
-      'measuredSelections': 1,
-      'measurementSeconds': 0.9,
-      'fullCommandRetries': 1,
-      'retrySeconds': 1.2,
-    });
+  test('[partition] how many mutants coverage chose test files for', () {
+    expect(json['selection'], <String, Object?>{'selectedMutants': 2});
   });
 
   test('[state] every mutant is listed, detected ones included, with only '
@@ -170,7 +160,6 @@ void main() {
       'seconds': 2,
       'gateSeconds': 0.005,
       'selected': true,
-      'measurementSeconds': 0.9,
       'testSeconds': 1.995,
       'timeoutSeconds': 30,
     });
@@ -187,9 +176,18 @@ void main() {
     });
   });
 
-  test('[partition] how many workers ran, and what each held on disk', () {
+  test('[partition] how many workers ran, and what the switched run did', () {
     expect(json['workers'], 2);
-    expect(json['workerDiskBytes'], <int>[1024, 2048]);
+    expect(json['switched'], <String, Object?>{
+      'switched': 3,
+      'alone': 1,
+      'aloneReasons': <String, int>{'constant context': 1},
+      'compiledTestFiles': 2,
+      'switchSeconds': 0,
+      'compileSeconds': 0,
+      'unmutatedSeconds': 0,
+      'workerDiskBytes': <int>[1024, 2048],
+    });
   });
 
   test('[boundary] an unfinished run has no end and no wall time', () {

@@ -1,9 +1,9 @@
 import '../mutant.dart';
 
-/// One mutant the gate accepted, with the test files selected for it — what
-/// `SchemataRunner` runs.
-class SchemataJob {
-  const SchemataJob(this.id, this.mutant, this.source, this.tests);
+/// One mutant the gate accepted, with the test files it runs against — what
+/// a `SwitchedRunner` runs.
+class SwitchedJob {
+  const SwitchedJob(this.id, this.mutant, this.source, this.tests);
 
   /// Unique within the run; the value `DART_MUTANTS_ID` takes.
   final int id;

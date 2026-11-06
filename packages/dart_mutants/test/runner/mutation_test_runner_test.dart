@@ -19,6 +19,8 @@ import 'package:dart_mutants/src/version.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+import '../support/fixture_pubspec.dart';
+
 /// A real temp Dart package — `pubspec.yaml`, `dart pub get`, real `lib/`
 /// and `test/` files — because the property under test (a mutant that
 /// fails to compile must never read as "detected") only actually exists at
@@ -38,7 +40,7 @@ environment:
   sdk: ^3.8.0
 dev_dependencies:
   test: ^1.25.0
-''');
+$dartMutantsDevDependency''');
   Directory(p.join(dir.path, 'lib')).createSync();
   Directory(p.join(dir.path, 'test')).createSync();
 
@@ -539,20 +541,17 @@ void main() {
     );
 
     test(
-      '[partition] a hung mutant still gets its file restored — the kill '
-      'happens in _runOne\'s try block, and restore runs in its finally '
-      'regardless',
+      '[partition] the package is never written to, a hung mutant\'s file '
+      'included — every mutant runs in a copy',
       () {
         expect(
           File(p.join(dir.path, 'lib', 'hangs.dart')).readAsStringSync(),
           contains("takeSafePath ? 'ok' : hang()"),
         );
-      },
-    );
-
-    test(
-      '[partition] every mutated file ends the run back at its own original content',
-      () {
+        expect(
+          File(p.join(dir.path, 'dart_mutants_test_entry.dart')).existsSync(),
+          isFalse,
+        );
         expect(
           File(p.join(dir.path, 'lib', 'detected.dart')).readAsStringSync(),
           "String classify(bool isPositive) => isPositive ? 'positive' : 'negative';\n",
@@ -562,6 +561,111 @@ void main() {
           contains("a ?? 'the default'"),
         );
       },
+    );
+
+    test(
+      '[partition] every mutant ran as a switched file — no mutant here '
+      'needs compiling alone',
+      () {
+        expect(report.stats!.switched!.switched, greaterThan(0));
+        expect(report.stats!.switched!.alone, 0);
+      },
+    );
+  }, timeout: const Timeout(Duration(minutes: 3)));
+
+  group('a mutant that cannot be switched', () {
+    test(
+      '[partition] is compiled alone and scored the same way, beside the '
+      'switched ones',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+        // The ternary sits in a constant context, which cannot read the
+        // environment; the comparison beside it can be switched.
+        File(p.join(dir.path, 'lib', 'constant.dart')).writeAsStringSync('''
+const bool wide = true;
+
+int width(int x) {
+  const List<int> pad = <int>[wide ? 2 : 0];
+  return x > 0 ? x + pad.first : 0;
+}
+''');
+        File(p.join(dir.path, 'test', 'constant_test.dart')).writeAsStringSync(
+          '''
+import 'package:fixture/constant.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('pads', () => expect(width(1), 3));
+  test('zero', () => expect(width(0), 0));
+}
+''',
+        );
+        final MutationRunReport report = await _runnerFor(dir).run(<String>[
+          p.join(dir.path, 'lib', 'constant.dart'),
+        ]);
+
+        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(report.stats!.switched!.alone, greaterThan(0));
+        expect(
+          report.stats!.switched!.aloneReasons.keys,
+          contains('constant context'),
+        );
+        expect(report.stats!.switched!.switched, greaterThan(0));
+        final FileMutationReport f = _reportFor(report, 'constant.dart');
+        // The constant ternary's swap pads by 0: caught. Every other
+        // mutant here is caught too, by one test or the other.
+        expect(f.undetected, 0);
+        expect(f.detected, greaterThan(1));
+        expect(
+          File(p.join(dir.path, 'lib', 'constant.dart')).readAsStringSync(),
+          contains('<int>[wide ? 2 : 0]'),
+        );
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  });
+
+  group('a switch that changes an inferred type', () {
+    test(
+      '[decision] breaks a test file\'s compile while its own file compiles: '
+      'its mutants are compiled alone and scored, rather than the run '
+      'stopping',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+        // Switched, `given ?? 'none'` reads as `String?`, so `label` is
+        // inferred nullable — fine here, and an error in the test, which
+        // calls `.length` on it.
+        File(p.join(dir.path, 'lib', 'inferred.dart')).writeAsStringSync('''
+String? given = 'set';
+final label = given ?? 'none';
+''');
+        File(p.join(dir.path, 'test', 'inferred_test.dart')).writeAsStringSync(
+          '''
+import 'package:fixture/inferred.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('label', () => expect(label.length, 3));
+}
+''',
+        );
+
+        final MutationRunReport report = await _runnerFor(dir).run(<String>[
+          p.join(dir.path, 'lib', 'inferred.dart'),
+        ]);
+
+        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(
+          report.stats!.switched!.aloneReasons.keys,
+          contains('breaks a test file switched'),
+        );
+        final FileMutationReport f = _reportFor(report, 'inferred.dart');
+        expect(f.undetected, 0, reason: f.toJson().toString());
+        expect(f.detected + f.invalid, greaterThan(0));
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
     );
   });
 
@@ -909,7 +1013,7 @@ void main() {
 
     test(
       '[boundary] a file no test loads has no coverage data at all, so its '
-      'mutant runs the full command and is NOT marked uncovered — absence '
+      'mutant runs every test file and is NOT marked uncovered — absence '
       'from a report is not evidence',
       () {
         final FileMutationReport f = _reportFor(report, 'undetected.dart');
@@ -941,7 +1045,7 @@ environment:
   sdk: ^3.8.0
 dev_dependencies:
   test: ^1.25.0
-''');
+$dartMutantsDevDependency''');
       // Line 2 runs, and the VM reports it at ZERO hits when `b` is true:
       // its only instrumented point is the call to `g`, skipped. Its
       // ternary swap is caught by the test all the same.
@@ -1053,8 +1157,9 @@ void main() {
     );
 
     test(
-      '[decision] a selected run that runs no test at all is asked of the '
-      'full command, rather than its exit 79 being read as a detection',
+      '[decision] a selected test file that declares no test passes with the '
+      'mutant on, as it does under the test command — the mutant survives '
+      'rather than being read as a detection',
       () {
         final FileMutationReport f = _reportFor(report, 'declared.dart');
         expect(<int>[f.detected, f.undetected, f.uncovered], <int>[0, 1, 0]);
@@ -1072,21 +1177,22 @@ void main() {
 
     test(
       '[state] a test file that reaches neither target runs only in the full '
-      'runs — the baseline, the coverage pass, and the one retry of the '
-      'mutant whose selected files ran no test',
+      'runs — the baseline and the coverage pass — and is never compiled for '
+      'a mutant',
       () {
         expect(
           File(p.join(dir.path, 'canary.log')).readAsStringSync().length,
-          3,
+          2,
         );
       },
     );
   });
 
-  group('a selected mutant\'s own budget', () {
-    // The full suite sleeps 4s in a test file that reaches no target, so the
-    // full budget is at least 12s more than any selection's. The floor is
-    // 1s, so every budget here is derived rather than floored.
+  group('each test file\'s own budget', () {
+    // A test file that reaches no target sleeps 4s; the others take well
+    // under a second. A mutant's budget on a file comes from that file's own
+    // unmutated run, never less than it plus the 1s floor plus the 30s
+    // package:test gives a test that awaits forever.
     late Directory dir;
     late Directory temps;
     late MutationRunReport report;
@@ -1110,8 +1216,8 @@ void main() {
   });
 }
 ''');
-      // Two mutants in one function, so one selection: its budget is to be
-      // measured once. The test file counts how often it is loaded.
+      // Two mutants in one function, so one selection: both run against the
+      // one test file. The test file counts how often it is loaded.
       File(p.join(dir.path, 'lib', 'twice.dart')).writeAsStringSync(
         "String pick(bool a, bool b) => a ? (b ? 'x' : 'y') : 'z';\n",
       );
@@ -1162,21 +1268,21 @@ void main() {
     });
 
     test(
-      '[decision] a mutant that hangs its selection times out at that '
-      'selection\'s budget, well under the full command\'s',
+      '[decision] a mutant that hangs its test file times out at that file\'s '
+      'budget: its unmutated run, plus the floor, plus package:test\'s 30s',
       () {
         final MutantResult hung = _reportFor(
           report,
           'hangs.dart',
         ).timedOutMutants.single;
-        expect(hung.timeout, lessThan(report.mutantTimeout!));
-        expect(hung.timeout, greaterThan(const Duration(seconds: 1)));
+        expect(hung.timeout, greaterThan(const Duration(seconds: 31)));
+        expect(hung.timeout, lessThan(const Duration(seconds: 35)));
       },
     );
 
     test(
-      '[decision] a selected mutant that runs to a verdict carries its '
-      'selection\'s budget too',
+      '[decision] mutants run against the same test file get the same '
+      'budget',
       () {
         final FileMutationReport f = _reportFor(report, 'twice.dart');
         expect(<int>[f.detected, f.undetected], <int>[2, 0]);
@@ -1189,14 +1295,13 @@ void main() {
             .map((MutantProgress m) => m.result.timeout)
             .toList();
         expect(budgets.toSet(), hasLength(1));
-        expect(budgets.first, lessThan(report.mutantTimeout!));
       },
     );
 
     test(
-      '[state] a selection is measured once, however many mutants share it '
-      '— baseline, coverage pass, one measurement, its two mutants, and '
-      'undetected.dart\'s full run',
+      '[state] a test file is compiled and run unmutated once, however many '
+      'mutants it runs — baseline, coverage pass, unmutated run, its two '
+      'mutants, and undetected.dart\'s mutant, which runs every test file',
       () {
         expect(
           File(p.join(dir.path, 'twice.log')).readAsStringSync(),
@@ -1206,14 +1311,15 @@ void main() {
     );
 
     test(
-      '[boundary] a mutant that runs the full command gets the full budget',
+      '[boundary] a mutant with no coverage data runs every test file and '
+      'survives, with a budget like any other',
       () {
         final MutantResult r = _reportFor(
           report,
           'undetected.dart',
         ).undetectedMutants.single;
         expect(r.uncovered, isFalse);
-        expect(r.timeout, report.mutantTimeout);
+        expect(r.timeout, greaterThan(const Duration(seconds: 31)));
       },
     );
 
@@ -1226,8 +1332,7 @@ void main() {
     );
 
     test(
-      '[state] the statistics time every phase that ran and every mutant, '
-      'and count the one measurement',
+      '[state] the statistics time every phase that ran and every mutant',
       () {
         final RunStats stats = report.stats!;
         expect(stats.baseline, report.baselineDuration);
@@ -1242,12 +1347,7 @@ void main() {
           stats.mutants.map((MutantTiming m) => m.selected),
           <bool>[true, true, true, false],
         );
-        // hangs.dart's selection and twice.dart's, each measured by the
-        // first mutant to need it.
-        expect(
-          stats.mutants.map((MutantTiming m) => m.measurement != null),
-          <bool>[true, true, false, false],
-        );
+        expect(stats.switched!.compiledTestFiles, greaterThan(0));
         expect(
           stats.mutants.every((MutantTiming m) => m.test != null),
           isTrue,
@@ -1268,13 +1368,7 @@ void main() {
         expect(plan!.mutantCount, 4);
         expect(plan!.baseline, report.baselineDuration);
         expect(plan!.budget, report.mutantTimeout);
-        // One worker, so the estimate and the floor are one number: four
-        // mutants at a baseline each, with nothing running in parallel. It
-        // is an upper bound — these four ran selected, well under the full
-        // suite — which is why no verdict is taken from it.
         expect(plan!.workers, 1);
-        expect(plan!.estimate, plan!.baseline * 4);
-        expect(plan!.floor, plan!.estimate);
         // The projection covers the mutants still to come, so the last one
         // has nothing left to project — a `~0s left` printed beside a
         // finished run reads as one still going.
@@ -1371,10 +1465,21 @@ void main() {
       reports['sequential, selected'] = await run(workers: 1, selected: true);
     });
 
+    // Every result's budget left out: it comes from a test file's measured
+    // unmutated run, which differs between runs by milliseconds.
+    Object? withoutBudgets(Object? json) => switch (json) {
+      final Map<String, Object?> map => <String, Object?>{
+        for (final MapEntry<String, Object?> e in map.entries)
+          if (e.key != 'timeoutSeconds') e.key: withoutBudgets(e.value),
+      },
+      final List<Object?> list => list.map(withoutBudgets).toList(),
+      _ => json,
+    };
+
     Map<String, Object?> verdicts(MutationRunReport report) =>
         <String, Object?>{
           for (final FileMutationReport f in report.files)
-            p.basename(f.filePath): f.toJson(),
+            p.basename(f.filePath): withoutBudgets(f.toJson()),
         };
 
     for (final String mode in <String>['', ', selected']) {
@@ -1413,8 +1518,7 @@ void main() {
           stats.mutants.map((MutantTiming m) => m.worker).toSet(),
           <int>{0, 1},
         );
-        expect(stats.workerDiskBytes, hasLength(2));
-        expect(stats.sandboxSetup, isNotNull);
+        expect(stats.switched!.workerDiskBytes, hasLength(2));
         expect(temps.listSync(), isEmpty);
       },
     );
@@ -1438,8 +1542,8 @@ void main() {
     );
 
     test(
-      '[error] a target outside the package the command runs in falls back to '
-      'one worker in place, and says why',
+      '[error] a target outside the package the command runs in stops the '
+      'run before the baseline, saying why',
       () async {
         final Directory outside = Directory.systemTemp.createTempSync(
           'parallel_outside_',
@@ -1451,7 +1555,6 @@ void main() {
           outside.path,
         ]);
         addTearDown(gate.close);
-        final List<String> reasons = <String>[];
 
         final MutationRunReport report = await MutationTestRunner(
           testCommand: ProcessCommand('dart', <String>[
@@ -1462,45 +1565,52 @@ void main() {
           baselineFactor: 0,
           workers: 2,
           tempSpace: TempSpace(root: temps),
-          onWorkersFallback: reasons.add,
         ).run(<String>[target.path]);
 
-        expect(reasons.single, contains('outside the package'));
-        expect(report.stats!.workers, 1);
-        expect(_reportFor(report, 'elsewhere.dart').undetected, 1);
+        expect(report.abortKind, AbortKind.switchedRunUnavailable);
+        expect(report.abortReason, contains('outside the package'));
+        expect(report.baselineDuration, isNull, reason: 'nothing ran');
       },
     );
 
     test(
-      '[error] a sandbox the test command fails in is not used: the run falls '
-      'back to one worker in place, rather than scoring every mutant as '
-      'caught',
+      '[error] a test file that fails unmutated in a switched run, though it '
+      'passes under the test command, stops the run and scores nothing — '
+      'rather than scoring every mutant it runs as caught',
       () async {
-        // Passes in the package, fails in any worker, where the file is a
-        // link — a stand-in for a copy the real tools cannot work in.
-        final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
-          dir.path,
-        ]);
-        addTearDown(gate.close);
-        final List<String> reasons = <String>[];
+        // Passes under `dart test`, which never sets the variable, and fails
+        // in a switched run, which always does: a stand-in for a test file
+        // the switched run cannot run the way the test command does.
+        final Directory own = await _fixturePackage();
+        addTearDown(() => own.deleteSync(recursive: true));
+        File(p.join(own.path, 'test', 'env_test.dart')).writeAsStringSync('''
+import 'dart:io';
 
+import 'package:fixture/detected.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('classifies', () {
+    expect(Platform.environment.containsKey('DART_MUTANTS_ID'), isFalse);
+    expect(classify(true), 'positive');
+  });
+}
+''');
         final MutationRunReport report = await MutationTestRunner(
-          testCommand: ProcessCommand('sh', <String>[
-            '-c',
-            '[ ! -L lib/detected.dart ]',
-          ], workingDirectory: dir.path),
-          compileSafetyGate: gate,
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+          ], workingDirectory: own.path),
+          compileSafetyGate: _realGate(own),
           mutantTimeout: const Duration(seconds: 10),
           baselineFactor: 0,
           workers: 2,
           tempSpace: TempSpace(root: temps),
-          onWorkersFallback: reasons.add,
-        ).run(<String>[p.join(dir.path, 'lib', 'undetected.dart')]);
+        ).run(<String>[p.join(own.path, 'lib', 'detected.dart')]);
 
-        expect(reasons.single, contains('failed in a worker'));
-        expect(report.stats!.workers, 1);
-        expect(report.stats!.sandboxSetup, isNotNull);
-        expect(_reportFor(report, 'undetected.dart').undetected, 1);
+        expect(report.abortKind, AbortKind.switchedRunFailed);
+        expect(report.abortReason, contains('test/env_test.dart'));
+        expect(report.abortReason, contains('unmutated'));
+        expect(report.files, isEmpty);
         expect(temps.listSync(), isEmpty);
       },
     );
@@ -1519,10 +1629,10 @@ void main() {
     });
   }, timeout: const Timeout(Duration(minutes: 10)));
 
-  group('selecting tests by coverage, when it cannot be done', () {
+  group('a test command a switched run cannot use', () {
     test(
-      '[error] a test command that is not dart test or flutter test aborts '
-      'the run before any mutant, rather than run every mutant in full',
+      '[error] one that is not dart test or flutter test aborts the run '
+      'before the baseline, saying so',
       () async {
         final Directory dir = await _fixturePackage();
         addTearDown(() => dir.deleteSync(recursive: true));
@@ -1544,12 +1654,91 @@ void main() {
           selectByCoverage: true,
         ).run(<String>[target]);
 
-        expect(report.abortKind, AbortKind.selectionUnavailable);
+        expect(report.abortKind, AbortKind.switchedRunUnavailable);
         expect(report.abortReason, contains('not `dart test'));
         expect(report.files, isEmpty);
+        expect(report.baselineDuration, isNull, reason: 'nothing ran');
         expect(report.stats!.mutants, isEmpty, reason: 'no mutant ran');
         expect(File(target).readAsStringSync(), before);
       },
+    );
+
+    test(
+      '[error] one passing an option a switched run cannot apply aborts the '
+      'run before the baseline, naming it',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+
+        final MutationRunReport report = await MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+            '--total-shards=2',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: _realGate(dir),
+        ).run(<String>[p.join(dir.path, 'lib', 'detected.dart')]);
+
+        expect(report.abortKind, AbortKind.switchedRunUnavailable);
+        expect(report.abortReason, contains('--total-shards=2'));
+        expect(report.baselineDuration, isNull, reason: 'nothing ran');
+      },
+    );
+  });
+
+  group('the test command\'s own configuration', () {
+    test(
+      '[decision] dart_test.yaml and the command\'s filters decide which '
+      'tests a mutant runs against, as they decide it for the command',
+      () async {
+        final Directory dir = await _fixturePackage();
+        addTearDown(() => dir.deleteSync(recursive: true));
+        // A tag dart_test.yaml skips, a tag the command excludes, and a
+        // suite-level @Skip: each test here fails always, so a run that
+        // ran any of them would fail unmutated and stop.
+        File(p.join(dir.path, 'dart_test.yaml')).writeAsStringSync('''
+tags:
+  slow:
+    skip: "too slow for mutants"
+  flaky:
+''');
+        File(p.join(dir.path, 'test', 'tagged_test.dart')).writeAsStringSync('''
+import 'package:fixture/detected.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('slow', () => expect(classify(true), 'never'), tags: 'slow');
+  test('flaky', () => expect(classify(true), 'never'), tags: 'flaky');
+  test('kept', () => expect(classify(true), 'positive'));
+}
+''');
+        File(p.join(dir.path, 'test', 'skipped_test.dart')).writeAsStringSync(
+          '''
+@Skip('not yet')
+library;
+
+import 'package:test/test.dart';
+
+void main() {
+  test('fails', () => expect(1, 2));
+}
+''',
+        );
+
+        final MutationRunReport report = await MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+            '--exclude-tags',
+            'flaky',
+          ], workingDirectory: dir.path),
+          compileSafetyGate: _realGate(dir),
+          mutantTimeout: const Duration(seconds: 10),
+          baselineFactor: 0,
+        ).run(<String>[p.join(dir.path, 'lib', 'detected.dart')]);
+
+        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(_reportFor(report, 'detected.dart').detected, 1);
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
     );
   });
 
@@ -1587,36 +1776,6 @@ void main() {
     );
   });
 
-  group('the test compilation cache', () {
-    test(
-      '[partition] is cleared before the baseline runs — a stale marker '
-      'left over from a previous session must not survive into this run',
-      () async {
-        final Directory dir = await _fixturePackage();
-        addTearDown(() => dir.deleteSync(recursive: true));
-        final Directory cacheDir = Directory(
-          p.join(dir.path, '.dart_tool', 'test'),
-        );
-        cacheDir.createSync(recursive: true);
-        final File marker = File(p.join(cacheDir.path, 'stale_marker.txt'));
-        marker.writeAsStringSync('leftover from a previous run');
-
-        await _runnerFor(dir).run(<String>[
-          p.join(dir.path, 'lib', 'no_mutants.dart'),
-        ]);
-
-        expect(
-          marker.existsSync(),
-          isFalse,
-          reason:
-              'dart test never writes a file with this name — its survival '
-              'past the run means the cache was never cleared before the '
-              'baseline compiled',
-        );
-      },
-    );
-  });
-
   group('a baseline that never finishes', () {
     test(
       '[boundary] aborts with its own reason, distinct from a baseline '
@@ -1632,7 +1791,7 @@ environment:
   sdk: ^3.8.0
 dev_dependencies:
   test: ^1.25.0
-''');
+$dartMutantsDevDependency''');
         Directory(p.join(dir.path, 'lib')).createSync();
         Directory(p.join(dir.path, 'test')).createSync();
         File(p.join(dir.path, 'lib', 'target.dart')).writeAsStringSync(
@@ -1683,8 +1842,8 @@ void main() {
 
         expect(report.aborted, isTrue);
         expect(report.abortKind, AbortKind.baselineTimeout);
-        // Kept alongside the kind: plan-cycle 1.3.1 tells this abort apart by
-        // matching these words, and will until it reads abortKind instead.
+        // Kept alongside the kind: a caller may still tell this abort apart by
+        // matching these words, until it reads abortKind instead.
         expect(report.abortReason, contains('did not finish'));
         expect(report.abortReason, contains('within the timeout'));
         expect(report.files, isEmpty);
@@ -1695,81 +1854,71 @@ void main() {
     );
   });
 
-  group('a baseline slower than the mutant floor', () {
-    // The suite is green, merely slower than one mutant's floor — which used
-    // to abort the whole run as `baseline-timeout`, as if it had hung. The
-    // floor is 1s and the suite sleeps 2s on top of a cold `dart test`
-    // start, so every run outlasts the floor however idle the machine is.
-    Future<(Directory, String)> slowFixture() async {
+  group('a slow test file', () {
+    // The only test file reaching `pace` sleeps 2s, so its own unmutated run
+    // is what each budget below is derived from.
+    Future<MutationRunReport> runWith(double factor) async {
       final Directory dir = await _fixturePackage();
       addTearDown(() => dir.deleteSync(recursive: true));
+      File(
+        p.join(dir.path, 'lib', 'slow.dart'),
+      ).writeAsStringSync("String pace(bool a) => a ? 'fast' : 'slow';\n");
       File(p.join(dir.path, 'test', 'slow_test.dart')).writeAsStringSync('''
+import 'package:fixture/slow.dart';
 import 'package:test/test.dart';
 
 void main() {
   test('slow but green', () async {
     await Future<void>.delayed(const Duration(seconds: 2));
+    expect(pace(true), 'fast');
   });
 }
 ''');
-      return (dir, p.join(dir.path, 'lib', 'detected.dart'));
+      return MutationTestRunner(
+        testCommand: ProcessCommand('dart', <String>[
+          'test',
+        ], workingDirectory: dir.path),
+        compileSafetyGate: _realGate(dir),
+        operators: <MutationOperator>[TernarySwap()],
+        mutantTimeout: const Duration(seconds: 1),
+        baselineFactor: factor,
+        baselineTimeout: const Duration(seconds: 60),
+        selectByCoverage: true,
+      ).run(<String>[p.join(dir.path, 'lib', 'slow.dart')]);
     }
 
-    MutationTestRunner runner(Directory dir, {double? factor}) =>
-        MutationTestRunner(
-          testCommand: ProcessCommand('dart', <String>[
-            'test',
-          ], workingDirectory: dir.path),
-          compileSafetyGate: _realGate(dir),
-          mutantTimeout: const Duration(seconds: 1),
-          baselineFactor: factor ?? MutationTestRunner.defaultBaselineFactor,
-          // Not the default ten times the floor: a cold full-fixture run
-          // plus the 2s sleep has blown far looser limits under load.
-          baselineTimeout: const Duration(seconds: 60),
-        );
-
     test(
-      '[decision] runs to completion, and each mutant gets the baseline '
-      'times the factor — enough to be scored rather than timed out',
+      '[decision] a mutant gets that file\'s unmutated run times the factor, '
+      'when that is more than the floor',
       () async {
-        final (Directory dir, String target) = await slowFixture();
-
-        final MutationRunReport report = await runner(dir).run(<String>[
-          target,
-        ]);
+        final MutationRunReport report = await runWith(20);
 
         expect(report.aborted, isFalse, reason: report.abortReason);
-        expect(
-          report.baselineDuration,
-          greaterThan(const Duration(seconds: 2)),
-        );
-        expect(
-          report.mutantTimeout,
-          report.baselineDuration! * MutationTestRunner.defaultBaselineFactor,
-        );
-        final FileMutationReport f = _reportFor(report, 'detected.dart');
+        final FileMutationReport f = _reportFor(report, 'slow.dart');
         expect(<int>[f.detected, f.timedOut], <int>[1, 0]);
+        expect(
+          report.stats!.mutants.single.result.timeout,
+          greaterThan(const Duration(seconds: 40)),
+        );
       },
-      timeout: const Timeout(Duration(seconds: 90)),
+      timeout: const Timeout(Duration(seconds: 120)),
     );
 
     test(
-      '[decision] with the factor off, the same mutant gets the bare floor '
-      'and times out — the derived budget is what scored it above',
+      '[decision] with the factor off, the budget is the file\'s unmutated '
+      'run plus the floor plus package:test\'s 30s — never less than the '
+      'file needs unmutated',
       () async {
-        final (Directory dir, String target) = await slowFixture();
-
-        final MutationRunReport report = await runner(
-          dir,
-          factor: 0,
-        ).run(<String>[target]);
+        final MutationRunReport report = await runWith(0);
 
         expect(report.aborted, isFalse, reason: report.abortReason);
         expect(report.mutantTimeout, const Duration(seconds: 1));
-        final FileMutationReport f = _reportFor(report, 'detected.dart');
-        expect(<int>[f.detected, f.timedOut], <int>[0, 1]);
+        final Duration budget = report.stats!.mutants.single.result.timeout!;
+        expect(budget, greaterThan(const Duration(seconds: 33)));
+        expect(budget, lessThan(const Duration(seconds: 40)));
+        expect(_reportFor(report, 'slow.dart').detected, 1);
       },
-      timeout: const Timeout(Duration(seconds: 90)),
+      timeout: const Timeout(Duration(seconds: 120)),
     );
   });
 
@@ -1815,10 +1964,8 @@ void main() {
   });
 
   group('maxRunTime', () {
-    // Ten mutants whose tests are cheap unmodified and a second each once
-    // mutated: the plan's floor (ten baselines) fits inside the limit, and
-    // the pace the run actually holds does not. That gap is the whole point
-    // — a floor is what nothing can beat, not what a run costs.
+    // Four mutants whose test is cheap unmodified and slow once mutated: only
+    // the pace the run actually holds can say it will not fit.
     const int mutants = 4;
     late Directory dir;
     late Directory temps;
@@ -1830,9 +1977,7 @@ void main() {
       final StringBuffer checks = StringBuffer();
       for (int i = 0; i < mutants; i++) {
         lib.writeln("String pick$i(bool a) => a ? 'y$i' : 'n$i';");
-        // Each mutant's own run sleeps; the unmodified suite does not. So
-        // the plan's floor stays small while a mutant costs minutes, which
-        // is the gap the pace check exists to see. `sleep`, not
+        // Each mutant's own run sleeps; the unmodified suite does not. `sleep`, not
         // `Future.delayed`: the cost has to land in the test process's wall
         // time whatever the runner does with the isolate.
         checks.writeln(
@@ -1873,42 +2018,16 @@ $checks
     ).run(<String>[p.join(dir.path, 'lib', 'slow.dart')]);
 
     test(
-      '[decision] a plan whose floor is already over the limit is refused '
-      'before a single file is written',
-      () async {
-        final File target = File(p.join(dir.path, 'lib', 'slow.dart'));
-        final String source = target.readAsStringSync();
-
-        // Under any baseline any machine can produce, so this test takes
-        // the floor branch wherever it runs.
-        final MutationRunReport report = await runWith(
-          const RunBudget(Duration(milliseconds: 1)),
-        );
-
-        expect(report.abortKind, AbortKind.overBudget);
-        expect(report.abortReason, contains('Nothing was mutated'));
-        expect(report.files, isEmpty);
-        expect(target.readAsStringSync(), source);
-        // The baseline still ran — it is what the floor is measured from,
-        // and it is not counted against the limit.
-        expect(report.baselineDuration, isNotNull);
-      },
-      timeout: const Timeout(Duration(seconds: 180)),
-    );
-
-    test(
       '[decision] a run the measured pace says will not fit stops between '
       'mutants, scores none of them, and leaves the file as it was',
       () async {
         final File target = File(p.join(dir.path, 'lib', 'slow.dart'));
         final String source = target.readAsStringSync();
 
-        // The limit is a minute: four green baselines fit inside it on any
-        // machine that can run this suite at all, so the floor check passes
-        // — and the first mutant alone sleeps past it, so the pace check is
-        // the only one that can stop this. Trusting the pace after one
-        // mutant keeps the test to that one sleep; `RunBudget`'s own tests
-        // cover what the shipped threshold does.
+        // The limit is a minute, and the first mutant alone sleeps past it.
+        // Trusting the pace after one mutant keeps the test to that one
+        // sleep; `RunBudget`'s own tests cover what the shipped threshold
+        // does.
         final MutationRunReport report = await runWith(
           const RunBudget(Duration(minutes: 1), paceAfterPerWorker: 1),
         );
@@ -1935,11 +2054,11 @@ InProcessAnalyzerGate _realGate(Directory dir) {
 }
 
 /// Rejects every file in [rejected] and defers to [inner] for the rest,
-/// recording each question as (path, what was on disk at that moment).
-class _RecordingGate implements CompileSafetyGate {
+/// recording each question as (path, the content it was asked about).
+class _RecordingGate implements SourceCompileSafetyGate {
   _RecordingGate(this.inner, {this.rejected = const <String>{}});
 
-  final CompileSafetyGate inner;
+  final SourceCompileSafetyGate inner;
   final Set<String> rejected;
   final List<(String, String)> asked = <(String, String)>[];
 
@@ -1950,6 +2069,15 @@ class _RecordingGate implements CompileSafetyGate {
       return false;
     }
     return inner.compiles(filePath);
+  }
+
+  @override
+  Future<bool> compilesSource(String filePath, String source) async {
+    asked.add((filePath, source));
+    if (rejected.contains(filePath)) {
+      return false;
+    }
+    return inner.compilesSource(filePath, source);
   }
 
   @override

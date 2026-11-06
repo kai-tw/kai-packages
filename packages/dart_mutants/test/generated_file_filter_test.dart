@@ -6,6 +6,8 @@ void main() {
     '.g.dart',
     '.freezed.dart',
     '.mocks.dart',
+    '.config.dart',
+    '.gen.dart',
   ]) {
     test('[partition] a $suffix file is generated', () {
       expect(isGeneratedFile('lib/src/foo$suffix'), isTrue);

@@ -1,9 +1,8 @@
-import 'dart:io';
-
 import 'package:freezed_annotation/freezed_annotation.dart';
 import 'package:path/path.dart' as p;
 
 import 'suite_coverage.dart';
+import 'worker_sandbox.dart';
 
 part 'coverage_map.freezed.dart';
 part 'coverage_map.g.dart';
@@ -107,11 +106,7 @@ class CoverageMap {
 /// Accumulates one test file's coverage at a time into a [CoverageMap].
 class CoverageMapBuilder {
   /// [root] is the package root every key is made relative to.
-  CoverageMapBuilder(String root) : _root = _realPath(p.absolute(root));
-
-  static String _realPath(String dir) => Directory(dir).existsSync()
-      ? Directory(dir).resolveSymbolicLinksSync()
-      : p.normalize(dir);
+  CoverageMapBuilder(String root) : _root = realPath(root);
 
   final String _root;
   final Map<String, Map<int, Set<String>>> _lines =

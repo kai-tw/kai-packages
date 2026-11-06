@@ -1,3 +1,105 @@
+## 0.9.0
+
+**Every mutant runs as a switched file; there is no other way a mutant
+runs.** 0.8.0 added switched files but kept writing each mutant into the
+package and running the test command whenever they could not apply — and
+they could not apply to any package with a `dart_test.yaml`, even one that
+only declared a tag, so a large app that had one ran every mutant the slow
+way and said so in one line on stderr. Now each test file is compiled once
+per worker and run once per mutant, under `flutter test` and `dart test`
+alike, with or without `--select-by-coverage`. Breaking:
+
+- **What the test runner would apply, applied.** A compiled test file runs
+  through the new `package:dart_mutants/switched_suite.dart`, which reads the
+  global configuration, the package's `dart_test.yaml`, the test file's
+  suite-level annotations (`@Tags`, `@Timeout`, `@Skip`, `@TestOn`,
+  `@OnPlatform`) and the command's `--name`, `--plain-name`, `--tags`,
+  `--exclude-tags`, `--timeout`, `--preset` and `--run-skipped`. A test the
+  command skips is skipped here too. 0.8.0's switched files read none of
+  this: a test skipped by a suite-level `@Skip` ran, and could detect a
+  mutant the command never would.
+- **A mutant that cannot be switched is compiled alone** — one in a constant
+  context, a whole local declaration, a part file, or one that stops its
+  file compiling beside the others: written into a copy as it is, with each
+  of its test files compiled again around it. The compiler is told which
+  files changed, so nothing depends on a cache noticing.
+- **What a switched run cannot do stops the run instead of changing how it
+  runs.** A command that is not `dart test …` or `flutter test …`, an option
+  it cannot apply (`--dart-define`, `--total-shards`, …), a package that does
+  not resolve `package:dart_mutants`, or a missing SDK piece aborts before
+  the baseline, as the new abortKind `switched-run-unavailable`. A test file
+  that fails to compile or to pass unmutated in a switched run, though the
+  command passed with it, aborts as `switched-run-failed`, naming the file,
+  and nothing is scored.
+- **A budget per test file.** A mutant gets, on each test file, that file's
+  unmutated run times `--baseline-factor`, and never less than that run plus
+  `--mutant-timeout` plus package:test's own 30s. The report's
+  `mutantTimeout` is now `--mutant-timeout` itself.
+- **`--workers` runs test files at once**, each worker with its own copy of
+  the package, compiler and test process. The package is never written to,
+  at any number of workers.
+- **`dart_mutants pause`, `resume` and `stop [<pid>]`** act on a run in
+  progress, found by the file it keeps at
+  `<cache>/dart_mutants/runs/<pid>.json` while it runs. A paused run
+  finishes the test file runs it is on, then waits with its compilers
+  closed; the time paused counts against no budget and no pace. A run
+  stopped this way, by `SIGTERM` or by Ctrl-C, ends with the new abortKind
+  `stopped`, exit 1, its report still written to `--output` and
+  `--history`. A run file whose process has ended, or whose pid now belongs
+  to a process that started after the file was written, is deleted and
+  nothing is signalled. Where `ps` cannot run, every run file is taken for a
+  live run, so one left behind by a run that ended has to be deleted by
+  hand.
+- **Test slots, shared by every run on the machine.** A worker holds one
+  while it compiles or runs a test file, and waits for a free one before it
+  does; the baseline and the coverage pass hold one while they run, and a
+  paused run gives its slots back. `$DART_MUTANTS_SLOTS` sets how many there
+  are (by default one per 4 GB of memory beyond the first 8, at least one),
+  `$DART_MUTANTS_SLOT_DIR` where (by default `<cache>/dart_mutants/slots`).
+  A slot whose run was killed comes free with it. `--workers auto` opens one
+  worker per free slot, and at least one. The time spent waiting for a slot
+  counts against no budget and no pace.
+- **Gone:** `--schemata`, the clearing of `dart test`'s kernel cache before
+  every run, a selected command's measured budget, the full-command retry of
+  a selected run that ran no test, the plan's time estimate and the
+  `--max-minutes` refusal made from it before the first mutant (the measured
+  pace still stops a run), and `MutationTestRunner.onWorkersFallback` and
+  `onSchemataUnavailable`.
+- **Statistics:** `schemata` is `switched`, with `alone` and `aloneReasons`;
+  `workerDiskBytes` moved into it; `sandboxSetupSeconds`, the selection's
+  measurement and retry figures, and each mutant's `switched`,
+  `measurementSeconds` and `retrySeconds` are gone.
+- **New dependencies: `test_core` and `test_api`**, whose own libraries the
+  in-test runner uses. A Flutter package no longer has to add `test_core`
+  itself; it has to resolve `dart_mutants`.
+- **Breaking: a run on an outdated release exits 2 before it runs
+  anything.** Each run reads the newest `dart_mutants-v<version>` tag with
+  `git ls-remote`, kept for a day under `<cache>/dart_mutants/`; on an older
+  release it names the one to move the ref to. A run that gets no answer
+  from the network, with none kept from the last day, exits 2 too: it cannot
+  tell an up-to-date release from an outdated one. There is no option to
+  skip the check.
+
+Also new:
+
+- **Review mode: `--diff <ref>`, `--review <file>` and
+  `--fail-on-survivors`.** `--diff` mutates only the lines changed since the
+  merge base of the ref and `HEAD`, uncommitted edits included, at most
+  `--per-line` mutants a line (1 unless given); with no files given, every
+  Dart file under `lib/` the change touched. `--review` writes each survivor
+  a test runs past to a JSON list of `{path, line, body}`, ready to post on
+  a pull request, and the run then exits 0 whatever the scores, unless
+  `--fail-on-survivors`. A change that only deletes lines has nothing new to
+  mutate: the review file gets `[]`, and the run exits 0.
+- **A swap that leaves the code as it was is not proposed** — a ternary or
+  two switch arms whose branches are the same text. No test could detect
+  it.
+- **`.config.dart` and `.gen.dart` files count as generated**, like
+  `.g.dart`, and are never mutated.
+
+A journal from an earlier release is started over once: its `format` is
+now 2.
+
 ## 0.8.0
 
 **`--schemata`, on by default: a `flutter test` package compiles each
