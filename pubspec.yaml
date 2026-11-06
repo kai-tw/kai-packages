@@ -21,16 +21,8 @@ workspace:
   - packages/ui_kit
   - packages/versioned_json
 
-# Lets `dart run dart_lints` work from the repo root, so the lint entry point is
-# the same here as in a consuming app.
-#
-# `dart_mutants` is here for the same reason and one extra one: `plan-mutation`
-# resolves the git toplevel and `cd`s to it before doing anything, so the only
-# pubspec it ever reads is this one. Declared solely in a member package — as
-# `image_codec` and `log_system` do, for invoking the engine from inside their
-# own directory — the gate reports "this project does not depend on
-# dart_mutants" and measures nothing, which reads as a missing tool rather than
-# as a lookup happening one directory up.
+# Lets `dart run dart_lints` and `dart run dart_mutants` work from the repo
+# root, so both commands are the same here as in a consuming app.
 dev_dependencies:
   dart_lints:
     path: packages/dart_lints
