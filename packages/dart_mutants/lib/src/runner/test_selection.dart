@@ -65,6 +65,12 @@ class TestSelection {
 /// finishes, and a test file already in [recorded] is not run again: a pass
 /// cut short resumes from where it stopped. `dart test` covers every file in
 /// one run, so there is nothing to resume there.
+///
+/// With [only], a test file not in it is not run at all: the caller knows it
+/// cannot load any file the selection will be asked about (see
+/// `testFilesLoading`), so its coverage could only say so. On a large app
+/// most test files are like that, and under `flutter test` each one costs a
+/// process start and a compile.
 Future<TestSelection?> collectCoverage(
   TestInvocation invocation, {
   required Duration timeout,
@@ -72,14 +78,22 @@ Future<TestSelection?> collectCoverage(
   TempSpace? temps,
   Map<String, SuiteCoverage>? recorded,
   void Function(SuiteCoverage suite)? onSuite,
+  Set<String>? only,
 }) async {
   final TempSpace space = temps ?? TempSpace();
   final String? packageName = _packageName(invocation.root);
-  final List<String> testFiles = invocation.testFiles();
-  final String? problem = _refusal(invocation, packageName, testFiles);
+  final List<String> everyTestFile = invocation.testFiles();
+  final String? problem = _refusal(invocation, packageName, everyTestFile);
   if (problem != null) {
     onFailure(problem);
     return null;
+  }
+  final List<String> testFiles = _keeping(everyTestFile, only);
+  if (testFiles.isEmpty) {
+    return TestSelection(
+      invocation,
+      CoverageMapBuilder(invocation.root).build(),
+    );
   }
   final Directory out = space.create('cov');
   try {
@@ -117,6 +131,10 @@ Future<TestSelection?> collectCoverage(
     space.delete(out);
   }
 }
+
+/// [testFiles] in [only], in their order — all of them without [only].
+List<String> _keeping(List<String> testFiles, Set<String>? only) =>
+    only == null ? testFiles : testFiles.where(only.contains).toList();
 
 /// Why this invocation cannot be selected from at all, or `null`. Every
 /// refusal is a shape in which the coverage pass could see different tests

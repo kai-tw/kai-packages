@@ -16,6 +16,7 @@ import 'compile_safety_gate.dart';
 import 'coverage_map.dart';
 import 'file_mutation_report.dart';
 import 'host_load.dart';
+import 'import_graph.dart';
 import 'line_range.dart';
 import 'mutant_filter.dart';
 import 'mutant_progress.dart';
@@ -124,6 +125,11 @@ class MutationTestRunner {
   /// sits in, and score a mutant in a function no test enters as undetected
   /// without running anything — see [TestSelection] and [executableScope].
   /// Without it, every mutant runs against every test file the command runs.
+  ///
+  /// The coverage pass runs only the test files whose imports lead to a
+  /// target (see `testFilesLoading`), and a mutant coverage says nothing
+  /// about runs against those, not against every test file: one that no
+  /// test file imports is scored undetected without running anything.
   ///
   /// Selecting fewer tests can lose a detection, never invent one: a test
   /// that fails when selected runs, and fails, in the full command too. So a
@@ -275,6 +281,11 @@ class MutationTestRunner {
   /// Whether the selection came from the journal's map rather than a pass.
   bool _coverageReused = false;
 
+  /// Under [selectByCoverage], the test files that can load each target, by
+  /// the target as given — see [testFilesLoading]. `null` without the
+  /// selection, or when the imports could not be read.
+  Map<String, List<String>>? _loading;
+
   /// The current run's — see [run].
   late RunStats _stats;
 
@@ -371,7 +382,10 @@ class MutationTestRunner {
       }
       final List<_PlannedFile> plan = planned.files;
 
-      final TestSelection? selection = await _selection(switched.invocation);
+      final TestSelection? selection = await _selection(
+        switched.invocation,
+        targets,
+      );
       if (_selectionUnavailable case final String unavailable) {
         return MutationRunReport.aborted(
           stats: await _finished(stats),
@@ -721,14 +735,24 @@ class MutationTestRunner {
   /// asks for it and the journal holds no map from an earlier start. `null`
   /// when it does not ask, and when the pass fails — that with the reason in
   /// [_selectionUnavailable].
-  Future<TestSelection?> _selection(TestInvocation invocation) async {
+  ///
+  /// The pass runs only the test files that can load one of [targets]: on
+  /// a large app, a change to one file is usually imported by a handful of
+  /// the hundreds of test files, and the rest would each cost a process
+  /// start and a compile to report nothing.
+  Future<TestSelection?> _selection(
+    TestInvocation invocation,
+    List<String> targets,
+  ) async {
     _selectionUnavailable = null;
     _coverageReused = false;
+    _loading = null;
     if (!selectByCoverage) {
       return null;
     }
     final Stopwatch clock = Stopwatch()..start();
     try {
+      final Set<String>? only = _readImports(invocation, targets);
       if (_journal?.coverage case final CoverageMap recorded) {
         _coverageReused = true;
         return TestSelection(invocation, recorded);
@@ -743,6 +767,7 @@ class MutationTestRunner {
           temps: tempSpace,
           recorded: _journal?.suites,
           onSuite: _journal?.recordSuite,
+          only: only,
         );
       });
       if (selection != null) {
@@ -752,6 +777,25 @@ class MutationTestRunner {
     } finally {
       _stats.coveragePass = clock.elapsed;
     }
+  }
+
+  /// Reads which test files can load each of [targets] into [_loading], and
+  /// returns them all together — the ones the coverage pass runs — or `null`
+  /// when the imports could not be read and every test file has to run.
+  Set<String>? _readImports(TestInvocation invocation, List<String> targets) {
+    final List<String> testFiles = invocation.testFiles();
+    final Map<String, List<String>>? loading = _loading = testFilesLoading(
+      root: invocation.root,
+      testFiles: testFiles,
+      targets: targets,
+    );
+    final Set<String>? only = loading?.values
+        .expand((List<String> tests) => tests)
+        .toSet();
+    _stats
+      ..testFiles = testFiles.length
+      ..testFilesLoadingTargets = only?.length;
+    return only;
   }
 
   /// A budget derived from a test file's unmutated run — see
@@ -819,15 +863,23 @@ class MutationTestRunner {
     List<String> all,
   ) {
     // No parse, and so no scope, where the selection cannot speak for this
-    // file — every mutant in it then runs every test file.
+    // file — every mutant in it then runs every test file that can load it.
     final ParseStringResult? parsed =
         selection == null || !selection.speaksFor(file.source)
         ? null
         : parseString(content: file.source, throwIfDiagnostics: false);
+    // Only under the selection: without it, a test that runs the package as
+    // a subprocess — `dart run bin/…` — reaches code no import shows, and
+    // the full command would detect what it does there.
+    final List<String>? loading = selection == null
+        ? null
+        : _loading?[file.path];
     return <_Job>[
       for (final Mutant mutant in file.mutants)
         if (_testsFor(mutant, selection, parsed) case final List<String> picked)
           _Job(mutant, file.source, gate!, picked, selected: true)
+        else if (loading != null)
+          _Job(mutant, file.source, gate!, loading, selected: true)
         else
           _Job(mutant, file.source, gate!, all, selected: false),
     ];

@@ -1012,12 +1012,27 @@ void main() {
     );
 
     test(
-      '[boundary] a file no test loads has no coverage data at all, so its '
-      'mutant runs every test file and is NOT marked uncovered — absence '
-      'from a report is not evidence',
+      '[decision] a file no test file imports is marked uncovered: coverage '
+      'has no data on it, but the imports show no test can load it',
       () {
         final FileMutationReport f = _reportFor(report, 'undetected.dart');
-        expect(<int>[f.undetected, f.uncovered], <int>[1, 0]);
+        expect(<int>[f.undetected, f.uncovered], <int>[1, 1]);
+      },
+    );
+
+    test(
+      '[partition] the coverage pass runs only the test files that import a '
+      'target, and the stats say how many of how many',
+      () {
+        final RunStats stats = report.stats!;
+        expect(stats.testFiles, 10);
+        expect(
+          stats.testFilesLoadingTargets,
+          3,
+          reason:
+              'undetected_test.dart imports nothing, and the other six import '
+              'files that are not targets',
+        );
       },
     );
 
@@ -1107,6 +1122,22 @@ void main() {
   test('loads', () => expect(rel, isNotNull));
 }
 ''');
+      // A ternary in a top-level initializer sits in no function, so coverage
+      // cannot say who runs it: its mutant runs against the one test file
+      // that imports it — and not the canary below.
+      File(p.join(dir.path, 'lib', 'initialized.dart')).writeAsStringSync(
+        "final String greeting = DateTime.now().year > 0 ? 'hi' : 'bye';\n",
+      );
+      File(
+        p.join(dir.path, 'test', 'initialized_test.dart'),
+      ).writeAsStringSync('''
+import 'package:fixture/initialized.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('greeting', () => expect(greeting, 'hi'));
+}
+''');
       // Reaches nothing under test, and counts how often it is run.
       File(p.join(dir.path, 'test', 'canary_test.dart')).writeAsStringSync('''
 import 'dart:io';
@@ -1142,9 +1173,31 @@ void main() {
             p.join(dir.path, 'lib', 'partial.dart'),
             p.join(dir.path, 'lib', 'declared.dart'),
             p.join(dir.path, 'lib', 'relative.dart'),
+            p.join(dir.path, 'lib', 'initialized.dart'),
           ]);
       await gate.close();
     });
+
+    test(
+      '[decision] a mutant coverage cannot speak for runs against the test '
+      'files that import its file, is detected there, and counts as selected',
+      () {
+        final FileMutationReport f = _reportFor(report, 'initialized.dart');
+        // The ternary swap and the negated condition are caught; `>` turned
+        // `>=` keeps the year test true, so nothing can catch it. None of
+        // the three is uncovered: each ran against initialized_test.dart.
+        expect(<int>[f.detected, f.undetected, f.uncovered], <int>[2, 1, 0]);
+        expect(
+          report.stats!.mutants
+              .where(
+                (MutantTiming m) =>
+                    m.result.mutant.filePath.endsWith('initialized.dart'),
+              )
+              .map((MutantTiming m) => m.selected),
+          <bool>[true, true, true],
+        );
+      },
+    );
 
     test(
       '[decision] a mutant on a line the VM reports at zero hits, in a '
@@ -1176,13 +1229,12 @@ void main() {
     );
 
     test(
-      '[state] a test file that reaches neither target runs only in the full '
-      'runs — the baseline and the coverage pass — and is never compiled for '
-      'a mutant',
+      '[state] a test file that imports neither target runs only in the '
+      'baseline: the coverage pass leaves it out, and no mutant compiles it',
       () {
         expect(
           File(p.join(dir.path, 'canary.log')).readAsStringSync().length,
-          2,
+          1,
         );
       },
     );
@@ -1300,26 +1352,26 @@ void main() {
 
     test(
       '[state] a test file is compiled and run unmutated once, however many '
-      'mutants it runs — baseline, coverage pass, unmutated run, its two '
-      'mutants, and undetected.dart\'s mutant, which runs every test file',
+      'mutants it runs — baseline, coverage pass, unmutated run, and its two '
+      'mutants',
       () {
         expect(
           File(p.join(dir.path, 'twice.log')).readAsStringSync(),
-          'xxxxxx',
+          'xxxxx',
         );
       },
     );
 
     test(
-      '[boundary] a mutant with no coverage data runs every test file and '
-      'survives, with a budget like any other',
+      '[boundary] a mutant in a file no test file imports runs nothing: it '
+      'is uncovered, and has no budget',
       () {
         final MutantResult r = _reportFor(
           report,
           'undetected.dart',
         ).undetectedMutants.single;
-        expect(r.uncovered, isFalse);
-        expect(r.timeout, greaterThan(const Duration(seconds: 31)));
+        expect(r.uncovered, isTrue);
+        expect(r.timeout, isNull);
       },
     );
 
@@ -1341,16 +1393,17 @@ void main() {
         expect(stats.finishedAt!.isBefore(stats.startedAt), isFalse);
         expect(
           stats.mutants.map((MutantTiming m) => m.bucket),
-          <String>['timeout', 'detected', 'detected', 'undetected'],
+          <String>['uncovered', 'timeout', 'detected', 'detected'],
         );
         expect(
           stats.mutants.map((MutantTiming m) => m.selected),
-          <bool>[true, true, true, false],
+          <bool>[true, true, true, true],
         );
         expect(stats.switched!.compiledTestFiles, greaterThan(0));
         expect(
-          stats.mutants.every((MutantTiming m) => m.test != null),
-          isTrue,
+          stats.mutants.map((MutantTiming m) => m.test != null),
+          <bool>[false, true, true, true],
+          reason: 'the uncovered mutant ran no test',
         );
         final Map<String, Object?> environment = stats.environment;
         expect(environment['dartMutantsVersion'], packageVersion);
@@ -1382,7 +1435,7 @@ void main() {
           progress.map(
             (MutantProgress m) => p.basename(m.result.mutant.filePath),
           ),
-          <String>['hangs.dart', 'twice.dart', 'twice.dart', 'undetected.dart'],
+          <String>['undetected.dart', 'hangs.dart', 'twice.dart', 'twice.dart'],
         );
       },
     );

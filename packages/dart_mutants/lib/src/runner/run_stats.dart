@@ -33,6 +33,11 @@ class RunStats {
 
   Duration? coveragePass;
 
+  /// Under the selection: the test files the command runs, and how many of
+  /// them can load a target — the ones the coverage pass runs.
+  int? testFiles;
+  int? testFilesLoadingTargets;
+
   /// How many workers ran the mutants.
   int? workers;
 
@@ -91,6 +96,9 @@ class RunStats {
 
   Map<String, Object?> _selection() => <String, Object?>{
     'selectedMutants': mutants.where((MutantTiming m) => m.selected).length,
+    if (testFiles != null) 'testFiles': testFiles,
+    if (testFilesLoadingTargets != null)
+      'testFilesLoadingTargets': testFilesLoadingTargets,
   };
 
   static Map<String, int> _counts(List<MutantTiming> group) {

@@ -1,3 +1,26 @@
+## 0.10.0
+
+**Under `--select-by-coverage`, the coverage pass runs only the test files
+that can load a target.** Which ones is read from the directives before the
+pass: a test file whose imports, exports and parts lead to a target, through
+any package and every branch of a conditional import. A test file is
+compiled with what its directives lead to and nothing else, so the rest
+could only report that they never ran the target. Under `flutter test` each
+of them cost a process start and a compile: a change to an app's root
+widget was imported by 3 of 377 test files, and the pass over all 377 took about
+31 minutes of a 43-minute run whose one mutant took 2 seconds. The pass
+still runs one test file at a time, so it needs no more memory than before.
+A test file that leads to a call of `Isolate.spawnUri` is kept for every
+target. A package without a package config is read as before, every test
+file run.
+
+- **A mutant coverage cannot speak for runs against the test files that can
+  load its file**, not every test file; one that no test file can load is
+  scored `undetected` and marked `uncovered` without running anything.
+  Before, a file no test loaded had no coverage data and its mutants ran
+  every test file before surviving.
+- **Statistics:** `selection` has `testFiles` and `testFilesLoadingTargets`.
+
 ## 0.9.0
 
 **Every mutant runs as a switched file; there is no other way a mutant

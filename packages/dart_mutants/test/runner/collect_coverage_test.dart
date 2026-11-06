@@ -44,6 +44,7 @@ Future<(TestSelection?, List<String>)> _collect(
   List<String> args, {
   Map<String, SuiteCoverage>? recorded,
   void Function(SuiteCoverage suite)? onSuite,
+  Set<String>? only,
 }) async {
   final List<String> reasons = <String>[];
   final TestSelection? selection = await collectCoverage(
@@ -54,6 +55,7 @@ Future<(TestSelection?, List<String>)> _collect(
     onFailure: reasons.add,
     recorded: recorded,
     onSuite: onSuite,
+    only: only,
   );
   return (selection, reasons);
 }
@@ -172,6 +174,23 @@ exit 0
     });
 
     test(
+      '[partition] with only, dart test is given just those files',
+      () async {
+        final (TestSelection? selection, List<String> reasons) = await _collect(
+          root,
+          dartWriting(good),
+          <String>['test'],
+          only: <String>{'test/a_test.dart'},
+        );
+
+        expect(reasons, isEmpty);
+        expect(selection!.map.testsFor('lib/pkg.dart', 1, 1), <String>{
+          'test/a_test.dart',
+        });
+      },
+    );
+
+    test(
       '[error] a report in an unexpected shape falls back instead of '
       'crashing the run after its baseline',
       () async {
@@ -247,6 +266,54 @@ exit 0
         expect(selection!.map.testsFor('lib/pkg.dart', 1, 1), <String>{
           'test/a_test.dart',
         });
+      },
+    );
+
+    test(
+      '[partition] with only, flutter test runs just those files, one by one',
+      () async {
+        final String flutter = _fake('flutter', '''
+out=""
+for a in "\$@"; do
+  case "\$a" in
+    --coverage-path=*) out="\${a#--coverage-path=}" ;;
+    test/*) echo "\$a" >> "${root.path}/.ran" ;;
+  esac
+done
+printf 'SF:lib/pkg.dart\\nDA:1,3\\nend_of_record\\n' > "\$out"
+exit 0
+''');
+
+        final (TestSelection? selection, List<String> reasons) = await _collect(
+          root,
+          flutter,
+          <String>['test'],
+          only: <String>{'test/b_test.dart'},
+        );
+
+        expect(reasons, isEmpty);
+        expect(File(p.join(root.path, '.ran')).readAsLinesSync(), <String>[
+          'test/b_test.dart',
+        ]);
+        expect(selection!.map.testsFor('lib/pkg.dart', 1, 1), <String>{
+          'test/b_test.dart',
+        });
+      },
+    );
+
+    test(
+      '[boundary] with only empty, nothing runs, and the selection says '
+      'nothing about any line',
+      () async {
+        final (TestSelection? selection, List<String> reasons) = await _collect(
+          root,
+          _fake('flutter', 'exit 1'),
+          <String>['test'],
+          only: <String>{},
+        );
+
+        expect(reasons, isEmpty);
+        expect(selection!.map.testsFor('lib/pkg.dart', 1, 1), isNull);
       },
     );
 

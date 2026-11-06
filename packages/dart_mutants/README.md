@@ -404,20 +404,33 @@ runs, until one of them fails. Most of those runs can't reach the mutant at
 all, and a mutant no test reaches runs against every one of them before it
 survives.
 
-With `--select-by-coverage`, each test file is run once with coverage on,
-after the baseline, and that records which test files entered which
-functions. Each mutant then gets one of three answers, about the **function
-it sits in**:
+With `--select-by-coverage`, each test file that can load a target is run
+once with coverage on, after the baseline, and that records which test
+files entered which functions. Each mutant then gets one of three answers,
+about the **function it sits in**:
 
 - **some test files entered it** — it runs against only those;
 - **no test file entered it** — the mutant is scored `undetected` without
   running anything, and marked `uncovered`: it needs a test that reaches the
   function at all, not a better assertion;
-- **coverage cannot say** — the mutant runs against every test file, as it
-  would without the flag, and is not marked `uncovered`. That covers code outside any function (field and
-  top-level initializers), a `const` constructor (its initializers run at
-  compile time), and a file no report mentions (one with no executable code
-  is absent even when every test loads it).
+- **coverage cannot say** — the mutant runs against every test file that can
+  load its file, and is not marked `uncovered`. That covers code outside
+  any function (field and top-level initializers), a `const` constructor
+  (its initializers run at compile time), and a file no report mentions
+  (one with no executable code is absent even when every test loads it).
+  When no test file can load its file at all, the mutant is `uncovered`.
+
+**Which test files can load a target** is read from the directives before
+the pass: a test file whose imports, exports and parts lead to the target,
+through any package, every branch of a conditional import included. A test
+file is compiled with what its directives lead to and nothing else, so one
+that leads elsewhere cannot run the target's code, and its coverage would
+only say so. On a large app this is most of the suite: a change to the
+app's root widget, in one measured case, was imported by 3 of 377 test
+files, and the pass that ran all 377 took about 31 minutes, one `flutter test`
+process start and compile after another. A test file that leads to a call
+of `Isolate.spawnUri`, which loads a file by path at run time, is kept for
+every target.
 
 **Why the function and not the line.** The VM instruments calls and
 function entries, not statements. Measured: `final s = b ? 'x' : g();`, run
@@ -426,8 +439,9 @@ point is the call it skipped, and the `return s;` under it is not reported at
 all. A line-level answer called the ternary swap on that line uncovered; a
 test catches it. A function's entry is always instrumented.
 
-The coverage pass is `dart test` once, or `flutter test` once per test file,
-since `flutter test` writes one combined report per run. It needs a
+The coverage pass is `dart test` once, or `flutter test` once per test file
+that can load a target, since `flutter test` writes one combined report per
+run. A run where no test file can load a target runs no pass at all. It needs a
 `--test-command` of `dart test …` or `flutter test …` whose test files it
 can list exactly as the runner would. The commands it would refuse — one
 that collects coverage itself, uses `--`, runs on a platform other than the
@@ -695,7 +709,9 @@ dart run dart_mutants --select-by-coverage \
 - `verdicts` and `operators`: count and seconds for each, and for each
   operator its verdicts. `uncovered` is counted apart from `undetected`;
 - `selection`: `selectedMutants`, how many mutants ran against test files
-  coverage chose;
+  coverage or imports chose, and under `--select-by-coverage`, `testFiles`,
+  how many the command runs, and `testFilesLoadingTargets`, how many of
+  those import a target and so ran in the coverage pass;
 - `mutants`: one entry per mutant, `detected` ones included, with its
   location, operator, verdict, the `worker` (lane) that settled it,
   `seconds`, `gateSeconds`, whether it was `selected`, and `testSeconds` and
