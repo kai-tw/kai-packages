@@ -11,6 +11,11 @@ dependency version. Renamed from `dart-packages` once it stopped being
 exclusively pure-Dart packages — `connectivity_status` is a real federated
 Flutter plugin with native iOS/Android code, not just Dart.
 
+## Checks, and what to ask first
+
+- The check before a commit: `dart format --output=none --set-exit-if-changed . && dart run dart_lints`.
+- Ask before pushing a tag or publishing to pub.dev.
+
 ## This repo is PUBLIC; the apps that consume it are not
 
 `kai-packages` and `claude-plugins` are public. Every consuming app is private.
