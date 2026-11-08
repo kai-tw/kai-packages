@@ -1,27 +1,22 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:json_annotation/json_annotation.dart';
 import 'package:path/path.dart' as p;
 
 import '../mutant.dart';
-import 'coverage_map.dart';
 import 'mutant_result.dart';
 import 'mutant_verdict.dart';
-import 'suite_coverage.dart';
 
 /// Every mutant's result, written to a file as it finishes, so a run that is
 /// stopped part-way — Ctrl-C, `kill`, `--max-minutes`, a crash — can be
 /// started again and pick up where it stopped instead of from the first
-/// mutant. The baseline's wall time and the coverage map are written too, so
-/// a restart does not pay for them again: on a large Flutter suite the
-/// coverage pass alone is hours — longer than a cloud VM may live — so under
-/// `flutter test` each test file's part of it is written as it finishes too.
+/// mutant. A passing baseline's wall time is written too, so a restart does
+/// not run it again.
 ///
 /// The file is JSON Lines: a header naming what the results depend on, then
-/// the baseline, each test file's coverage, the coverage map and one line per
-/// finished mutant, each appended as it is known. A later run reuses what is recorded only when the
-/// header matches it exactly; otherwise the file is started over and
+/// the baseline and one line per finished mutant, each appended as it is
+/// known. A later run reuses what is recorded only when the header matches
+/// it exactly; otherwise the file is started over and
 /// [discarded] says why. The header has two halves:
 ///
 /// - the run's configuration — [format], test command, operators,
@@ -45,8 +40,6 @@ class RunJournal {
     this.discarded,
     this.recordedCount, {
     this.baseline,
-    this.coverage,
-    this.suites = const <String, SuiteCoverage>{},
   });
 
   /// Opens [path] for a run whose header is [header], keeping what it
@@ -67,14 +60,6 @@ class RunJournal {
         null,
         recorded.length,
         baseline: _lastOf(body, _baselineOf),
-        coverage: _lastOf(body, _coverageOf),
-        suites: <String, SuiteCoverage>{
-          for (final SuiteCoverage s
-              in body
-                  .map((String l) => SuiteCoverage.fromJson(_tryDecode(l)))
-                  .nonNulls)
-            s.testFile: s,
-        },
       );
     }
     file
@@ -91,8 +76,10 @@ class RunJournal {
   /// What a recorded result means. Raise it with any change that can give a
   /// recorded mutant a different verdict, and every journal written before
   /// is started over. 2: every mutant runs as a switched file, against the
-  /// tests `dart_test.yaml` and the command's filters keep.
-  static const int format = 2;
+  /// tests `dart_test.yaml` and the command's filters keep. 3: under the
+  /// selection, against the test files that reach its switch rather than
+  /// the ones that enter its function.
+  static const int format = 3;
 
   /// [firstLine] decoded, with the header 0.5.0 wrote read as [format] 1:
   /// it named the engine version first where [format] now stands, and its
@@ -126,20 +113,6 @@ class RunJournal {
     _ => null,
   };
 
-  /// `null` for a map in any other shape, like any line that does not parse.
-  static CoverageMap? _coverageOf(Object? json) {
-    if (json case {'coverage': final Map<String, Object?> map}) {
-      try {
-        return CoverageMap.fromJson(map);
-      } on CheckedFromJsonException {
-        return null;
-      } on FormatException {
-        return null;
-      }
-    }
-    return null;
-  }
-
   /// The entries of [lines], each mutant's last one winning.
   static Map<String, _Recorded> _entries(Iterable<String> lines) =>
       <String, _Recorded>{
@@ -161,24 +134,9 @@ class RunJournal {
   /// `null` when none is recorded.
   final Duration? baseline;
 
-  /// The map a coverage pass over this same code collected, or `null` when
-  /// none is recorded.
-  final CoverageMap? coverage;
-
-  /// Each test file's part of a coverage pass that had not finished, by test
-  /// file — see [SuiteCoverage]. Empty when none is recorded.
-  final Map<String, SuiteCoverage> suites;
-
-  /// Appends one test file's part of the coverage pass to the file.
-  void recordSuite(SuiteCoverage suite) => _append(suite.toJson());
-
   /// Appends a passing baseline's wall time to the file.
   void recordBaseline(Duration wallTime) =>
       _append(<String, Object?>{'baselineMs': wallTime.inMilliseconds});
-
-  /// Appends a finished coverage pass's map to the file.
-  void recordCoverage(CoverageMap map) =>
-      _append(<String, Object?>{'coverage': map.toJson()});
 
   /// [mutant]'s recorded result, or `null` when it has none that can be
   /// reused.

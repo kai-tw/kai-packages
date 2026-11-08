@@ -21,7 +21,8 @@ class MutantTiming {
 
   final Duration gate;
 
-  /// Whether coverage chose its test files.
+  /// Whether its test files were selected — see
+  /// `MutationTestRunner.selectByCoverage`.
   final bool selected;
 
   /// Its own test runs, summed; `null` when it ran none.

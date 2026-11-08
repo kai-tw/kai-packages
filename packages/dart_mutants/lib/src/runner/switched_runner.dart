@@ -46,6 +46,10 @@ import 'worker_sandbox.dart';
 /// runs against it. One that does not means this run would not run what the
 /// test command runs, so the whole run stops, naming the file — scoring
 /// mutants against it would read every one of them as detected.
+///
+/// A test file no mutant still waits on is not run at all, not even
+/// unmutated: once every mutant that listed it is settled — detected by an
+/// earlier file, say — it has nothing left to decide.
 class SwitchedRunner {
   SwitchedRunner({
     required this.toolchain,
@@ -61,8 +65,20 @@ class SwitchedRunner {
     this.onSlotWait,
     this.workers = 1,
     this.arguments = const <String>[],
+    this.testTimeout,
     this.shouldStop,
+    this.selectByReach = false,
   });
+
+  /// Run a switched mutant only against the test files whose unmutated run
+  /// reached its switch — see [reachedVariable]. A test file that does not
+  /// reach the switch runs, with the mutant on, exactly what it runs with it
+  /// off, so it cannot detect it. A switched mutant no test file reaches is
+  /// undetected and uncovered, settled without running it.
+  ///
+  /// A mutant compiled alone has no switch to reach, and runs against every
+  /// test file it was given that its switch did not already rule out.
+  final bool selectByReach;
 
   final SwitchedToolchain toolchain;
 
@@ -76,6 +92,11 @@ class SwitchedRunner {
 
   /// The test command's own filtering options, handed to every test file.
   final List<String> arguments;
+
+  /// The longest one test may run, unmutated or with a mutant on, before it
+  /// fails; `null` leaves it to the test's own timeout. See
+  /// `runSwitchedSuite`.
+  final Duration? testTimeout;
 
   /// How long one test file's compile, or its unmutated run, may take.
   final Duration testFileTimeout;
@@ -128,6 +149,13 @@ class SwitchedRunner {
   final Map<int, Duration> _spent = <int, Duration>{};
 
   final Set<int> _settled = <int>{};
+
+  /// Under [selectByReach], the mutants some test file's unmutated run
+  /// reached.
+  final Set<int> _reached = <int>{};
+
+  /// The budget each mutant last ran under, by id.
+  final Map<int, Duration> _budgets = <int, Duration>{};
 
   /// Switched mutants, by id.
   final Map<int, SwitchedJob> _switched = <int, SwitchedJob>{};
@@ -329,7 +357,14 @@ class SwitchedRunner {
         if (_nextFile < _files.length) {
           final String file = _files[_nextFile++];
           _wakeSlotWaits();
-          await _runFile(lane, file);
+          if (_waitedOn(file)) {
+            await _runFile(lane, file);
+          } else {
+            // No waiter is left to read it, nor can one come: the mutants
+            // still open, alone ones included, do not list this file.
+            _unmutated[file]!.complete(Duration.zero);
+            stats.skippedTestFiles += 1;
+          }
         } else if (_nextAlone < _alone.length) {
           final SwitchedJob job = _alone[_nextAlone++];
           _wakeSlotWaits();
@@ -340,6 +375,12 @@ class SwitchedRunner {
       _giveBackSlot(lane);
     }
   }
+
+  /// Whether a mutant without a result still has to pass on [file].
+  bool _waitedOn(String file) => _remaining.entries.any(
+    (MapEntry<int, Set<String>> e) =>
+        !_settled.contains(e.key) && e.value.contains(file),
+  );
 
   /// [file] compiled and run unmutated, then once per switched mutant still
   /// waiting on it.
@@ -406,24 +447,69 @@ class SwitchedRunner {
     stats.compiling += clock.elapsed;
     if (!compiled) {
       _fail(
-        '$file does not compile in a switched run, though the test command '
-        'passed with it',
+        '$file does not compile in a switched run',
       );
       return null;
     }
+    final File? reached = selectByReach ? lane.reachedFile() : null;
     clock.reset();
-    final int? exitCode = await lane.run(toolchain, null, testFileTimeout);
-    stats.unmutated += clock.elapsed;
+    final int? exitCode = await lane.run(
+      toolchain,
+      null,
+      testFileTimeout,
+      reached: reached?.path,
+    );
+    final Duration took = clock.elapsed;
+    stats.unmutated += took;
     if (exitCode != 0) {
       _fail(
         '$file ${exitCode == null ? 'did not finish within '
                   '${testFileTimeout.inSeconds}s' : 'failed (exit $exitCode)'} '
-        'unmutated in a switched run, though the test command passed with '
-        'it',
+        'unmutated in a switched run',
       );
       return null;
     }
-    return clock.elapsed;
+    if (reached != null) {
+      _narrow(file, _idsIn(reached), lane.id);
+    }
+    return took;
+  }
+
+  /// The ids [file] holds, one a line; none when it was never written.
+  static Set<int> _idsIn(File file) => file.existsSync()
+      ? file.readAsLinesSync().map(int.tryParse).nonNulls.toSet()
+      : const <int>{};
+
+  /// Drops [file] from every switched mutant [reached] leaves out, settling
+  /// one that has no file left: [file]'s unmutated run did not reach it, so
+  /// it would not detect it. The ones moved to [_alone] while [file] compiled
+  /// are left as they are: [file] ran them unswitched, so it says nothing
+  /// about them.
+  void _narrow(String file, Set<int> reached, int lane) {
+    for (final SwitchedJob job in _switched.values) {
+      final Set<String> remaining = _remaining[job.id]!;
+      if (_settled.contains(job.id) || !remaining.contains(file)) {
+        continue;
+      }
+      if (reached.contains(job.id)) {
+        _reached.add(job.id);
+        continue;
+      }
+      remaining.remove(file);
+      stats.unreachedRuns += 1;
+      if (remaining.isEmpty) {
+        _resolve(
+          job,
+          lane,
+          MutantResult(
+            mutant: job.mutant,
+            verdict: MutantVerdict.undetected,
+            uncovered: !_reached.contains(job.id),
+            timeout: _budgets[job.id],
+          ),
+        );
+      }
+    }
   }
 
   /// [file] compiled in [lane], tried again as [_prepare] describes while it
@@ -448,7 +534,14 @@ class SwitchedRunner {
   Future<bool> _compile(_Lane lane, String testFile) {
     stats.compiledTestFiles += 1;
     lane.sync(_sources);
-    return lane.compile(toolchain, root, testFile, arguments, testFileTimeout);
+    return lane.compile(
+      toolchain,
+      root,
+      testFile,
+      arguments,
+      testFileTimeout,
+      testTimeout: testTimeout,
+    );
   }
 
   /// [job]'s mutant written into its file as it is, and each test file it
@@ -594,6 +687,7 @@ class SwitchedRunner {
     if (_settled.contains(job.id)) {
       return;
     }
+    _budgets[job.id] = budget;
     final Set<String> remaining = _remaining[job.id]!..remove(file);
     final MutantVerdict? verdict = switch (exitCode) {
       null => MutantVerdict.timeout,
@@ -603,13 +697,17 @@ class SwitchedRunner {
     if (verdict == null) {
       return;
     }
-    _settled.add(job.id);
-    onResult(
+    _resolve(
       job,
-      MutantResult(mutant: job.mutant, verdict: verdict, timeout: budget),
       lane,
-      _spent[job.id] ?? Duration.zero,
+      MutantResult(mutant: job.mutant, verdict: verdict, timeout: budget),
     );
+  }
+
+  /// Records [result] as [job]'s, once.
+  void _resolve(SwitchedJob job, int lane, MutantResult result) {
+    _settled.add(job.id);
+    onResult(job, result, lane, _spent[job.id] ?? Duration.zero);
     _wakeSlotWaits();
   }
 
@@ -727,13 +825,15 @@ class _Lane {
     String root,
     String testFile,
     List<String> arguments,
-    Duration timeout,
-  ) async {
+    Duration timeout, {
+    Duration? testTimeout,
+  }) async {
     File(_entry).writeAsStringSync(
       toolchain.entry(
         box.pathFor(p.join(root, testFile)),
         root: box.directory,
         arguments: arguments,
+        testTimeout: testTimeout,
       ),
     );
     final bool compiled = await compiler.compile(
@@ -747,19 +847,31 @@ class _Lane {
     return compiled;
   }
 
+  /// The file the next run writes the switches it reaches to, emptied.
+  File reachedFile() {
+    final File file = File(p.join(workPath, 'reached'));
+    if (file.existsSync()) {
+      file.deleteSync();
+    }
+    return file;
+  }
+
   /// The last compiled program, run with [mutantId] on — `null` none — for
-  /// at most [timeout]: its exit code, or `null` when it did not finish.
+  /// at most [timeout]: its exit code, or `null` when it did not finish. It
+  /// writes the switches it reaches to [reached], when given.
   Future<int?> run(
     SwitchedToolchain toolchain,
     int? mutantId,
-    Duration timeout,
-  ) => toolchain
+    Duration timeout, {
+    String? reached,
+  }) => toolchain
       .command(
         _dill,
         workingDirectory: box.directory,
         packageConfig: packageConfig,
         work: workPath,
         mutantId: mutantId,
+        reached: reached,
       )
       .run(timeout: timeout);
 }

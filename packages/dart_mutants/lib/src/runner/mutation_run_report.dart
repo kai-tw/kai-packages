@@ -36,16 +36,10 @@ enum AbortKind {
   switchedRunUnavailable('switched-run-unavailable'),
 
   /// A test file did not compile, or did not pass, with no mutant on in a
-  /// switched run, though the test command passed with it. The run would
-  /// not have run what the test command runs, so it stopped.
+  /// switched run. The run would not have run what the test command runs, so
+  /// it stopped. Without the selection, the test command had passed with
+  /// that file; under it, which runs no baseline, the file may simply be red.
   switchedRunFailed('switched-run-failed'),
-
-  /// `MutationTestRunner.selectByCoverage` was asked for and cannot be
-  /// honoured: the test command is one the coverage pass refuses, or the
-  /// pass itself failed. Refused after the coverage pass, before the first
-  /// mutant — every mutant against the full command instead would be a run
-  /// the caller did not ask for, many times longer than the one they did.
-  selectionUnavailable('selection-unavailable'),
 
   /// The run was stopped from outside — `dart_mutants stop`, `SIGTERM` or
   /// Ctrl-C — before it finished. The mutants that did finish are in the
@@ -87,9 +81,9 @@ class MutationRunReport {
   /// when the run kept none — see `MutationTestRunner.journalPath`.
   final int? reusedMutants;
 
-  /// Whether each mutant ran only the test files that cover it. `false` on a
-  /// completed run that did not ask for coverage selection; a run that asked
-  /// and could not have it aborts instead. `null` on an aborted run.
+  /// Whether each mutant ran only the test files that reach it — see
+  /// `MutationTestRunner.selectByCoverage`. `false` on a completed run that
+  /// did not ask for it; `null` on an aborted run.
   final bool? selectedByCoverage;
 
   /// How long the test command took against unmodified code, or `null` when

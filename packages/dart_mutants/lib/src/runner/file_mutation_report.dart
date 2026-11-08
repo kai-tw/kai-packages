@@ -87,8 +87,7 @@ class FileMutationReport {
   int get total => detected + undetected;
 
   /// How many of [undetectedMutants] no test executed at all — see
-  /// [MutantResult.uncovered]. Always 0 unless tests are selected by
-  /// coverage.
+  /// [MutantResult.uncovered]. Always 0 unless tests are selected.
   int get uncovered =>
       undetectedMutants.where((MutantResult r) => r.uncovered).length;
 

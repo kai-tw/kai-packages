@@ -1,3 +1,59 @@
+## 0.11.0
+
+**Under `--select-by-coverage`, there is no coverage pass and no full
+baseline: the switched run says which test files reach each mutant.** On a
+consuming app's review run, 194 of 352 test files imported a changed file,
+because the change touched types much of the app imports. The baseline took
+12 minutes and the coverage pass, one `flutter test --coverage` process per
+test file, about 32 more, before the first of 501 mutants ran; the mutants
+then took about 5. The same review run on this release took 6.5 minutes in
+all, with two workers, and gave each of its 500 mutants the verdict 0.10.0
+gave it. The memory a run needs is unchanged: nothing runs in parallel that
+did not before. Breaking:
+
+- **Each switch records that it was reached.** A test file's unmutated run,
+  which every test file a mutant runs against already had, now writes each
+  switch it reaches to a file (`DART_MUTANTS_REACHED`), from the root zone,
+  so a test that overrides the file system with `IOOverrides` cannot swallow
+  it. A mutant runs only against the test files that reached its switch:
+  one that did not runs, with the mutant on, exactly what it runs with it
+  off. A mutant no test file reaches is `undetected` and `uncovered`. This
+  is finer than the function-level selection it replaces: a mutant on a
+  branch no test takes, in a function a test enters, is now `uncovered`
+  rather than a survivor. A mutant compiled alone has no switch, and runs
+  against every test file that imports its file.
+- **No full baseline under the selection.** A test file that cannot load a
+  target cannot detect a mutant, and every test file a mutant runs against
+  still has to pass unmutated first. Under `flutter test`, the test command
+  runs once on one test file, to build the assets the switched run reads; a
+  failure there aborts as `baseline-failed` or `baseline-timeout`. The
+  report's `baselineSeconds` and the plan's baseline are absent.
+- **A test file no open mutant lists is not run at all**, with or without
+  the selection: once every mutant that listed it is settled, it has
+  nothing left to decide.
+- **A test file stops at its first failing test.** One failure already
+  decides the file, so the tests after it are not run.
+- **No test may run longer than `--test-timeout`, 5 seconds by default**,
+  unmutated or with a mutant on, whatever timeout it declares itself;
+  `--test-timeout 0` leaves each test to its own. A test slower than that
+  unmutated stops the run, as a failing one does. A mutant that makes a
+  test that slow is `detected`: a mutant that only hangs a test used to
+  wait out `package:test`'s 30 seconds for every test of the file, and was
+  killed as a `timeout` that is not scored. A mutant's budget on a test
+  file now counts the limit where it counted those 30 seconds.
+  `environment` has `testTimeoutSeconds`.
+- **`--mutant-timeout` is gone; the headroom it set is a fixed 5 seconds**,
+  down from 30. With a test that hangs failing at `--test-timeout`, what
+  runs into a mutant's budget is a loop that never yields, which no amount
+  of waiting finishes. Passing it is a usage error. `--baseline-timeout`,
+  which defaulted to ten times it, now defaults to 300 seconds, as before.
+  `mutantTimeoutSeconds` in the report is that headroom, 5.
+- **Removed:** the `selection-unavailable` abort kind, which only the
+  coverage pass produced; the journal's coverage map, and its format is now
+  3, so a journal an earlier release wrote is started over; the statistics'
+  `coveragePassSeconds`, replaced by `assetBuildSeconds`.
+- **Statistics:** `switched` has `skippedTestFiles` and `unreachedRuns`.
+
 ## 0.10.0
 
 **Under `--select-by-coverage`, the coverage pass runs only the test files

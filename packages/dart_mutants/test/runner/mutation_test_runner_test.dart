@@ -1021,8 +1021,8 @@ void main() {
     );
 
     test(
-      '[partition] the coverage pass runs only the test files that import a '
-      'target, and the stats say how many of how many',
+      '[partition] only the test files that import a target can run, and the '
+      'stats say how many of how many',
       () {
         final RunStats stats = report.stats!;
         expect(stats.testFiles, 10);
@@ -1038,7 +1038,7 @@ void main() {
 
     test(
       '[decision] a mutant that does not compile is invalid, whatever '
-      'coverage says — the gate comes first',
+      'the selection says — the gate comes first',
       () {
         final FileMutationReport f = _reportFor(report, 'invalid.dart');
         expect(<int>[f.invalid, f.detected, f.undetected], <int>[1, 1, 0]);
@@ -1046,7 +1046,7 @@ void main() {
     );
   });
 
-  group('selecting tests by coverage, where coverage alone would mislead', () {
+  group('selecting tests, where line coverage would mislead', () {
     late Directory dir;
     late MutationRunReport report;
 
@@ -1122,9 +1122,10 @@ void main() {
   test('loads', () => expect(rel, isNotNull));
 }
 ''');
-      // A ternary in a top-level initializer sits in no function, so coverage
-      // cannot say who runs it: its mutant runs against the one test file
-      // that imports it — and not the canary below.
+      // A ternary in a top-level initializer sits in no function, which the
+      // function-level selection before 0.11.0 could not speak for. Its
+      // switch is reached when the variable is first read, by the one test
+      // file that imports it — and not the canary below.
       File(p.join(dir.path, 'lib', 'initialized.dart')).writeAsStringSync(
         "final String greeting = DateTime.now().year > 0 ? 'hi' : 'bye';\n",
       );
@@ -1179,8 +1180,8 @@ void main() {
     });
 
     test(
-      '[decision] a mutant coverage cannot speak for runs against the test '
-      'files that import its file, is detected there, and counts as selected',
+      '[decision] a mutant in a top-level initializer, in no function, is '
+      'reached when it is read, detected, and counts as selected',
       () {
         final FileMutationReport f = _reportFor(report, 'initialized.dart');
         // The ternary swap and the negated condition are caught; `>` turned
@@ -1229,22 +1230,374 @@ void main() {
     );
 
     test(
-      '[state] a test file that imports neither target runs only in the '
-      'baseline: the coverage pass leaves it out, and no mutant compiles it',
+      '[state] a test file that imports no target is never run: there is no '
+      'baseline under the selection, and no mutant compiles it',
       () {
-        expect(
-          File(p.join(dir.path, 'canary.log')).readAsStringSync().length,
-          1,
-        );
+        expect(File(p.join(dir.path, 'canary.log')).existsSync(), isFalse);
       },
     );
   });
 
+  group('selecting tests by the switches they reach', () {
+    late Directory dir;
+    late MutationRunReport report;
+
+    tearDownAll(() => dir.deleteSync(recursive: true));
+
+    setUpAll(() async {
+      dir = Directory.systemTemp.createTempSync('selection_reach_');
+      File(p.join(dir.path, 'pubspec.yaml')).writeAsStringSync('''
+name: fixture
+environment:
+  sdk: ^3.8.0
+dev_dependencies:
+  test: ^1.25.0
+$dartMutantsDevDependency''');
+      // The test enters `branchy` but never takes the second return, so
+      // the ternary there is never reached: it cannot be detected, and is
+      // uncovered rather than a survivor.
+      File(p.join(dir.path, 'lib', 'branchy.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+String branchy(bool a, bool b) {
+  if (a) {
+    return 'x';
+  }
+  return b ? 'y' : 'z';
+}
+''');
+      File(p.join(dir.path, 'test', 'branchy_test.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+import 'package:fixture/branchy.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('a', () => expect(branchy(true, true), 'x'));
+}
+''');
+      // Both test files reach `pick` and catch its one mutant. The first,
+      // in name order, settles it, so the second has nothing left to do and
+      // is never run. Each counts how often it is loaded.
+      File(
+        p.join(dir.path, 'lib', 'pick.dart'),
+      ).writeAsStringSync("String pick(bool a) => a ? 'yes' : 'no';\n");
+      for (final String name in <String>['a_pick', 'b_pick']) {
+        File(p.join(dir.path, 'test', '${name}_test.dart')).writeAsStringSync(
+          '''
+import 'dart:io';
+
+import 'package:fixture/pick.dart';
+import 'package:test/test.dart';
+
+void main() {
+  File('${p.join(dir.path, '$name.log')}')
+      .writeAsStringSync('x', mode: FileMode.append);
+  test('pick', () => expect(pick(true), 'yes'));
+}
+''',
+        );
+      }
+      // Reached only inside a zone whose file system throws: the switch
+      // still records the reach, and the mutant is run and detected.
+      File(
+        p.join(dir.path, 'lib', 'guarded.dart'),
+      ).writeAsStringSync("String guarded(bool a) => a ? 'on' : 'off';\n");
+      File(p.join(dir.path, 'test', 'guarded_test.dart')).writeAsStringSync('''
+import 'dart:io';
+
+import 'package:fixture/guarded.dart';
+import 'package:test/test.dart';
+
+final class _NoFiles extends IOOverrides {
+  @override
+  File createFile(String path) => throw UnsupportedError('no files here');
+}
+
+void main() {
+  test('guarded', () {
+    IOOverrides.runWithIOOverrides(
+      () => expect(guarded(true), 'on'),
+      _NoFiles(),
+    );
+  });
+}
+''');
+      final ProcessResult pubGet = await Process.run('dart', <String>[
+        'pub',
+        'get',
+      ], workingDirectory: dir.path);
+      if (pubGet.exitCode != 0) {
+        throw StateError('dart pub get failed:\n${pubGet.stderr}');
+      }
+      final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+        dir.path,
+      ]);
+      report =
+          await MutationTestRunner(
+            testCommand: ProcessCommand('dart', <String>[
+              'test',
+            ], workingDirectory: dir.path),
+            compileSafetyGate: gate,
+            operators: <MutationOperator>[TernarySwap()],
+            mutantTimeout: const Duration(seconds: 10),
+            baselineFactor: 0,
+            selectByCoverage: true,
+          ).run(<String>[
+            p.join(dir.path, 'lib', 'branchy.dart'),
+            p.join(dir.path, 'lib', 'pick.dart'),
+            p.join(dir.path, 'lib', 'guarded.dart'),
+          ]);
+      await gate.close();
+    });
+
+    test('[partition] runs to completion, selected', () {
+      expect(report.aborted, isFalse, reason: report.abortReason);
+      expect(report.selectedByCoverage, isTrue);
+    });
+
+    test(
+      '[decision] a mutant in a function a test enters, on a branch it never '
+      'takes, is uncovered — the test file ran, and never reached it',
+      () {
+        final FileMutationReport f = _reportFor(report, 'branchy.dart');
+        expect(<int>[f.detected, f.undetected, f.uncovered], <int>[0, 1, 1]);
+        expect(report.stats!.switched!.unreachedRuns, 1);
+      },
+    );
+
+    test(
+      '[state] a test file every one of whose mutants is already settled is '
+      'not run at all, not even unmutated',
+      () {
+        expect(_reportFor(report, 'pick.dart').detected, 1);
+        expect(
+          File(p.join(dir.path, 'a_pick.log')).readAsStringSync(),
+          'xx',
+          reason: 'unmutated, then the mutant',
+        );
+        expect(File(p.join(dir.path, 'b_pick.log')).existsSync(), isFalse);
+        expect(report.stats!.switched!.skippedTestFiles, 1);
+      },
+    );
+
+    test(
+      '[decision] a switch reached while a test overrides the file system '
+      'is still recorded, and its mutant run and detected',
+      () {
+        final FileMutationReport f = _reportFor(report, 'guarded.dart');
+        expect(<int>[f.detected, f.undetected, f.uncovered], <int>[1, 0, 0]);
+      },
+    );
+  }, timeout: const Timeout(Duration(seconds: 180)));
+
+  group('the per-test limit, and stopping at the first failure', () {
+    late Directory dir;
+
+    Future<MutationRunReport> run(List<String> targets) async {
+      final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+        dir.path,
+      ]);
+      addTearDown(gate.close);
+      return MutationTestRunner(
+        testCommand: ProcessCommand('dart', <String>[
+          'test',
+          ...targets.map((String t) => 'test/${t}_test.dart'),
+        ], workingDirectory: dir.path),
+        compileSafetyGate: gate,
+        operators: <MutationOperator>[TernarySwap()],
+        mutantTimeout: const Duration(seconds: 10),
+        testTimeout: const Duration(seconds: 2),
+        baselineFactor: 0,
+        selectByCoverage: true,
+      ).run(<String>[
+        for (final String t in targets) p.join(dir.path, 'lib', '$t.dart'),
+      ]);
+    }
+
+    setUpAll(() async {
+      dir = Directory.systemTemp.createTempSync('test_limit_');
+      File(p.join(dir.path, 'pubspec.yaml')).writeAsStringSync('''
+name: fixture
+environment:
+  sdk: ^3.8.0
+dev_dependencies:
+  test: ^1.25.0
+$dartMutantsDevDependency''');
+      // Swapped, the wait never ends: the test's own timeout is none, so
+      // only the limit can fail it.
+      File(p.join(dir.path, 'lib', 'wait.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+import 'dart:async';
+
+Future<void> settle(bool now) => now ? Future<void>.value() : Completer<void>().future;
+''');
+      File(p.join(dir.path, 'test', 'wait_test.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+import 'package:fixture/wait.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('settles', () => settle(true), timeout: Timeout.none);
+}
+''');
+      // The first test catches the swap; the second counts how often it
+      // runs, which a run that stops at the first failure never reaches.
+      File(
+        p.join(dir.path, 'lib', 'order.dart'),
+      ).writeAsStringSync("String first(bool a) => a ? 'x' : 'y';\n");
+      File(p.join(dir.path, 'test', 'order_test.dart')).writeAsStringSync('''
+import 'dart:io';
+
+import 'package:fixture/order.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('first', () => expect(first(true), 'x'));
+  test('second', () {
+    File('${p.join(dir.path, 'second.log')}')
+        .writeAsStringSync('x', mode: FileMode.append);
+  });
+}
+''');
+      // Slower than the limit with no mutant on at all.
+      File(
+        p.join(dir.path, 'lib', 'sluggish.dart'),
+      ).writeAsStringSync("String pace(bool a) => a ? 'on' : 'off';\n");
+      File(p.join(dir.path, 'test', 'sluggish_test.dart')).writeAsStringSync('''
+import 'package:fixture/sluggish.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('sluggish', () async {
+    await Future<void>.delayed(const Duration(seconds: 4));
+    expect(pace(true), 'on');
+  });
+}
+''');
+      final ProcessResult pubGet = await Process.run('dart', <String>[
+        'pub',
+        'get',
+      ], workingDirectory: dir.path);
+      if (pubGet.exitCode != 0) {
+        throw StateError('dart pub get failed:\n${pubGet.stderr}');
+      }
+    });
+
+    tearDownAll(() => dir.deleteSync(recursive: true));
+
+    test(
+      '[decision] a mutant that makes a test outlast the limit is detected, '
+      'well inside its budget, rather than timed out',
+      () async {
+        final MutationRunReport report = await run(<String>['wait']);
+
+        expect(report.aborted, isFalse, reason: report.abortReason);
+        final FileMutationReport f = _reportFor(report, 'wait.dart');
+        expect(<int>[f.detected, f.timedOut], <int>[1, 0]);
+        expect(
+          report.stats!.environment['testTimeoutSeconds'],
+          2,
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 120)),
+    );
+
+    test(
+      '[state] a test file stops at its first failing test: the test after '
+      'it runs unmutated, and never with the mutant on',
+      () async {
+        final MutationRunReport report = await run(<String>['order']);
+
+        expect(_reportFor(report, 'order.dart').detected, 1);
+        expect(File(p.join(dir.path, 'second.log')).readAsStringSync(), 'x');
+      },
+      timeout: const Timeout(Duration(seconds: 120)),
+    );
+
+    test(
+      '[error] a test slower than the limit unmutated stops the run, '
+      'naming its file',
+      () async {
+        final MutationRunReport report = await run(<String>['sluggish']);
+
+        expect(report.abortKind, AbortKind.switchedRunFailed);
+        expect(
+          report.abortReason,
+          contains('test/sluggish_test.dart failed (exit 1) unmutated'),
+        );
+      },
+      timeout: const Timeout(Duration(seconds: 120)),
+    );
+  });
+
+  test(
+    '[error] under the selection, which runs no baseline, a test file that '
+    'does not compile stops the switched run, naming it',
+    () async {
+      final Directory dir = Directory.systemTemp.createTempSync(
+        'selection_broken_',
+      );
+      addTearDown(() => dir.deleteSync(recursive: true));
+      File(p.join(dir.path, 'pubspec.yaml')).writeAsStringSync('''
+name: fixture
+environment:
+  sdk: ^3.8.0
+dev_dependencies:
+  test: ^1.25.0
+$dartMutantsDevDependency''');
+      File(p.join(dir.path, 'lib', 'pick.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync("String pick(bool a) => a ? 'yes' : 'no';\n");
+      File(p.join(dir.path, 'test', 'broken_test.dart'))
+        ..createSync(recursive: true)
+        ..writeAsStringSync('''
+import 'package:fixture/pick.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('broken', () => expect(pick(1), 'yes'));
+}
+''');
+      final ProcessResult pubGet = await Process.run('dart', <String>[
+        'pub',
+        'get',
+      ], workingDirectory: dir.path);
+      if (pubGet.exitCode != 0) {
+        throw StateError('dart pub get failed:\n${pubGet.stderr}');
+      }
+      final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+        dir.path,
+      ]);
+      addTearDown(gate.close);
+
+      final MutationRunReport report = await MutationTestRunner(
+        testCommand: ProcessCommand('dart', <String>[
+          'test',
+        ], workingDirectory: dir.path),
+        compileSafetyGate: gate,
+        operators: <MutationOperator>[TernarySwap()],
+        mutantTimeout: const Duration(seconds: 10),
+        baselineFactor: 0,
+        selectByCoverage: true,
+      ).run(<String>[p.join(dir.path, 'lib', 'pick.dart')]);
+
+      expect(report.abortKind, AbortKind.switchedRunFailed);
+      expect(
+        report.abortReason,
+        contains('test/broken_test.dart does not compile in a switched run'),
+      );
+    },
+    timeout: const Timeout(Duration(seconds: 180)),
+  );
+
   group('each test file\'s own budget', () {
     // A test file that reaches no target sleeps 4s; the others take well
     // under a second. A mutant's budget on a file comes from that file's own
-    // unmutated run, never less than it plus the 1s floor plus the 30s
-    // package:test gives a test that awaits forever.
+    // unmutated run, never less than it plus the 1s floor plus the 5s a test
+    // that awaits forever takes to fail (the default --test-timeout).
     late Directory dir;
     late Directory temps;
     late MutationRunReport report;
@@ -1321,14 +1674,15 @@ void main() {
 
     test(
       '[decision] a mutant that hangs its test file times out at that file\'s '
-      'budget: its unmutated run, plus the floor, plus package:test\'s 30s',
+      'budget: its unmutated run, plus the floor, plus the 5s test timeout — '
+      'a synchronous loop no test timeout can stop',
       () {
         final MutantResult hung = _reportFor(
           report,
           'hangs.dart',
         ).timedOutMutants.single;
-        expect(hung.timeout, greaterThan(const Duration(seconds: 31)));
-        expect(hung.timeout, lessThan(const Duration(seconds: 35)));
+        expect(hung.timeout, greaterThan(const Duration(seconds: 6)));
+        expect(hung.timeout, lessThan(const Duration(seconds: 10)));
       },
     );
 
@@ -1352,12 +1706,12 @@ void main() {
 
     test(
       '[state] a test file is compiled and run unmutated once, however many '
-      'mutants it runs — baseline, coverage pass, unmutated run, and its two '
-      'mutants',
+      'mutants it runs, and under the selection nothing else runs it — its '
+      'unmutated run, and its two mutants',
       () {
         expect(
           File(p.join(dir.path, 'twice.log')).readAsStringSync(),
-          'xxxxx',
+          'xxx',
         );
       },
     );
@@ -1376,7 +1730,7 @@ void main() {
     );
 
     test(
-      '[state] the coverage pass wrote into a temporary directory, and none '
+      '[state] the switched run wrote into temporary directories, and none '
       'is left once the run returns',
       () {
         expect(temps.listSync(), isEmpty);
@@ -1384,12 +1738,15 @@ void main() {
     );
 
     test(
-      '[state] the statistics time every phase that ran and every mutant',
+      '[state] the statistics time every phase that ran and every mutant — '
+      'under the selection and `dart test`, neither a baseline nor an asset '
+      'build',
       () {
         final RunStats stats = report.stats!;
-        expect(stats.baseline, report.baselineDuration);
+        expect(stats.baseline, isNull);
+        expect(report.baselineDuration, isNull);
+        expect(stats.assetBuild, isNull);
         expect(stats.gateCheck, isNotNull);
-        expect(stats.coveragePass, greaterThan(Duration.zero));
         expect(stats.finishedAt!.isBefore(stats.startedAt), isFalse);
         expect(
           stats.mutants.map((MutantTiming m) => m.bucket),
@@ -1959,7 +2316,7 @@ void main() {
 
     test(
       '[decision] with the factor off, the budget is the file\'s unmutated '
-      'run plus the floor plus package:test\'s 30s — never less than the '
+      'run plus the floor plus the 5s test timeout — never less than the '
       'file needs unmutated',
       () async {
         final MutationRunReport report = await runWith(0);
@@ -1967,8 +2324,8 @@ void main() {
         expect(report.aborted, isFalse, reason: report.abortReason);
         expect(report.mutantTimeout, const Duration(seconds: 1));
         final Duration budget = report.stats!.mutants.single.result.timeout!;
-        expect(budget, greaterThan(const Duration(seconds: 33)));
-        expect(budget, lessThan(const Duration(seconds: 40)));
+        expect(budget, greaterThan(const Duration(seconds: 8)));
+        expect(budget, lessThan(const Duration(seconds: 15)));
         expect(_reportFor(report, 'slow.dart').detected, 1);
       },
       timeout: const Timeout(Duration(seconds: 120)),
@@ -2000,8 +2357,8 @@ void main() {
     );
 
     test(
-      '[boundary] the baseline gets ten times the mutant floor unless told '
-      'otherwise',
+      '[boundary] the baseline gets 5 minutes unless told otherwise, '
+      'whatever the mutant floor, and the floor is 5s',
       () {
         final MutationTestRunner runner = MutationTestRunner(
           testCommand: const ProcessCommand('true', <String>[]),
@@ -2010,8 +2367,16 @@ void main() {
           ),
           mutantTimeout: const Duration(seconds: 7),
         );
+        final MutationTestRunner defaults = MutationTestRunner(
+          testCommand: const ProcessCommand('true', <String>[]),
+          compileSafetyGate: const AnalyzerProcessGate(
+            ProcessCommand('true', <String>[]),
+          ),
+        );
 
-        expect(runner.baselineTimeout, const Duration(seconds: 70));
+        expect(runner.baselineTimeout, const Duration(minutes: 5));
+        expect(defaults.mutantTimeout, const Duration(seconds: 5));
+        expect(defaults.testTimeout, const Duration(seconds: 5));
       },
     );
   });

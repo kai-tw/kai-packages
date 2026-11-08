@@ -213,8 +213,8 @@ void main() {
         marker,
         output: output,
       );
-      // Past the baseline and the coverage pass, which run in a process of
-      // their own each: from the third process on, mutants are being scored.
+      // Past the baseline, which runs in a process of its own: from the
+      // third process on, test files are being run in the switched run.
       await until(
         (List<MarkerEvent> e) =>
             e.map((MarkerEvent x) => x.pid).toSet().length >= 3,

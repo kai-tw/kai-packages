@@ -124,7 +124,11 @@ void main() {
   /// Starts the CLI on [dir]'s `lib/calc.dart` with its temporary
   /// directories under [temps], and waits until a mutant is running: a
   /// switched lane's copy exists and a child process is in flight.
-  Future<Process> startMidMutant(Directory dir, Directory temps) async {
+  Future<Process> startMidMutant(
+    Directory dir,
+    Directory temps, {
+    bool selected = false,
+  }) async {
     final Process process = await Process.start(
       'dart',
       <String>[
@@ -132,6 +136,10 @@ void main() {
         _binPath,
         '--test-command',
         'dart test',
+        // The fixture's test takes 5s, to be caught mid-run.
+        '--test-timeout',
+        '0',
+        if (selected) '--select-by-coverage',
         p.join(dir.path, 'lib', 'calc.dart'),
       ],
       workingDirectory: dir.path,
@@ -235,8 +243,8 @@ void main() {
   );
 
   test(
-    'SIGTERM during the coverage pass deletes its temporary directory, '
-    'rather than leaving it to fill the disk',
+    'SIGTERM mid-mutant under --select-by-coverage, while the unmutated runs '
+    'write what they reach, still deletes every temporary directory',
     () async {
       final Directory dir = await _slowFixture();
       addTearDown(() => dir.deleteSync(recursive: true));
@@ -247,43 +255,15 @@ void main() {
       );
       addTearDown(() => temps.deleteSync(recursive: true));
 
-      final Process process = await Process.start(
-        'dart',
-        <String>[
-          'run',
-          _binPath,
-          '--test-command',
-          'dart test',
-          '--select-by-coverage',
-          p.join(dir.path, 'lib', 'calc.dart'),
-        ],
-        workingDirectory: dir.path,
-        environment: <String, String>{
-          ...cliEnvironment,
-          'TMPDIR': temps.path,
-        },
-      );
-      addTearDown(() => process.kill(ProcessSignal.sigkill));
-      process.stdout.drain<void>();
-      process.stderr.drain<void>();
-
-      bool coverageDirExists() => temps.listSync().any(
-        (FileSystemEntity e) =>
-            p.basename(e.path).startsWith('dart_mutants_${process.pid}_cov_'),
-      );
-      await _waitUntil(
-        coverageDirExists,
-        timeout: const Duration(seconds: 30),
-      );
-
+      final Process process = await startMidMutant(dir, temps, selected: true);
       process.kill(ProcessSignal.sigterm);
       expect(
         await process.exitCode.timeout(const Duration(seconds: 10)),
         1,
       );
-      expect(coverageDirExists(), isFalse);
+      expect(_ownTemps(temps, process.pid), isEmpty);
     },
-    timeout: const Timeout(Duration(seconds: 60)),
+    timeout: const Timeout(Duration(seconds: 90)),
   );
 }
 

@@ -125,22 +125,40 @@ void main() {
   );
 
   test(
-    '[state] a second start reads the baseline and the coverage map from '
-    'the journal instead of running them again',
+    '[state] a second start reads the baseline from the journal instead of '
+    'running it again',
+    () async {
+      final _Start first = await _start(dir, journal);
+      File(journal).writeAsStringSync(
+        '${File(journal).readAsLinesSync().take(2).join('\n')}\n',
+      );
+      final _Start second = await _start(dir, journal);
+
+      expect(first.plan?.baselineReused, isFalse);
+      expect(second.plan?.baselineReused, isTrue);
+      expect(
+        second.plan?.baseline?.inMilliseconds,
+        first.plan?.baseline?.inMilliseconds,
+      );
+      expect(second.ran, hasLength(2));
+    },
+    timeout: const Timeout(Duration(seconds: 180)),
+  );
+
+  test(
+    '[state] under the selection, a second start scores the same without a '
+    'baseline, and reuses every result',
     () async {
       final _Start first = await _start(dir, journal, selectByCoverage: true);
       final _Start second = await _start(dir, journal, selectByCoverage: true);
 
-      expect(first.plan?.baselineReused, isFalse);
-      expect(first.plan?.coverageReused, isFalse);
-      expect(second.plan?.baselineReused, isTrue);
-      expect(second.plan?.coverageReused, isTrue);
-      expect(
-        second.plan?.baseline.inMilliseconds,
-        first.plan?.baseline.inMilliseconds,
-      );
+      expect(first.plan?.baseline, isNull);
+      expect(second.plan?.baseline, isNull);
+      expect(second.ran, isEmpty);
       expect(second.report.selectedByCoverage, isTrue);
+      expect(second.file('pick.dart').detected, 1);
       expect(second.file('unused.dart').undetected, 1);
+      expect(second.file('unused.dart').uncovered, 1);
     },
     timeout: const Timeout(Duration(seconds: 180)),
   );

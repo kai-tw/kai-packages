@@ -8,6 +8,13 @@ import '../mutant.dart';
 /// Unset, empty or any id the file does not hold leaves it unmodified.
 const String mutantIdVariable = 'DART_MUTANTS_ID';
 
+/// The environment variable naming the file a switched file appends each
+/// switch it reaches to, one id a line, the first time it reaches it. Unset
+/// or empty, nothing is written. A switch a run never reaches holds a mutant
+/// that run cannot detect: with the mutant on, the run executes exactly what
+/// it executes with it off.
+const String reachedVariable = 'DART_MUTANTS_REACHED';
+
 /// One file with many mutants written into it at once, each behind a switch
 /// read at run time — a mutant schema. Compiled once, it runs as any one of
 /// its mutants, or as the unmodified code, by setting [mutantIdVariable].
@@ -37,6 +44,9 @@ class SwitchedFile {
 /// Several mutants at one node chain; a mutant inside another's node is
 /// switched inside that node's unmodified branch. Only one mutant is ever on,
 /// so each mutated branch holds that mutant alone.
+///
+/// Run with [reachedVariable] set, the file also says which switches the run
+/// reached — see `SwitchedRunner.selectByReach`.
 ///
 /// Left out, with the reason in [SwitchedFile.skipped]: a part file, which
 /// cannot import `dart:io`; anything in a constant context, which cannot read
@@ -102,13 +112,31 @@ class _Writer {
   String write(int importAt) {
     final StringBuffer out = StringBuffer()
       ..write(_source.substring(0, importAt))
-      ..write("\nimport 'dart:io' as _dmIo;\n");
+      ..write("\nimport 'dart:async' as _dmAsync;\n")
+      ..write("import 'dart:io' as _dmIo;\n");
     _next = 0;
     _span(out, importAt, _source.length);
+    // The reached file is written from the root zone, so a test that swaps
+    // the file system out with `IOOverrides` cannot swallow the write.
     out.write(
       '\n\nfinal int _dmId = int.tryParse('
       "_dmIo.Platform.environment['$mutantIdVariable'] ?? '') ?? -1;\n"
-      'bool _dmOn(int id) => _dmId == id;\n',
+      'final String _dmReach = '
+      "_dmIo.Platform.environment['$reachedVariable'] ?? '';\n"
+      'final Set<int> _dmReached = <int>{};\n'
+      'bool _dmOn(int id) {\n'
+      '  if (_dmReach.isNotEmpty && _dmReached.add(id)) {\n'
+      '    _dmAsync.Zone.root.run(\n'
+      '      () => _dmIo.File(_dmReach).writeAsStringSync(\n'
+      r"        '$id\n',"
+      '\n'
+      '        mode: _dmIo.FileMode.append,\n'
+      '        flush: true,\n'
+      '      ),\n'
+      '    );\n'
+      '  }\n'
+      '  return _dmId == id;\n'
+      '}\n',
     );
     return out.toString();
   }
