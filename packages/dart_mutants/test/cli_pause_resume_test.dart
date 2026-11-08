@@ -221,6 +221,12 @@ void main() {
       );
       expect((await _control('pause', dir)).exitCode, 0);
       // The test files already running finish; nothing new may begin.
+      // A lane that got past its pause check just before the signal is still
+      // compiling its next test file, which leaves no marker until it runs —
+      // so the markers can read idle while that file is about to start. Let
+      // it start and finish before taking the count.
+      await until(idle);
+      await Future<void>.delayed(const Duration(seconds: 10));
       await until(idle);
       final int whenPaused = starts();
       await Future<void>.delayed(const Duration(seconds: 5));

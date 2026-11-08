@@ -5,8 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Every job below runs on its own runner at the same time. Runners are free
+# for a public repo, so wall-clock time is the only thing worth saving, and
+# each job pays about a minute of setup for it.
 jobs:
-  check:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +22,7 @@ jobs:
       # Every package's SDK constraint here is a caret lower bound
       # (`^3.8.0`, `^3.12.0`), so a newer bundled Dart always satisfies it —
       # the tradeoff is losing exact reproducibility between CI runs in
-      # exchange for never going stale.
+      # exchange for never going stale. Every job below sets up the same way.
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
@@ -38,21 +41,40 @@ jobs:
       # print and the command still exits 0).
       - run: dart run dart_lints
 
+  # dart_mutants' suite drives real subprocesses (dart pub get, dart analyze,
+  # dart test, SIGTERM/SIGKILL) rather than mocking any of them, and its own
+  # dart_test.yaml pins concurrency: 1 because those runs starve each other
+  # for CPU. Run serially on one runner, it took over 30 minutes, so it's
+  # split into shards that each get a runner and its CPUs to themselves.
+  dart_mutants:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      - run: flutter pub get
+
+      - run: dart test --total-shards 6 --shard-index ${{ matrix.shard }}
+        working-directory: packages/dart_mutants
+
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      - run: flutter pub get
+
       - run: dart test
         working-directory: packages/dart_lints
-
-      # Added after dart_lints on purpose — dart_mutants is declared in the
-      # same place for the same reason (see pubspec.yaml's dev_dependencies
-      # comment) and, like clock_anchor before it, had no step of its own
-      # here, so its suite silently never ran in CI. That suite drives real
-      # subprocesses (dart pub get, dart analyze, dart test, SIGTERM/SIGKILL)
-      # rather than mocking any of them, so it is the slowest package step in
-      # this job — and its own dart_test.yaml pins concurrency: 1 and a 4x
-      # timeout on top of that, because each of those subprocess runs is now
-      # a cold compile by design (see TestCompilationCache). That is the
-      # accepted trade, not a flake to chase.
-      - run: dart test
-        working-directory: packages/dart_mutants
 
       - run: dart test
         working-directory: packages/hybrid_logical_clock
@@ -62,9 +84,10 @@ jobs:
       # stand-in, so when both break, the narrower failure is the one to read
       # first.
       #
-      # Every package's tests are listed by hand here, which means a package
-      # added without a step of its own is silently never tested. That is how
-      # this one nearly shipped.
+      # Every package's tests are listed by hand in this workflow, which
+      # means a package added without a step of its own is silently never
+      # tested. That is how this one nearly shipped. dart_mutants has a job
+      # of its own above.
       - run: dart test
         working-directory: packages/clock_anchor
 
@@ -85,6 +108,27 @@ jobs:
       - run: flutter test
         working-directory: packages/log_system
 
+      # Catches pub.dev's own complaints (missing example, bad description
+      # length, unresolvable doc links) before a release rather than during one.
+      - run: dart pub publish --dry-run
+        working-directory: packages/hybrid_logical_clock
+
+      - run: dart pub publish --dry-run
+        working-directory: packages/clock_anchor
+
+      # ui_kit, connectivity_status and versioned_json are intentionally not
+      # published (git dependency only), so no publish dry-run step for them.
+
+  connectivity_status_android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+      - run: flutter pub get
+
       # connectivity_status's example app is not in the pub workspace (a
       # federated plugin's example never is), so it needs its own
       # resolution before it can build.
@@ -98,17 +142,6 @@ jobs:
       # needs a real Xcode toolchain, so it gets its own macOS job below.
       - run: flutter build apk --debug
         working-directory: packages/connectivity_status/example
-
-      # Catches pub.dev's own complaints (missing example, bad description
-      # length, unresolvable doc links) before a release rather than during one.
-      - run: dart pub publish --dry-run
-        working-directory: packages/hybrid_logical_clock
-
-      - run: dart pub publish --dry-run
-        working-directory: packages/clock_anchor
-
-      # ui_kit, connectivity_status and versioned_json are intentionally not
-      # published (git dependency only), so no publish dry-run step for them.
 
   connectivity_status_ios:
     runs-on: macos-latest
