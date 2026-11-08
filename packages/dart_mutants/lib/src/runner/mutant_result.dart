@@ -14,8 +14,8 @@ class MutantResult {
   final MutantVerdict verdict;
 
   /// `true` when this mutant was scored [MutantVerdict.undetected] without a
-  /// test run, because coverage showed no test enters the function it sits
-  /// in. Only ever set when tests are selected by coverage. Kept apart
+  /// test run, because no test file reaches it. Only ever set when tests
+  /// are selected — see `MutationTestRunner.selectByCoverage`. Kept apart
   /// from a survivor that ran because the two call for different fixes: one
   /// needs an assertion, the other needs a test that reaches the code at all.
   final bool uncovered;

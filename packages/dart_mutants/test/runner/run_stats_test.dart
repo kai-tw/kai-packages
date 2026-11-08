@@ -183,6 +183,8 @@ void main() {
       'alone': 1,
       'aloneReasons': <String, int>{'constant context': 1},
       'compiledTestFiles': 2,
+      'skippedTestFiles': 0,
+      'unreachedRuns': 0,
       'switchSeconds': 0,
       'compileSeconds': 0,
       'unmutatedSeconds': 0,

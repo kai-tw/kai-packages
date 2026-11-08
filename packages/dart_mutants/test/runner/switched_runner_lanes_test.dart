@@ -64,12 +64,14 @@ class _Toolchain implements SwitchedToolchain {
     required String packageConfig,
     required String work,
     int? mutantId,
+    String? reached,
   }) => _real.command(
     dill,
     workingDirectory: workingDirectory,
     packageConfig: packageConfig,
     work: work,
     mutantId: mutantId,
+    reached: reached,
   );
 
   @override
@@ -77,7 +79,13 @@ class _Toolchain implements SwitchedToolchain {
     String testFile, {
     required String root,
     required List<String> arguments,
-  }) => _real.entry(testFile, root: root, arguments: arguments);
+    Duration? testTimeout,
+  }) => _real.entry(
+    testFile,
+    root: root,
+    arguments: arguments,
+    testTimeout: testTimeout,
+  );
 }
 
 const String _lib = '''

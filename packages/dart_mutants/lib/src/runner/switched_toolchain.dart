@@ -29,21 +29,25 @@ abstract interface class SwitchedToolchain {
   void prepare(String work);
 
   /// Runs [dill] from [workingDirectory]: [mutantId] picks the mutant the
-  /// switched files run as, `null` none.
+  /// switched files run as, `null` none; [reached] names the file they write
+  /// the switches they reach to, `null` none — see [reachedVariable].
   ProcessCommand command(
     String dill, {
     required String workingDirectory,
     required String packageConfig,
     required String work,
     int? mutantId,
+    String? reached,
   });
 
   /// The program the test file at [testFile] (inside [root]) runs as,
-  /// handed [arguments] — the test command's own filtering options.
+  /// handed [arguments] — the test command's own filtering options — and
+  /// [testTimeout], the longest one test may run, `null` no limit.
   String entry(
     String testFile, {
     required String root,
     required List<String> arguments,
+    Duration? testTimeout,
   });
 }
 
@@ -58,8 +62,8 @@ class FlutterToolchain implements SwitchedToolchain {
   /// The engine's host directory name, e.g. `darwin-x64`.
   final String _host;
 
-  /// The package under test, whose `build/unit_test_assets` its baseline run
-  /// left behind.
+  /// The package under test, whose `build/unit_test_assets` a run of the
+  /// test command left behind.
   final String _packageRoot;
 
   String get _cache => p.join(sdkRoot, 'bin', 'cache');
@@ -165,9 +169,10 @@ class FlutterToolchain implements SwitchedToolchain {
     Directory(p.join(work, 'assets')).createSync();
   }
 
-  /// The assets `flutter test` built for the package, which its baseline
-  /// run left behind; an empty directory when there are none, and a test
-  /// that needs them then fails unmutated, which stops the run.
+  /// The assets `flutter test` built for the package, which the baseline —
+  /// or under the selection, the run that builds them — left behind; an
+  /// empty directory when there are none, and a test that needs them then
+  /// fails unmutated, which stops the run.
   String _assets(String work) {
     final String built = p.join(_packageRoot, 'build', 'unit_test_assets');
     return Directory(built).existsSync() ? built : p.join(work, 'assets');
@@ -180,6 +185,7 @@ class FlutterToolchain implements SwitchedToolchain {
     required String packageConfig,
     required String work,
     int? mutantId,
+    String? reached,
   }) {
     final String assets = _assets(work);
     return ProcessCommand(
@@ -208,6 +214,7 @@ class FlutterToolchain implements SwitchedToolchain {
         // Always set, so a value this process inherited cannot switch a
         // mutant on for the unmutated run.
         mutantIdVariable: mutantId?.toString() ?? '',
+        reachedVariable: reached ?? '',
       },
     );
   }
@@ -219,6 +226,7 @@ class FlutterToolchain implements SwitchedToolchain {
     String testFile, {
     required String root,
     required List<String> arguments,
+    Duration? testTimeout,
   }) {
     final String test = Uri.file(testFile).toString();
     final String? config = testConfigFor(testFile, root);
@@ -238,6 +246,7 @@ class FlutterToolchain implements SwitchedToolchain {
           : '    () => config.testExecutable(test.main),',
       '    path: ${_literal(p.relative(testFile, from: root))},',
       '    arguments: ${_literals(arguments)},',
+      ?_timeout(testTimeout, '    '),
       '  );',
       '}',
       '',
@@ -348,12 +357,14 @@ class DartToolchain implements SwitchedToolchain {
     required String packageConfig,
     required String work,
     int? mutantId,
+    String? reached,
   }) => ProcessCommand(
     _dart,
     <String>['--enable-asserts', '--packages=$packageConfig', dill],
     workingDirectory: workingDirectory,
     environment: <String, String>{
       mutantIdVariable: mutantId?.toString() ?? '',
+      reachedVariable: reached ?? '',
     },
   );
 
@@ -362,6 +373,7 @@ class DartToolchain implements SwitchedToolchain {
     String testFile, {
     required String root,
     required List<String> arguments,
+    Duration? testTimeout,
   }) => <String>[
     "import 'package:dart_mutants/switched_suite.dart';",
     '',
@@ -371,6 +383,7 @@ class DartToolchain implements SwitchedToolchain {
     '  test.main,',
     '  path: ${_literal(p.relative(testFile, from: root))},',
     '  arguments: ${_literals(arguments)},',
+    ?_timeout(testTimeout, '  '),
     ');',
     '',
   ].join('\n');
@@ -405,6 +418,12 @@ String? packageNameOf(String root) {
 
 String _literal(String value) =>
     "'${value.replaceAll(r'\', r'\\').replaceAll("'", r"\'").replaceAll(r'$', r'\$')}'";
+
+/// The `testTimeout:` argument of an entry, at [indent]; `null` for none.
+String? _timeout(Duration? limit, String indent) => limit == null
+    ? null
+    : '${indent}testTimeout: const Duration(milliseconds: '
+          '${limit.inMilliseconds}),';
 
 String _literals(List<String> values) =>
     '<String>[${values.map(_literal).join(', ')}]';

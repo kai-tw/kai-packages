@@ -97,15 +97,15 @@ void main() {
       // no survivor is called uncovered.
       expect(json['selectedByCoverage'], isFalse);
       expect(fileReport['uncovered'], 0);
-      // The run's floor is the --mutant-timeout passed; the budget the
-      // survivor actually got on its test file is that plus the file's own
-      // unmutated run plus package:test's 30s.
+      // The run's floor is the fixed 5s headroom; the budget the survivor
+      // actually got on its test file is that plus the file's own unmutated
+      // run plus the 5s test timeout.
       expect(json['baselineSeconds']! as num, greaterThan(0));
-      expect(json['mutantTimeoutSeconds'], 30);
+      expect(json['mutantTimeoutSeconds'], 5);
       final Map<String, Object?> survivor =
           (fileReport['undetectedMutants']! as List<Object?>).single!
               as Map<String, Object?>;
-      expect(survivor['timeoutSeconds']! as num, greaterThan(60));
+      expect(survivor['timeoutSeconds']! as num, greaterThan(10));
     },
   );
 
@@ -166,6 +166,8 @@ void main() {
   );
 
   for (final (String flag, String value) in <(String, String)>[
+    ('--test-timeout', '-1'),
+    ('--test-timeout', 'soon'),
     ('--baseline-timeout', '0'),
     ('--baseline-timeout', 'soon'),
     ('--baseline-factor', '-1'),
@@ -221,7 +223,7 @@ void main() {
       final Map<String, Object?> json =
           jsonDecode(result.stdout as String) as Map<String, Object?>;
       expect(json['abortKind'], isNull, reason: '${json['abortReason']}');
-      expect(json['mutantTimeoutSeconds'], 30);
+      expect(json['mutantTimeoutSeconds'], 5);
     },
   );
 
@@ -335,7 +337,7 @@ void main() {
     // double the single-run cost the package default (30s) is sized for.
     // Measured at ~19s for one run alone; the two together tripped the
     // default, which is a test-runtime ceiling, not a `dart_mutants` gate —
-    // unlike `--mutant-timeout`, doubling it cannot hide a genuine hang here.
+    // unlike a mutant's budget, doubling it cannot hide a genuine hang here.
     timeout: const Timeout(Duration(seconds: 90)),
   );
 
@@ -374,7 +376,7 @@ void main() {
               as Map<String, Object?>;
       expect(
         survivor['timeoutSeconds']! as num,
-        greaterThan((json['mutantTimeoutSeconds']! as num) + 30),
+        greaterThan((json['mutantTimeoutSeconds']! as num) + 5),
       );
       expect(File('$out.partial').existsSync(), isFalse);
 
@@ -383,7 +385,7 @@ void main() {
       expect(lines[0], startsWith('1 mutant in 1 file — baseline '));
       expect(
         lines[0],
-        endsWith('each mutant given at least 30.0s a test file'),
+        endsWith('each mutant given at least 5.0s a test file'),
       );
       // The last mutant carries no `left`: nothing is left, and a `~0s left`
       // on the final line reads as a run still going.

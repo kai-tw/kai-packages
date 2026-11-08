@@ -101,6 +101,7 @@ Future<MutationRunReport> _run(
   Directory dir, {
   List<String> flags = const <String>[],
   int workers = 1,
+  Duration? baselineTimeout,
 }) async {
   final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
     dir.path,
@@ -117,6 +118,7 @@ Future<MutationRunReport> _run(
     workers: workers,
     mutantTimeout: const Duration(seconds: 60),
     baselineFactor: 0,
+    baselineTimeout: baselineTimeout,
   ).run(<String>[p.join(dir.path, 'lib', 'calc.dart')]);
 }
 
@@ -154,6 +156,9 @@ void main() {
 
       final MutationRunReport one = await _run(dir);
       expect(one.aborted, isFalse, reason: one.abortReason);
+      // Under the selection: no baseline, only the run that builds assets.
+      expect(one.baselineDuration, isNull);
+      expect(one.stats!.assetBuild, isNotNull);
       expect(one.stats!.switched!.switched, greaterThan(0));
       // The ternary in the constant list cannot read the environment.
       expect(
@@ -185,6 +190,65 @@ void main() {
     },
     skip: _hasFlutter() ? false : 'needs flutter on PATH',
     timeout: const Timeout(Duration(minutes: 15)),
+  );
+
+  test(
+    '[error] under the selection, a test file that fails unmodified in the '
+    'run that builds the assets aborts as a red baseline, naming the file',
+    () async {
+      // Sorts first, so it is the file the assets are built with.
+      final File red = File(p.join(dir.path, 'test', 'aaa_red_test.dart'))
+        ..writeAsStringSync('''
+import 'package:fixture/calc.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('red', () => expect(label(1), 'not positive'));
+}
+''');
+      addTearDown(red.deleteSync);
+
+      final MutationRunReport report = await _run(dir);
+
+      expect(report.abortKind, AbortKind.baselineFailed);
+      expect(report.abortReason, contains('test/aaa_red_test.dart'));
+      expect(report.stats!.assetBuild, isNotNull);
+      expect(report.stats!.mutants, isEmpty);
+    },
+    skip: _hasFlutter() ? false : 'needs flutter on PATH',
+    timeout: const Timeout(Duration(minutes: 5)),
+  );
+
+  test(
+    '[error] under the selection, a test file that hangs in the run that '
+    'builds the assets aborts as a baseline that never finished',
+    () async {
+      final File hung = File(p.join(dir.path, 'test', 'aaa_hung_test.dart'))
+        ..writeAsStringSync('''
+import 'dart:async';
+
+import 'package:fixture/calc.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('hung', () async {
+    label(1);
+    await Completer<void>().future;
+  }, timeout: Timeout.none);
+}
+''');
+      addTearDown(hung.deleteSync);
+
+      final MutationRunReport report = await _run(
+        dir,
+        baselineTimeout: const Duration(seconds: 15),
+      );
+
+      expect(report.abortKind, AbortKind.baselineTimeout);
+      expect(report.abortReason, contains('test/aaa_hung_test.dart'));
+    },
+    skip: _hasFlutter() ? false : 'needs flutter on PATH',
+    timeout: const Timeout(Duration(minutes: 5)),
   );
 
   test(

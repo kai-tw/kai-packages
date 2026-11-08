@@ -7,8 +7,8 @@ import 'switched_stats.dart';
 /// against.
 ///
 /// Filled in by `MutationTestRunner.run`. A phase that never happened, such
-/// as the coverage pass without `--select-by-coverage`, or everything after
-/// an abort, stays `null` and is left out of [toJson].
+/// as the baseline under `--select-by-coverage`, or everything after an
+/// abort, stays `null` and is left out of [toJson].
 class RunStats {
   RunStats({
     required this.startedAt,
@@ -31,10 +31,12 @@ class RunStats {
   /// Putting every target to the gate unmodified, before any mutant.
   Duration? gateCheck;
 
-  Duration? coveragePass;
+  /// Under the selection and `flutter test`: the test command run on one
+  /// test file, to build the assets the switched run reads.
+  Duration? assetBuild;
 
   /// Under the selection: the test files the command runs, and how many of
-  /// them can load a target — the ones the coverage pass runs.
+  /// them can load a target — the ones a mutant can run against.
   int? testFiles;
   int? testFilesLoadingTargets;
 
@@ -71,7 +73,7 @@ class RunStats {
     for (final MapEntry<String, Duration?> phase in <String, Duration?>{
       'baselineSeconds': baseline,
       'gateCheckSeconds': gateCheck,
-      'coveragePassSeconds': coveragePass,
+      'assetBuildSeconds': assetBuild,
     }.entries)
       if (phase.value case final Duration took) phase.key: _s(took),
     'mutantsSeconds': _s(_sum(mutants, (MutantTiming m) => m.elapsed)),

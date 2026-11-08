@@ -10,8 +10,8 @@
 class RunBudget {
   const RunBudget(this.limit, {this.paceAfterPerWorker = defaultPaceAfter});
 
-  /// The longest the mutants may take. The baseline and the coverage pass
-  /// are not counted against it — they run before the first mutant.
+  /// The longest the mutants may take. The baseline is not counted against
+  /// it — it runs before the first mutant.
   final Duration limit;
 
   /// How many mutants each worker must finish before the pace they set is

@@ -5,7 +5,7 @@ import 'package:path/path.dart' as p;
 import 'process_command.dart';
 
 /// The two test runners this package knows how to run a chosen subset of
-/// test files with, and collect per-file coverage from.
+/// test files with.
 enum TestRunner { dart, flutter }
 
 /// A `--test-command` taken apart into what selecting tests needs: which
@@ -94,8 +94,8 @@ class TestInvocation {
     '--branch-coverage',
   };
 
-  /// Whether the command collects coverage itself — which the coverage pass
-  /// cannot add to without the two fighting over where it goes.
+  /// Whether the command collects coverage itself — which a switched run,
+  /// starting each compiled test file directly, does not do.
   bool get setsCoverage => _command.arguments.any(
     (String arg) => _coverageOptions.contains(arg.split('=').first),
   );
@@ -104,8 +104,8 @@ class TestInvocation {
   /// class cannot tell what anything means.
   bool get hasOptionTerminator => _command.arguments.contains('--');
 
-  /// Whether the command runs on any platform but the VM — whose suites
-  /// write no VM coverage, so lines only they reach would read as unhit.
+  /// Whether the command runs on any platform but the VM, which is the only
+  /// one a switched run runs on.
   bool get runsOffTheVm {
     final List<String> args = _command.arguments;
     for (int i = 0; i < args.length; i++) {
@@ -167,8 +167,8 @@ class TestInvocation {
     for (final String path in paths.isEmpty ? const <String>['test'] : paths) {
       final String absolute = p.normalize(p.join(root, path));
       if (!FileSystemEntity.isDirectorySync(absolute)) {
-        // Relative even when given absolute: the coverage pass finds each
-        // file's report under this same relative path.
+        // Relative even when given absolute, as every file found below is:
+        // a test file is known by one path wherever it comes from.
         files.add(p.relative(absolute, from: root));
         continue;
       }
@@ -195,4 +195,22 @@ class TestInvocation {
     <String>['test', ...flags, ...extra, ...testFiles],
     workingDirectory: _command.workingDirectory,
   );
+}
+
+/// Why [invocation]'s `dart_test.yaml` stops a switched run from running the
+/// files the command runs, or `null`: the keys that change which files run,
+/// or where. `paths` only matters when the command names none of its own.
+String? configRefusal(TestInvocation invocation) {
+  final File config = File(p.join(invocation.root, 'dart_test.yaml'));
+  if (!config.existsSync()) {
+    return null;
+  }
+  final String keys = invocation.paths.isEmpty
+      ? 'paths|filename|include|platforms|override_platforms|define_platforms'
+      : 'filename|include|platforms|override_platforms|define_platforms';
+  final RegExpMatch? match = RegExp(
+    '^\\s*($keys)\\s*:',
+    multiLine: true,
+  ).firstMatch(config.readAsStringSync());
+  return match == null ? null : 'dart_test.yaml sets ${match.group(1)}';
 }

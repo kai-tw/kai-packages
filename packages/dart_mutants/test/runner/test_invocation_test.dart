@@ -118,6 +118,45 @@ void main() {
     },
   );
 
+  group('configRefusal', () {
+    final Map<String, (List<String>, String, String?)> cases =
+        <String, (List<String>, String, String?)>{
+          'no dart_test.yaml': (<String>['test'], '', null),
+          'tags alone': (<String>['test'], 'tags:\n  slow:\n', null),
+          'paths, with no paths given': (
+            <String>['test'],
+            'paths: [test]\n',
+            'dart_test.yaml sets paths',
+          ),
+          'paths, with paths given': (
+            <String>['test', 'test'],
+            'paths: [x]\n',
+            null,
+          ),
+          'filename, even with paths given': (
+            <String>['test', 'test'],
+            'filename: "*_spec.dart"\n',
+            'dart_test.yaml sets filename',
+          ),
+          'platforms': (
+            <String>['test', 'test'],
+            'platforms: [chrome]\n',
+            'dart_test.yaml sets platforms',
+          ),
+        };
+    for (final MapEntry<String, (List<String>, String, String?)> c
+        in cases.entries) {
+      test('[decision] ${c.key}', () {
+        if (c.value.$2.isNotEmpty) {
+          File(
+            p.join(root.path, 'dart_test.yaml'),
+          ).writeAsStringSync(c.value.$2);
+        }
+        expect(configRefusal(parse('dart', c.value.$1)!), c.value.$3);
+      });
+    }
+  });
+
   group('testFiles', () {
     test('[boundary] an absolute test file comes back relative', () {
       expect(

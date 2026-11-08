@@ -13,15 +13,12 @@ import '../mutation_visitor.dart';
 import '../operators.dart';
 import '../version.dart';
 import 'compile_safety_gate.dart';
-import 'coverage_map.dart';
 import 'file_mutation_report.dart';
 import 'host_load.dart';
 import 'import_graph.dart';
-import 'line_range.dart';
 import 'mutant_filter.dart';
 import 'mutant_progress.dart';
 import 'mutant_result.dart';
-import 'mutant_scope.dart';
 import 'mutant_timing.dart';
 import 'mutant_verdict.dart';
 import 'mutation_run_report.dart';
@@ -38,7 +35,6 @@ import 'switched_stats.dart';
 import 'switched_toolchain.dart';
 import 'temp_space.dart';
 import 'test_invocation.dart';
-import 'test_selection.dart';
 import 'test_slot.dart';
 import 'test_slots.dart';
 import 'wait_span.dart';
@@ -65,7 +61,8 @@ class MutationTestRunner {
     this.fallbackCompileSafetyGate,
     this.onGateFallback,
     List<MutationOperator>? operators,
-    this.mutantTimeout = const Duration(seconds: 30),
+    this.mutantTimeout = defaultMutantTimeout,
+    this.testTimeout = defaultTestTimeout,
     this.baselineFactor = defaultBaselineFactor,
     Duration? baselineTimeout,
     this.selectByCoverage = false,
@@ -88,7 +85,7 @@ class MutationTestRunner {
              },
        tempSpace = tempSpace ?? TempSpace(),
        operators = operators ?? defaultOperators(),
-       baselineTimeout = baselineTimeout ?? mutantTimeout * 10 {
+       baselineTimeout = baselineTimeout ?? defaultBaselineTimeout {
     if (workers case final int lanes when lanes < 1) {
       throw ArgumentError.value(workers, 'workers', 'must be 1 or more');
     }
@@ -121,29 +118,33 @@ class MutationTestRunner {
   /// makes on its own, which a person should hear about.
   final void Function(String filePath)? onGateFallback;
 
-  /// Run each mutant against only the test files that enter the function it
-  /// sits in, and score a mutant in a function no test enters as undetected
-  /// without running anything — see [TestSelection] and [executableScope].
-  /// Without it, every mutant runs against every test file the command runs.
+  /// Run each mutant against only the test files that reach it, and score a
+  /// mutant no test file reaches as undetected and uncovered.
   ///
-  /// The coverage pass runs only the test files whose imports lead to a
-  /// target (see `testFilesLoading`), and a mutant coverage says nothing
-  /// about runs against those, not against every test file: one that no
-  /// test file imports is scored undetected without running anything.
+  /// Which files reach a mutant is read from the switched run itself, not
+  /// from a coverage pass of its own: each test file whose imports lead to
+  /// the mutant's file (see `testFilesLoading`) runs unmutated, saying which
+  /// switches it reaches, and runs only the mutants among them — see
+  /// [SwitchedRunner.selectByReach]. A file no test file imports is scored
+  /// uncovered without running anything. A mutant compiled alone, which has
+  /// no switch, runs against every test file that imports its file.
+  ///
+  /// Nor is there a full baseline: a test file that cannot load a target
+  /// cannot detect a mutant, and every test file that runs a mutant has to
+  /// pass unmutated first. Under `flutter test` the command does run once,
+  /// on one test file, to build the assets the switched run reads.
+  ///
+  /// Without it, every mutant runs against every test file the command
+  /// runs, after the full command has passed once.
   ///
   /// Selecting fewer tests can lose a detection, never invent one: a test
   /// that fails when selected runs, and fails, in the full command too. So a
   /// selected score can only err low, and the known ways it does are: a
   /// mutant that changes a declaration's inferred type can break the
-  /// compilation of a test file that never enters its function (in full,
-  /// that reads as `detected`); code reached only from a subprocess or
-  /// `Isolate.spawnUri`, whose coverage the test runner does not collect; and
-  /// code whose execution depends on timing or randomness, which one coverage
-  /// pass can miss.
-  ///
-  /// A command the coverage pass refuses — see `collectCoverage` — or a pass
-  /// that fails aborts the run as [AbortKind.selectionUnavailable], before
-  /// the first mutant.
+  /// compilation of a test file that never reaches it (in full, that reads
+  /// as `detected`); code reached only from a subprocess, which runs the
+  /// package's own unswitched code; and code whose execution depends on
+  /// timing or randomness, which one unmutated run can miss.
   final bool selectByCoverage;
 
   /// Called once, before the first mutant runs, with what the run holds.
@@ -176,7 +177,8 @@ class MutationTestRunner {
   final int? workers;
 
   /// The test slots this run shares with every other run on the machine:
-  /// the baseline and the coverage pass hold one while they run, and each
+  /// the baseline, or the run that builds the assets, holds one while it
+  /// runs, and each
   /// lane one while it compiles or runs a test file — see [SwitchedRunner].
   /// A wait for one counts toward no mutant's budget, nor toward the pace
   /// [runBudget] judges. `null` puts no limit on the run.
@@ -197,10 +199,10 @@ class MutationTestRunner {
   /// results a stopped run already has — see [RunJournal] for when a result
   /// is reused. `null`, the default, records nothing.
   ///
-  /// A passing baseline and a finished coverage pass are recorded too, and a
-  /// start that finds them skips both: the journal only matches code whose
-  /// fingerprint is unchanged, the code that baseline passed against and
-  /// that map was collected from. The gate checks still run on every start.
+  /// A passing baseline is recorded too, and a start that finds one skips
+  /// it: the journal only matches code whose fingerprint is unchanged, the
+  /// code that baseline passed against. The gate checks still run on every
+  /// start.
   final String? journalPath;
 
   /// The only lines mutated, per target file — a diff's changed lines, so a
@@ -221,10 +223,34 @@ class MutationTestRunner {
 
   RunJournal? _journal;
 
-  /// The least time a mutant gets on one test file before it is killed and
-  /// scored as [MutantVerdict.timeout] instead of waited on forever. A slow
-  /// test file gets more — see [baselineFactor].
+  /// The headroom a mutant gets on one test file over that file's unmutated
+  /// run (and [testTimeout]) before it is killed and scored as
+  /// [MutantVerdict.timeout] instead of waited on forever. A slow test file
+  /// gets more — see [baselineFactor]. 5s, and not an option of the CLI:
+  /// what runs into it is a loop that never yields, which no amount of
+  /// waiting finishes.
   final Duration mutantTimeout;
+
+  /// See [mutantTimeout].
+  static const Duration defaultMutantTimeout = Duration(seconds: 5);
+
+  /// See [baselineTimeout].
+  static const Duration defaultBaselineTimeout = Duration(minutes: 5);
+
+  /// The longest one test may run in the switched run, unmutated or with a
+  /// mutant on, before it fails — whatever timeout the test declares itself.
+  /// `null` leaves each test to its own timeout, `package:test`'s 30s by
+  /// default.
+  ///
+  /// A test slower than this unmutated stops the run, as any test that
+  /// fails unmutated does: a test that slow is itself the problem. A mutant
+  /// that makes a test slower than this is `detected`: the code got that
+  /// much slower, and a test caught it. `setUpAll` and `tearDownAll` are not
+  /// held to it.
+  final Duration? testTimeout;
+
+  /// See [testTimeout].
+  static const Duration defaultTestTimeout = Duration(seconds: 5);
 
   /// A mutant's budget on a test file is the larger of [mutantTimeout] and
   /// this many times that file's own unmutated run in this run. `0` turns
@@ -241,8 +267,7 @@ class MutationTestRunner {
 
   /// How long the baseline gets, and one test file's compile or unmutated
   /// run in the switched run. An already-hanging test command is exactly as
-  /// unusable a baseline as an already-failing one. Defaults to ten times
-  /// [mutantTimeout].
+  /// unusable a baseline as an already-failing one. Defaults to 5 minutes.
   final Duration baselineTimeout;
 
   /// Kills every running process and deletes the run's temporary
@@ -258,8 +283,8 @@ class MutationTestRunner {
   int _planned = 0;
 
   /// Wall time over the mutants alone — started when the first one does, so
-  /// the baseline and the coverage pass stay out of the pace they are used
-  /// to project, and stopped while the run is paused. See [runBudget].
+  /// the baseline and the asset build stay out of the pace it is used to
+  /// project, and stopped while the run is paused. See [runBudget].
   final Stopwatch _mutantClock = Stopwatch();
 
   /// Whether the mutants have started, so a resume knows to start
@@ -274,12 +299,8 @@ class MutationTestRunner {
   /// will not fit it. Non-null means no lane takes another job.
   String? _overBudget;
 
-  /// Why [selectByCoverage] could not be applied, once the coverage pass
-  /// says so. Non-null means the run aborts before the first mutant.
-  String? _selectionUnavailable;
-
-  /// Whether the selection came from the journal's map rather than a pass.
-  bool _coverageReused = false;
+  /// Whether the baseline was read from the journal rather than run.
+  bool _baselineReused = false;
 
   /// Under [selectByCoverage], the test files that can load each target, by
   /// the target as given — see [testFilesLoading]. `null` without the
@@ -358,8 +379,7 @@ class MutationTestRunner {
       // Before the baseline, so the fingerprint is taken while every target
       // is still the code it starts from.
       _journal = _openJournal(targets);
-      final _Baseline baselineRun = await _baseline();
-      final Duration baseline = baselineRun.wallTime;
+      final _Baseline? baselineRun = await _baselineUnlessSelecting();
       final MutationRunReport? baselineAbort = await _baselineAbort(
         baselineRun,
         stats,
@@ -367,6 +387,7 @@ class MutationTestRunner {
       if (baselineAbort != null) {
         return baselineAbort;
       }
+      final Duration? baseline = baselineRun?.wallTime;
 
       // Every target is read and enumerated once, here, and the same lists
       // are what runs — the plan's count is the count that runs.
@@ -382,29 +403,17 @@ class MutationTestRunner {
       }
       final List<_PlannedFile> plan = planned.files;
 
-      final TestSelection? selection = await _selection(
-        switched.invocation,
-        targets,
-      );
-      if (_selectionUnavailable case final String unavailable) {
-        return MutationRunReport.aborted(
-          stats: await _finished(stats),
-          AbortKind.selectionUnavailable,
-          '--select-by-coverage cannot be applied: $unavailable. No mutant '
-          'has run. Fix that, or run without --select-by-coverage to run '
-          'every mutant against every test file.',
-          baselineDuration: baseline,
-          mutantTimeout: mutantTimeout,
-        );
-      }
-
-      final List<_Job> jobs = _jobsFor(
-        plan,
-        planned.gates,
-        selection,
-        switched,
-      );
+      _loading = _readImports(switched.invocation, targets);
+      final List<_Job> jobs = _jobsFor(plan, planned.gates, switched);
       final List<MutantResult?> recalled = _recall(jobs);
+      final MutationRunReport? assetsAbort = await _buildAssets(
+        switched,
+        _pending(jobs, recalled),
+        stats,
+      );
+      if (assetsAbort != null) {
+        return assetsAbort;
+      }
       _lanes = _laneCount();
       _completed = 0;
       _planned = recalled.where((MutantResult? r) => r == null).length;
@@ -415,8 +424,7 @@ class MutationTestRunner {
         baseline: baseline,
         budget: mutantTimeout,
         workers: _lanes,
-        baselineReused: baselineRun.reused,
-        coverageReused: _coverageReused,
+        baselineReused: _baselineReused,
       );
       onPlan?.call(runPlan);
       final String? failure = await _runPending(
@@ -437,8 +445,8 @@ class MutationTestRunner {
         _fileReports(plan, _merge(recalled, jobs)),
         baselineDuration: baseline,
         mutantTimeout: mutantTimeout,
-        selectedByCoverage: selection != null,
-        reusedMutants: _journal == null ? null : runPlan.reused,
+        selectedByCoverage: selectByCoverage,
+        reusedMutants: _reusedBy(runPlan),
         stats: await _finished(stats),
       );
     } finally {
@@ -449,12 +457,29 @@ class MutationTestRunner {
     }
   }
 
+  /// The full baseline, or `null` under the selection, which runs none: a
+  /// test file that cannot load a target cannot detect a mutant, and every
+  /// one that runs a mutant runs unmutated first and has to pass — see
+  /// [SwitchedRunner].
+  Future<_Baseline?> _baselineUnlessSelecting() async {
+    _baselineReused = false;
+    if (selectByCoverage) {
+      return null;
+    }
+    final _Baseline run = await _baseline();
+    _baselineReused = run.reused;
+    return run;
+  }
+
   /// The abort a baseline that did not finish, or did not pass, ends the run
-  /// with; `null` when it passed.
+  /// with; `null` when it passed, or when none [run].
   Future<MutationRunReport?> _baselineAbort(
-    _Baseline run,
+    _Baseline? run,
     RunStats stats,
   ) async {
+    if (run == null) {
+      return null;
+    }
     final int? exitCode = run.exitCode;
     if (exitCode == null) {
       return MutationRunReport.aborted(
@@ -488,7 +513,7 @@ class MutationTestRunner {
     List<String> targets,
     _Switched switched,
     RunStats stats,
-    Duration baseline,
+    Duration? baseline,
   ) async {
     final List<_PlannedFile> plan = <_PlannedFile>[];
     final Map<String, SourceCompileSafetyGate> gates =
@@ -531,7 +556,7 @@ class MutationTestRunner {
   Future<MutationRunReport?> _stopped(
     String? failure,
     RunStats stats,
-    Duration baseline,
+    Duration? baseline,
   ) async {
     if (failure != null) {
       return MutationRunReport.aborted(
@@ -731,86 +756,102 @@ class MutationTestRunner {
     return fallback;
   }
 
-  /// The coverage pass, run once after the baseline when [selectByCoverage]
-  /// asks for it and the journal holds no map from an earlier start. `null`
-  /// when it does not ask, and when the pass fails — that with the reason in
-  /// [_selectionUnavailable].
-  ///
-  /// The pass runs only the test files that can load one of [targets]: on
-  /// a large app, a change to one file is usually imported by a handful of
-  /// the hundreds of test files, and the rest would each cost a process
-  /// start and a compile to report nothing.
-  Future<TestSelection?> _selection(
+  /// Which test files can load each of [targets], by the target as given —
+  /// see [testFilesLoading] — or `null` when not selecting, or when the
+  /// imports could not be read and every test file has to be asked.
+  Map<String, List<String>>? _readImports(
     TestInvocation invocation,
     List<String> targets,
-  ) async {
-    _selectionUnavailable = null;
-    _coverageReused = false;
-    _loading = null;
+  ) {
     if (!selectByCoverage) {
       return null;
     }
-    final Stopwatch clock = Stopwatch()..start();
-    try {
-      final Set<String>? only = _readImports(invocation, targets);
-      if (_journal?.coverage case final CoverageMap recorded) {
-        _coverageReused = true;
-        return TestSelection(invocation, recorded);
-      }
-      final TestSelection? selection = await _holdingSlot(() {
-        // The wait for the slot is not the pass's own time.
-        clock.reset();
-        return collectCoverage(
-          invocation,
-          timeout: baselineTimeout,
-          onFailure: (String reason) => _selectionUnavailable = reason,
-          temps: tempSpace,
-          recorded: _journal?.suites,
-          onSuite: _journal?.recordSuite,
-          only: only,
-        );
-      });
-      if (selection != null) {
-        _journal?.recordCoverage(selection.map);
-      }
-      return selection;
-    } finally {
-      _stats.coveragePass = clock.elapsed;
-    }
-  }
-
-  /// Reads which test files can load each of [targets] into [_loading], and
-  /// returns them all together — the ones the coverage pass runs — or `null`
-  /// when the imports could not be read and every test file has to run.
-  Set<String>? _readImports(TestInvocation invocation, List<String> targets) {
     final List<String> testFiles = invocation.testFiles();
-    final Map<String, List<String>>? loading = _loading = testFilesLoading(
+    final Map<String, List<String>>? loading = testFilesLoading(
       root: invocation.root,
       testFiles: testFiles,
       targets: targets,
     );
-    final Set<String>? only = loading?.values
-        .expand((List<String> tests) => tests)
-        .toSet();
     _stats
       ..testFiles = testFiles.length
-      ..testFilesLoadingTargets = only?.length;
-    return only;
+      ..testFilesLoadingTargets = loading?.values
+          .expand((List<String> tests) => tests)
+          .toSet()
+          .length;
+    return loading;
+  }
+
+  /// Under the selection and `flutter test`, the test command run on one test
+  /// file the [pending] mutants run against, so it builds the assets a
+  /// switched run reads (see [FlutterToolchain]) — which the full baseline
+  /// did before the selection skipped it. The abort a failure ends the run
+  /// with, or `null`.
+  ///
+  /// That file runs unmutated in the switched run as well; a failure here is
+  /// reported as the baseline's, since it is the test command that fails.
+  Future<MutationRunReport?> _buildAssets(
+    _Switched switched,
+    List<_Job> pending,
+    RunStats stats,
+  ) async {
+    if (!selectByCoverage || switched.invocation.runner != TestRunner.flutter) {
+      return null;
+    }
+    final List<String> files = <String>{
+      for (final _Job job in pending) ...job.tests,
+    }.toList()..sort();
+    if (files.isEmpty) {
+      return null;
+    }
+    final Stopwatch clock = Stopwatch();
+    final int? exitCode = await _holdingSlot(() {
+      clock.start();
+      return switched.invocation
+          .withTestFiles(<String>[files.first])
+          .run(timeout: baselineTimeout);
+    });
+    stats.assetBuild = clock.elapsed;
+    return _assetBuildAbort(files.first, exitCode, stats);
+  }
+
+  /// The abort the asset build's run of [file] ends the run with, by its
+  /// [exitCode] — `null` when it did not finish — or `null` when it passed.
+  Future<MutationRunReport?> _assetBuildAbort(
+    String file,
+    int? exitCode,
+    RunStats stats,
+  ) async {
+    // 79: the file declares no test, or none the command's filters keep.
+    if (exitCode == 0 || exitCode == 79) {
+      return null;
+    }
+    return MutationRunReport.aborted(
+      stats: await _finished(stats),
+      exitCode == null ? AbortKind.baselineTimeout : AbortKind.baselineFailed,
+      exitCode == null
+          ? 'the test command did not finish on $file unmodified '
+                'within the timeout (${baselineTimeout.inSeconds}s). If it is '
+                'merely slow rather than hanging, raise --baseline-timeout.'
+          : 'the test command failed on $file unmodified (exit '
+                '$exitCode) — refusing to score mutants against a test that '
+                'was already red',
+    );
   }
 
   /// A budget derived from a test file's unmutated run — see
   /// [baselineFactor] — but never less than that run plus [mutantTimeout]
-  /// plus `package:test`'s own 30s per-test timeout.
+  /// plus the time a test that awaits forever takes to fail: [testTimeout],
+  /// or without it `package:test`'s own 30s.
   ///
-  /// One test file runs in a few seconds, so its derived budget is usually
-  /// the [mutantTimeout] floor, 30s by default — the same 30s after which
-  /// `package:test` fails a test that awaits forever. Measured on a large
-  /// app: killed at that moment, two mutants `flutter test` scored
-  /// `detected`, through that very timeout, read as `timeout`.
+  /// Killed before that, a mutant whose test would have failed on that very
+  /// timeout reads as `timeout` rather than `detected` — measured on a large
+  /// app, when the budget was [mutantTimeout] alone, for two mutants.
   Duration _budgetFrom(Duration unmutated) {
     final Duration derived = unmutated * baselineFactor;
     final Duration floor =
-        unmutated + mutantTimeout + const Duration(seconds: 30);
+        unmutated +
+        mutantTimeout +
+        (testTimeout ?? const Duration(seconds: 30));
     return derived > floor ? derived : floor;
   }
 
@@ -828,6 +869,10 @@ class MutationTestRunner {
       ...testCommand.arguments,
     ].join(' '),
     'mutantTimeoutSeconds': MutantTiming.seconds(mutantTimeout),
+    'testTimeoutSeconds': switch (testTimeout) {
+      final Duration limit => MutantTiming.seconds(limit),
+      null => null,
+    },
     'baselineFactor': baselineFactor,
     'baselineTimeoutSeconds': MutantTiming.seconds(baselineTimeout),
     'selectByCoverage': selectByCoverage,
@@ -843,64 +888,31 @@ class MutationTestRunner {
   }
 
   /// Every mutant of [plan], in order, with the test files it runs against.
+  /// Under the selection, a mutant starts with the test files that can load
+  /// its file — empty when none can, which scores it uncovered without
+  /// running it — and the switched run narrows them to the ones that reach
+  /// it. Without the selection, or where the imports could not be read, it
+  /// starts with every test file. Only under the selection: without it, a
+  /// test that runs the package as a subprocess — `dart run bin/…` —
+  /// reaches code no import shows, and the full command would detect what it
+  /// does there.
   List<_Job> _jobsFor(
     List<_PlannedFile> plan,
     Map<String, SourceCompileSafetyGate> gates,
-    TestSelection? selection,
     _Switched switched,
   ) {
     final List<String> all = switched.invocation.testFiles();
     return <_Job>[
       for (final _PlannedFile file in plan)
-        ..._jobsForFile(file, gates[file.path], selection, all),
+        for (final Mutant mutant in file.mutants)
+          _Job(
+            mutant,
+            file.source,
+            gates[file.path]!,
+            _loading?[file.path] ?? all,
+            selected: selectByCoverage,
+          ),
     ];
-  }
-
-  List<_Job> _jobsForFile(
-    _PlannedFile file,
-    SourceCompileSafetyGate? gate,
-    TestSelection? selection,
-    List<String> all,
-  ) {
-    // No parse, and so no scope, where the selection cannot speak for this
-    // file — every mutant in it then runs every test file that can load it.
-    final ParseStringResult? parsed =
-        selection == null || !selection.speaksFor(file.source)
-        ? null
-        : parseString(content: file.source, throwIfDiagnostics: false);
-    // Only under the selection: without it, a test that runs the package as
-    // a subprocess — `dart run bin/…` — reaches code no import shows, and
-    // the full command would detect what it does there.
-    final List<String>? loading = selection == null
-        ? null
-        : _loading?[file.path];
-    return <_Job>[
-      for (final Mutant mutant in file.mutants)
-        if (_testsFor(mutant, selection, parsed) case final List<String> picked)
-          _Job(mutant, file.source, gate!, picked, selected: true)
-        else if (loading != null)
-          _Job(mutant, file.source, gate!, loading, selected: true)
-        else
-          _Job(mutant, file.source, gate!, all, selected: false),
-    ];
-  }
-
-  /// The test files [selection] picks for [mutant] — empty when no test
-  /// reaches it — or `null` where it cannot say.
-  static List<String>? _testsFor(
-    Mutant mutant,
-    TestSelection? selection,
-    ParseStringResult? parsed,
-  ) {
-    if (selection == null || parsed == null) {
-      return null;
-    }
-    final LineRange? scope = executableScope(
-      parsed.unit,
-      parsed.lineInfo,
-      mutant.offset,
-    );
-    return selection.testsFor(mutant, scope);
   }
 
   /// Each job's result from the journal, or `null` where it has to run.
@@ -913,6 +925,10 @@ class MutationTestRunner {
         for (int i = 0; i < jobs.length; i++)
           if (recalled[i] == null) jobs[i],
       ];
+
+  /// How many of [plan]'s mutants the journal handed back; `null` when the
+  /// run keeps no journal.
+  int? _reusedBy(RunPlan plan) => _journal == null ? null : plan.reused;
 
   /// [recalled] with each gap filled by its job's result.
   static List<MutantResult> _merge(
@@ -1004,11 +1020,13 @@ class MutationTestRunner {
       slots: slots,
       onSlotWait: _onSlotWait,
       arguments: switched.arguments,
+      testTimeout: testTimeout,
       testFileTimeout: baselineTimeout,
       budgetFrom: _budgetFrom,
       stats: stats,
       shouldStop: () => _overBudget != null,
       control: _control,
+      selectByReach: selectByCoverage,
       onResult:
           (SwitchedJob job, MutantResult result, int lane, Duration tests) {
             final _Job owner = runnable[job.id]!;

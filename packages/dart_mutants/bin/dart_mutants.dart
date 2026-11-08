@@ -273,7 +273,10 @@ MutationTestRunner _runner(
   ),
   // Already validated by _parseAndValidate — safe to parse again here
   // rather than thread the number through as a second return value.
-  mutantTimeout: Duration(seconds: int.parse(args['mutant-timeout'] as String)),
+  testTimeout: switch (int.parse(args['test-timeout'] as String)) {
+    0 => null,
+    final int seconds => Duration(seconds: seconds),
+  },
   baselineFactor: double.parse(args['baseline-factor'] as String),
   baselineTimeout: _optionalSeconds(args['baseline-timeout'] as String?),
   selectByCoverage: args['select-by-coverage'] as bool,
@@ -349,39 +352,42 @@ ArgParser _buildParser() {
           'it rejects valid mutants that merely trip a lint.',
     )
     ..addOption(
-      'mutant-timeout',
-      defaultsTo: '30',
+      'test-timeout',
+      defaultsTo: '${MutationTestRunner.defaultTestTimeout.inSeconds}',
       help:
-          'The least number of seconds a mutant gets on one test file before '
-          'it is killed and scored as a timeout instead of waited on forever. '
-          'A slow test file gets more: see --baseline-factor.',
+          'The most seconds one test may run, unmutated or with a mutant on, '
+          'whatever timeout it declares itself. A test slower than this '
+          'unmutated stops the run; a mutant that makes a test this slow is '
+          'detected. 0 leaves each test to its own timeout.',
     )
     ..addOption(
       'baseline-factor',
       defaultsTo: _formatFactor(MutationTestRunner.defaultBaselineFactor),
       help:
-          'A mutant\'s budget on a test file is the larger of --mutant-timeout '
-          'and this many times that file\'s own unmutated run. The headroom '
-          'is for machine load changing mid-run. 0 turns it off.',
+          'A mutant\'s budget on a test file is the larger of this many times '
+          'that file\'s own unmutated run, and that run plus 5s plus '
+          '--test-timeout. The multiple is for machine load changing mid-run. '
+          '0 turns it off.',
     )
     ..addOption(
       'baseline-timeout',
       help:
           'Seconds the test command gets against unmodified code before the '
           'run aborts as hanging, and one test file gets to compile or to run '
-          'unmutated. Defaults to ten times --mutant-timeout.',
+          'unmutated. Defaults to '
+          '${MutationTestRunner.defaultBaselineTimeout.inSeconds}.',
     )
     ..addFlag(
       'select-by-coverage',
       negatable: false,
       help:
-          'Collect per-test-file coverage once, then run each mutant against '
-          'only the test files that enter the function it is in, and score a '
-          'mutant in a function no test enters as undetected (marked '
-          'uncovered) without running anything. Without it, every mutant runs '
-          'against every test file. A command the coverage pass refuses, or a '
-          'pass that fails, aborts the run before the first mutant (abortKind '
-          'selection-unavailable).',
+          'Run each mutant against only the test files that reach it, and '
+          'score a mutant no test reaches as undetected (marked uncovered). '
+          'Each test file that imports a target runs unmutated once, which '
+          'says which mutants it reaches; there is no separate coverage pass '
+          'and no full baseline (under flutter test, the command runs once on '
+          'one test file, to build the assets). Without it, the full test '
+          'command runs once, then every mutant against every test file.',
     )
     ..addMultiOption(
       'lines',
@@ -418,8 +424,8 @@ ArgParser _buildParser() {
       valueHelp: 'minutes',
       help:
           'Stop without scoring anything as soon as the pace the mutants are '
-          'holding says they will take longer than this. The baseline and the '
-          'coverage pass do not count against it.',
+          'holding says they will take longer than this. The baseline does '
+          'not count against it.',
     )
     ..addOption(
       'output',
@@ -434,7 +440,7 @@ ArgParser _buildParser() {
       'journal',
       valueHelp: 'path',
       help:
-          'Record the baseline, the coverage map and each mutant\'s result in '
+          'Record the baseline and each mutant\'s result in '
           'this file as they finish. A run started again with the same file '
           'reuses all of them, except timeouts, and runs only the rest — as '
           'long as the test command, gate, operators, --select-by-coverage '
@@ -617,8 +623,9 @@ int? _perLine(ArgResults args) =>
 
 /// What is wrong with the three timeout options, or `null` if nothing is.
 String? _timeoutOptionError(ArgResults args) {
-  if (!_isPositiveSeconds(args['mutant-timeout'] as String)) {
-    return '--mutant-timeout must be a positive number of seconds';
+  final int? testTimeout = int.tryParse(args['test-timeout'] as String);
+  if (testTimeout == null || testTimeout < 0) {
+    return '--test-timeout must be a whole number of seconds, 0 or more';
   }
   final String? baselineTimeout = args['baseline-timeout'] as String?;
   if (baselineTimeout != null && !_isPositiveSeconds(baselineTimeout)) {
@@ -767,15 +774,15 @@ void _printPlan(RunPlan plan) {
   final String reused = plan.reused == 0
       ? ''
       : ' (${plan.reused} more reused from the journal)';
-  final String fromJournal = <String>[
-    if (plan.baselineReused) 'baseline',
-    if (plan.coverageReused) 'coverage map',
-  ].join(' and ');
+  final Duration? baseline = plan.baseline;
+  final String baselinePhrase = baseline == null
+      ? ''
+      : 'baseline ${_formatSeconds(baseline)}'
+            '${plan.baselineReused ? ' (from the journal)' : ''}, ';
   stdout.writeln(
     '${_count(plan.mutantCount, 'mutant')} in '
-    '${_count(plan.fileCount, 'file')}$reused — baseline '
-    '${_formatSeconds(plan.baseline)}, ${_budgetPhrase(plan.budget)}'
-    '${fromJournal.isEmpty ? '' : ' ($fromJournal from the journal)'}',
+    '${_count(plan.fileCount, 'file')}$reused — '
+    '$baselinePhrase${_budgetPhrase(plan.budget)}',
   );
 }
 

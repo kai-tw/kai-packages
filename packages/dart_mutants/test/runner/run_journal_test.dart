@@ -2,11 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dart_mutants/src/mutant.dart';
-import 'package:dart_mutants/src/runner/coverage_map.dart';
 import 'package:dart_mutants/src/runner/mutant_result.dart';
 import 'package:dart_mutants/src/runner/mutant_verdict.dart';
 import 'package:dart_mutants/src/runner/run_journal.dart';
-import 'package:dart_mutants/src/runner/suite_coverage.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -128,57 +126,35 @@ void main() {
     expect(opened.recordedCount, 0);
   });
 
-  test(
-    '[state] a recorded baseline and coverage map are read back by the next '
-    'open',
-    () {
-      final CoverageMap map = (CoverageMapBuilder(
-        dir.path,
-      )..add('test/a_test.dart', 'lib/a.dart', 3, 1)).build();
-      RunJournal.open(path, header)
-        ..recordBaseline(const Duration(milliseconds: 4200))
-        ..recordCoverage(map);
+  test('[state] a recorded baseline is read back by the next open', () {
+    RunJournal.open(
+      path,
+      header,
+    ).recordBaseline(const Duration(milliseconds: 4200));
 
-      final RunJournal again = RunJournal.open(path, header);
+    final RunJournal again = RunJournal.open(path, header);
 
-      expect(again.baseline, const Duration(milliseconds: 4200));
-      expect(again.coverage?.testsFor('lib/a.dart', 3, 3), <String>{
-        'test/a_test.dart',
-      });
-    },
-  );
+    expect(again.baseline, const Duration(milliseconds: 4200));
+  });
 
   test(
-    '[boundary] a coverage map cut off mid-write is not read — the next '
-    'start collects it again',
+    '[error] a line in a shape this version does not record — the coverage '
+    'map 0.10.0 wrote, say — is skipped, and does not stop the journal from '
+    'opening',
     () {
-      RunJournal.open(path, header).recordBaseline(const Duration(seconds: 1));
-      File(path).writeAsStringSync(
-        '{"coverage":{"tests":["test/a',
-        mode: FileMode.append,
+      RunJournal.open(path, header).record(
+        MutantResult(mutant: _mutant(3), verdict: MutantVerdict.detected),
       );
-
-      final RunJournal again = RunJournal.open(path, header);
-
-      expect(again.baseline, const Duration(seconds: 1));
-      expect(again.coverage, isNull);
-    },
-  );
-
-  test(
-    '[error] a coverage map in another shape is not read, and does not stop '
-    'the journal from opening',
-    () {
-      RunJournal.open(path, header);
       File(path).writeAsStringSync(
-        '{"coverage":{"tests":"test/a_test.dart","files":{}}}\n',
+        '{"coverage":{"tests":["test/a_test.dart"],"files":{}}}\n',
         mode: FileMode.append,
       );
 
       final RunJournal again = RunJournal.open(path, header);
 
       expect(again.discarded, isNull);
-      expect(again.coverage, isNull);
+      expect(again.recordedCount, 1);
+      expect(again.recall(_mutant(3))?.verdict, MutantVerdict.detected);
     },
   );
 
@@ -219,65 +195,6 @@ void main() {
       });
 
       expect(opened.discarded, isNotNull);
-    },
-  );
-
-  test(
-    '[partition] each test file\'s coverage recorded in one run is read back '
-    'in the next, hit and unhit lines both',
-    () {
-      final RunJournal first = RunJournal.open(path, header);
-      first.recordSuite(
-        SuiteCoverage(
-          'test/a_test.dart',
-          hit: <String, Set<int>>{
-            'lib/a.dart': <int>{1, 2, 3, 7},
-          },
-          zero: <String, Set<int>>{
-            'lib/a.dart': <int>{4, 5},
-            'lib/b.dart': <int>{1},
-          },
-        ),
-      );
-      first.recordSuite(SuiteCoverage.empty('test/b_test.dart'));
-
-      final RunJournal again = RunJournal.open(path, header);
-      final SuiteCoverage a = again.suites['test/a_test.dart']!;
-
-      expect(again.suites.keys, <String>{
-        'test/a_test.dart',
-        'test/b_test.dart',
-      });
-      expect(a.hit, <String, Set<int>>{
-        'lib/a.dart': <int>{1, 2, 3, 7},
-      });
-      expect(a.zero, <String, Set<int>>{
-        'lib/a.dart': <int>{4, 5},
-        'lib/b.dart': <int>{1},
-      });
-      expect(again.suites['test/b_test.dart']!.hit, isEmpty);
-      expect(
-        File(path).readAsLinesSync()[1],
-        contains('[[1,3],[7,7]]'),
-        reason: 'consecutive lines are stored as one run',
-      );
-    },
-  );
-
-  test(
-    '[partition] a journal started over keeps no test file\'s coverage',
-    () {
-      RunJournal.open(
-        path,
-        header,
-      ).recordSuite(SuiteCoverage.empty('test/a_test.dart'));
-
-      final RunJournal opened = RunJournal.open(path, <String, Object?>{
-        ...header,
-        'fingerprint': 'bbbb',
-      });
-
-      expect(opened.suites, isEmpty);
     },
   );
 
