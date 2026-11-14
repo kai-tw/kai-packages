@@ -65,7 +65,7 @@ void main() {
           <String, String>{
             'baselineTimeout': 'baseline-timeout',
             'baselineFailed': 'baseline-failed',
-            'gateRejectsUnmodified': 'gate-rejects-unmodified',
+            'compileCheckRejectsUnmodified': 'compile-check-rejects-unmodified',
             'overBudget': 'over-budget',
             'switchedRunUnavailable': 'switched-run-unavailable',
             'switchedRunFailed': 'switched-run-failed',

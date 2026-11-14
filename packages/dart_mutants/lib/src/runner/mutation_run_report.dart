@@ -18,11 +18,11 @@ enum AbortKind {
   /// The test command finished against unmodified code, and failed.
   baselineFailed('baseline-failed'),
 
-  /// The compile-safety gate — and any fallback — rejected a target file
-  /// before it was mutated. The gate cannot read the file, or its own
+  /// The compile check — and any fallback — rejected a target file
+  /// before it was mutated. The check cannot read the file, or its own
   /// configuration rejects code that compiles, or the file does not compile
   /// and no test loads it; the run cannot tell which.
-  gateRejectsUnmodified('gate-rejects-unmodified'),
+  compileCheckRejectsUnmodified('compile-check-rejects-unmodified'),
 
   /// The run would take longer than `MutationTestRunner.runBudget`, which
   /// the caller set: stopped as soon as the pace the run held over the

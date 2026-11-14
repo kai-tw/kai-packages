@@ -20,7 +20,7 @@ import '../mutation_visitor.dart';
 /// gives.
 ///
 /// Two type-level facts make a real share of these mutants unusable, and both
-/// are left to the compile-safety gate rather than guessed at here, because
+/// are left to the compile check rather than guessed at here, because
 /// the AST alone genuinely cannot tell:
 ///
 /// - `+` is also `String` and `List` concatenation. `'a' + 'b'` mutates to
@@ -32,7 +32,7 @@ import '../mutation_visitor.dart';
 ///   mutation, since `a ~/ b` and `a * b` differ so wildly that any assertion
 ///   on the value catches it.)
 ///
-/// Both are proposed anyway and rejected by the gate at one analyze each,
+/// Both are proposed anyway and rejected by the check at one analyze each,
 /// which costs a little and — critically — scores nothing. A mutant that
 /// fails to compile is `invalid`, never `detected`; it cannot inflate a
 /// score, only the runtime.

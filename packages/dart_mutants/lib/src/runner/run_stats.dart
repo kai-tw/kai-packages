@@ -28,8 +28,8 @@ class RunStats {
 
   Duration? baseline;
 
-  /// Putting every target to the gate unmodified, before any mutant.
-  Duration? gateCheck;
+  /// The compile check of every unmodified target, before any mutant.
+  Duration? compileCheck;
 
   /// Under the selection and `flutter test`: the test command run on one
   /// test file, to build the assets the switched run reads.
@@ -72,7 +72,7 @@ class RunStats {
   Map<String, Object?> _phases() => <String, Object?>{
     for (final MapEntry<String, Duration?> phase in <String, Duration?>{
       'baselineSeconds': baseline,
-      'gateCheckSeconds': gateCheck,
+      'compileCheckSeconds': compileCheck,
       'assetBuildSeconds': assetBuild,
     }.entries)
       if (phase.value case final Duration took) phase.key: _s(took),

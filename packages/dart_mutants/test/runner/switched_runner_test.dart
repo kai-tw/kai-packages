@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
+import 'package:dart_mutants/src/runner/compile_check.dart';
 import 'package:dart_mutants/src/runner/file_mutation_report.dart';
 import 'package:dart_mutants/src/runner/mutant_result.dart';
 import 'package:dart_mutants/src/runner/mutant_timing.dart';
@@ -103,17 +103,17 @@ Future<MutationRunReport> _run(
   int workers = 1,
   Duration? baselineTimeout,
 }) async {
-  final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[
+  final InProcessAnalyzerCheck check = InProcessAnalyzerCheck(<String>[
     dir.path,
   ]);
-  addTearDown(gate.close);
+  addTearDown(check.close);
   return MutationTestRunner(
     testCommand: ProcessCommand('flutter', <String>[
       'test',
       '--no-pub',
       ...flags,
     ], workingDirectory: dir.path),
-    compileSafetyGate: gate,
+    compileCheck: check,
     selectByCoverage: true,
     workers: workers,
     mutantTimeout: const Duration(seconds: 60),

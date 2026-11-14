@@ -1,3 +1,36 @@
+## 0.12.0
+
+**A mutant that deletes a `super` call the analyzer requires is `invalid`,
+not a survivor.** Deleting `super.didChangeDependencies();` from a Flutter
+`State` changes nothing a test can see: the method it calls is empty. So the
+mutant survived every suite, and `--fail-on-survivors` failed any change that
+touched such an override. The deletion can't ship anyway: the analyzer
+reports `must_call_super`, which `dart analyze` and `flutter analyze` fail on
+by default. A mutant now counts as `invalid` when it adds a
+`must_call_super` diagnostic the file didn't already have. The same goes for
+`super.dispose()`, which does real work: the analyzer guards that call, not a
+test.
+
+- **Only while the project reports the diagnostic.** A project that turns
+  `must_call_super` off, in `analysis_options.yaml` or with an `// ignore:`
+  comment, gets these mutants run like any other, since nothing else guards
+  the call.
+- **Only with the in-process analyzer.** Under `--analyze-command`, these
+  mutants run like any other.
+- **The journal's format is now 4**, so a journal an earlier release wrote is
+  started over once.
+- **Breaking: "gate" is renamed to "compile check" everywhere.** In the JSON
+  report, the abort kind `gate-rejects-unmodified` is now
+  `compile-check-rejects-unmodified`, and the statistics fields
+  `gateCheckSeconds` and `gateSeconds` are now `compileCheckSeconds`. In
+  the Dart API, `CompileSafetyGate`, `SourceCompileSafetyGate`,
+  `InProcessAnalyzerGate` and `AnalyzerProcessGate` are now `CompileCheck`,
+  `SourceCompileCheck`, `InProcessAnalyzerCheck` and `AnalyzerProcessCheck`;
+  `MutationTestRunner`'s `compileSafetyGate`, `fallbackCompileSafetyGate`
+  and `onGateFallback` are now `compileCheck`, `fallbackCompileCheck` and
+  `onCompileCheckFallback`. The entries below keep the names each release
+  shipped with.
+
 ## 0.11.0
 
 **Under `--select-by-coverage`, there is no coverage pass and no full

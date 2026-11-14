@@ -2,7 +2,7 @@ import 'mutant_progress.dart';
 import 'mutant_result.dart';
 
 /// What a run is about to do, reported once, after the baseline (when there
-/// is one) and the gate checks, and before the first mutant runs.
+/// is one) and the compile checks run, and before the first mutant runs.
 ///
 /// A run over many files can take hours, and nothing else says how many
 /// mutants it holds until the report arrives at the end. How long it will

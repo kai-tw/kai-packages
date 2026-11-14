@@ -37,7 +37,7 @@ MutantTiming _timing(
         : const Duration(seconds: 30),
   ),
   elapsed: Duration(milliseconds: ms),
-  gate: const Duration(milliseconds: 5),
+  compileCheck: const Duration(milliseconds: 5),
   selected: selected,
   test: verdict == MutantVerdict.invalid || uncovered
       ? null
@@ -51,7 +51,7 @@ RunStats _stats() =>
         loadAtStart: const HostLoad(<double>[1, 2, 3]),
       )
       ..baseline = const Duration(milliseconds: 1500)
-      ..gateCheck = const Duration(milliseconds: 40)
+      ..compileCheck = const Duration(milliseconds: 40)
       ..workers = 2
       ..switched = (SwitchedStats()
         ..switched = 3
@@ -104,7 +104,7 @@ void main() {
   test('[partition] phases that ran are timed; one that did not is absent', () {
     expect(json['phases'], <String, Object?>{
       'baselineSeconds': 1.5,
-      'gateCheckSeconds': 0.04,
+      'compileCheckSeconds': 0.04,
       'mutantsSeconds': 35.017,
     });
   });
@@ -158,7 +158,7 @@ void main() {
       'verdict': 'detected',
       'worker': 1,
       'seconds': 2,
-      'gateSeconds': 0.005,
+      'compileCheckSeconds': 0.005,
       'selected': true,
       'testSeconds': 1.995,
       'timeoutSeconds': 30,
@@ -171,7 +171,7 @@ void main() {
       'verdict': 'invalid',
       'worker': 0,
       'seconds': 0.01,
-      'gateSeconds': 0.005,
+      'compileCheckSeconds': 0.005,
       'selected': false,
     });
   });

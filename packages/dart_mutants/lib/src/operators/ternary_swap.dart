@@ -17,7 +17,7 @@ import '../mutation_visitor.dart';
 /// legal (`isLoading ? null : count` swapped is `count : null`, fine either
 /// way here, but `isLoading ? 0 : 'done'` swapped needs the surrounding
 /// context to accept either type in either position, which it often will
-/// not). That is expected and is exactly what the compile-safety gate this
+/// not). That is expected and is exactly what the compile check this
 /// package always runs before counting a mutant exists to catch — this
 /// operator does not try to predict it.
 class TernarySwap extends MutationOperator {

@@ -19,7 +19,7 @@ class MutantProgress {
 
   final MutantResult result;
 
-  /// Wall time spent on this mutant: writing it, the compile-safety gate,
+  /// Wall time spent on this mutant: writing it, the compile check,
   /// any test runs and the restore.
   final Duration elapsed;
 
@@ -30,7 +30,7 @@ class MutantProgress {
   /// Measured rather than assumed, so it already carries whatever
   /// [RunPlan.estimate] could only guess at: how much parallel workers
   /// actually win, what a selected command costs against the full one, and
-  /// how many candidates the compile-safety gate rejects for free. It moves
+  /// how many candidates the compile check rejects for free. It moves
   /// while the run does — an early stretch of rejected mutants reads fast,
   /// and a file whose tests are slow reads slow.
   final Duration projectedRemaining;

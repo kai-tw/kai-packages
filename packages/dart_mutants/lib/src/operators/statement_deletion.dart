@@ -28,8 +28,8 @@ import '../mutation_visitor.dart';
 /// statement was, so the mutant always parses, and whether it *compiles* is
 /// left to the one thing that can actually answer that. Deleting a `return`
 /// from a value-returning function, or a variable declaration something later
-/// reads, produces a mutant the compile-safety gate rejects; that costs one
-/// gate check and scores nothing, which is the same bargain
+/// reads, produces a mutant the compile check rejects; that costs one
+/// compile check and scores nothing, which is the same bargain
 /// `NullCoalescingDeletion` already makes deliberately.
 ///
 /// Deleting a statement can also produce an *equivalent* mutant — a trailing

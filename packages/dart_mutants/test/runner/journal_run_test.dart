@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
+import 'package:dart_mutants/src/runner/compile_check.dart';
 import 'package:dart_mutants/src/runner/file_mutation_report.dart';
 import 'package:dart_mutants/src/runner/mutant_progress.dart';
 import 'package:dart_mutants/src/runner/mutation_run_report.dart';
@@ -71,15 +71,17 @@ Future<_Start> _start(
   String journal, {
   bool selectByCoverage = false,
 }) async {
-  final InProcessAnalyzerGate gate = InProcessAnalyzerGate(<String>[dir.path]);
-  addTearDown(gate.close);
+  final InProcessAnalyzerCheck check = InProcessAnalyzerCheck(<String>[
+    dir.path,
+  ]);
+  addTearDown(check.close);
   final _Start start = _Start();
   start.report =
       await MutationTestRunner(
         testCommand: ProcessCommand('dart', <String>[
           'test',
         ], workingDirectory: dir.path),
-        compileSafetyGate: gate,
+        compileCheck: check,
         mutantTimeout: const Duration(seconds: 20),
         baselineFactor: 0,
         selectByCoverage: selectByCoverage,

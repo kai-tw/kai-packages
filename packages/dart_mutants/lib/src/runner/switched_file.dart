@@ -52,7 +52,7 @@ class SwitchedFile {
 /// cannot import `dart:io`; anything in a constant context, which cannot read
 /// the environment; a whole local declaration, whose name a branch would hide;
 /// a function's own body; and a bare `$name` in a string. Whether what is left
-/// compiles is not checked here — see the runner, which asks the gate.
+/// compiles is not checked here — see the runner, which asks the check.
 SwitchedFile switchMutants(String source, Map<int, Mutant> mutants) {
   final CompilationUnit unit = parseString(
     content: source,

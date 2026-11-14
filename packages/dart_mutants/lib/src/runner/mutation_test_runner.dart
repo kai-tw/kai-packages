@@ -12,7 +12,7 @@ import '../mutation_operator.dart';
 import '../mutation_visitor.dart';
 import '../operators.dart';
 import '../version.dart';
-import 'compile_safety_gate.dart';
+import 'compile_check.dart';
 import 'file_mutation_report.dart';
 import 'host_load.dart';
 import 'import_graph.dart';
@@ -57,9 +57,9 @@ import 'worker_sandbox.dart';
 class MutationTestRunner {
   MutationTestRunner({
     required this.testCommand,
-    required this.compileSafetyGate,
-    this.fallbackCompileSafetyGate,
-    this.onGateFallback,
+    required this.compileCheck,
+    this.fallbackCompileCheck,
+    this.onCompileCheckFallback,
     List<MutationOperator>? operators,
     this.mutantTimeout = defaultMutantTimeout,
     this.testTimeout = defaultTestTimeout,
@@ -106,17 +106,17 @@ class MutationTestRunner {
 
   /// A `dart test …` or `flutter test …` command, run in the package.
   final ProcessCommand testCommand;
-  final CompileSafetyGate compileSafetyGate;
+  final CompileCheck compileCheck;
 
-  /// Used instead of [compileSafetyGate] for any file that gate rejects
+  /// Used instead of [compileCheck] for any file that check rejects
   /// before it has been mutated at all — see [run]. `null` means there is
   /// nothing to fall back to, and such a file aborts the run.
-  final CompileSafetyGate? fallbackCompileSafetyGate;
+  final CompileCheck? fallbackCompileCheck;
 
-  /// Called with a file that [compileSafetyGate] rejected unmodified and
-  /// [fallbackCompileSafetyGate] will judge instead — a decision the run
+  /// Called with a file that [compileCheck] rejected unmodified and
+  /// [fallbackCompileCheck] will judge instead — a decision the run
   /// makes on its own, which a person should hear about.
-  final void Function(String filePath)? onGateFallback;
+  final void Function(String filePath)? onCompileCheckFallback;
 
   /// Run each mutant against only the test files that reach it, and score a
   /// mutant no test file reaches as undetected and uncovered.
@@ -201,7 +201,7 @@ class MutationTestRunner {
   ///
   /// A passing baseline is recorded too, and a start that finds one skips
   /// it: the journal only matches code whose fingerprint is unchanged, the
-  /// code that baseline passed against. The gate checks still run on every
+  /// code that baseline passed against. The compile checks still run on every
   /// start.
   final String? journalPath;
 
@@ -321,22 +321,21 @@ class MutationTestRunner {
   /// them look detected, for a reason that has nothing to do with the
   /// mutation.
   ///
-  /// The same rule, applied to the compile-safety gate: before anything is
-  /// mutated, every target file that has mutants is put to the gate as it
-  /// stands. A gate that rejects a target's unmodified code would score every
+  /// The same rule, applied to the compile check: before anything is
+  /// mutated, every target file that has mutants is checked as it stands. A check that rejects a target's unmodified code would score every
   /// one of its mutants `invalid` — silently, and in a shape a caller reads
   /// as "nothing to measure". Such a file is judged by
-  /// [fallbackCompileSafetyGate] instead if that accepts it, and otherwise
+  /// [fallbackCompileCheck] instead if that accepts it, and otherwise
   /// the run aborts before touching anything.
   ///
-  /// That abort cannot tell its causes apart: the gate cannot read the file;
-  /// the gate's own configuration rejects code that compiles (a
+  /// That abort cannot tell its causes apart: the check cannot read the file;
+  /// the check's own configuration rejects code that compiles (a
   /// caller-chosen command that fails on lints, or a lint promoted to an
   /// error); or the file genuinely does not compile. The baseline does not
   /// settle it, because it only vouches for files the test command loads —
   /// a broken target no test imports passes the baseline and ends up here.
-  /// A file with no mutants is not put to the gate at all: there is nothing
-  /// of it to judge, so nothing a wrong answer could cost.
+  /// A file with no mutants isn't checked at all: there is nothing of it to
+  /// judge, so nothing a wrong answer could cost.
   Future<MutationRunReport> run(List<String> filePaths) async {
     final List<String> targets = filePaths
         .where((String path) => !isGeneratedFile(path))
@@ -397,14 +396,14 @@ class MutationTestRunner {
         stats,
         baseline,
       );
-      final MutationRunReport? gateAbort = planned.abort;
-      if (gateAbort != null) {
-        return gateAbort;
+      final MutationRunReport? checkAbort = planned.abort;
+      if (checkAbort != null) {
+        return checkAbort;
       }
       final List<_PlannedFile> plan = planned.files;
 
       _loading = _readImports(switched.invocation, targets);
-      final List<_Job> jobs = _jobsFor(plan, planned.gates, switched);
+      final List<_Job> jobs = _jobsFor(plan, planned.checks, switched);
       final List<MutantResult?> recalled = _recall(jobs);
       final MutationRunReport? assetsAbort = await _buildAssets(
         switched,
@@ -507,8 +506,8 @@ class MutationTestRunner {
   }
 
   /// Reads and enumerates every target and puts each one that has mutants to
-  /// its gate. [_Enumerated.abort] is set, and the rest left short, when a
-  /// gate rejects a file before it has been mutated.
+  /// its check. [_Enumerated.abort] is set, and the rest left short, when a
+  /// check rejects a file before it has been mutated.
   Future<_Enumerated> _enumerate(
     List<String> targets,
     _Switched switched,
@@ -516,9 +515,9 @@ class MutationTestRunner {
     Duration? baseline,
   ) async {
     final List<_PlannedFile> plan = <_PlannedFile>[];
-    final Map<String, SourceCompileSafetyGate> gates =
-        <String, SourceCompileSafetyGate>{};
-    final Stopwatch gateClock = Stopwatch()..start();
+    final Map<String, SourceCompileCheck> checks =
+        <String, SourceCompileCheck>{};
+    final Stopwatch checkClock = Stopwatch()..start();
     for (final String filePath in targets) {
       final String source = await File(filePath).readAsString();
       final List<Mutant> mutants = _collectMutants(filePath, source);
@@ -526,29 +525,29 @@ class MutationTestRunner {
       if (mutants.isEmpty) {
         continue;
       }
-      final CompileSafetyGate? gate = await _gateFor(filePath);
-      if (gate == null) {
-        stats.gateCheck = gateClock.elapsed;
+      final CompileCheck? check = await _compileCheckFor(filePath);
+      if (check == null) {
+        stats.compileCheck = checkClock.elapsed;
         return _Enumerated.rejected(
           MutationRunReport.aborted(
             stats: await _finished(stats),
-            AbortKind.gateRejectsUnmodified,
-            'the compile-safety gate rejects $filePath before it has been '
-            'mutated. The gate cannot read that file, or its configuration '
+            AbortKind.compileCheckRejectsUnmodified,
+            'the compile check rejects $filePath before it has been '
+            'mutated. The check cannot read that file, or its configuration '
             'rejects code that compiles (`flutter analyze` needs '
             '--no-fatal-infos --no-fatal-warnings; a lint promoted to an '
             'error does it too), or the file does not compile and no test '
             'the command runs loads it. Refusing to score mutants with a '
-            'gate that rejects the code they start from.',
+            'check that rejects the code they start from.',
             baselineDuration: baseline,
             mutantTimeout: mutantTimeout,
           ),
         );
       }
-      gates[filePath] = _inMemory(gate, switched, targets);
+      checks[filePath] = _inMemory(check, switched, targets);
     }
-    stats.gateCheck = gateClock.elapsed;
-    return _Enumerated(plan, gates);
+    stats.compileCheck = checkClock.elapsed;
+    return _Enumerated(plan, checks);
   }
 
   /// The abort the pending mutants' run ended in, a failure of the run or
@@ -674,18 +673,18 @@ class MutationTestRunner {
     return null;
   }
 
-  /// [gate] as one that judges content in memory: itself when it can, or
+  /// [check] as one that judges content in memory: itself when it can, or
   /// else asked about a copy of the package with the content written in.
-  SourceCompileSafetyGate _inMemory(
-    CompileSafetyGate gate,
+  SourceCompileCheck _inMemory(
+    CompileCheck check,
     _Switched switched,
     List<String> targets,
   ) {
-    if (gate is SourceCompileSafetyGate) {
-      return gate;
+    if (check is SourceCompileCheck) {
+      return check;
     }
-    return switched.copyGates[gate] ??= _CopyGate(
-      gate,
+    return switched.copyChecks[check] ??= _CopyCheck(
+      check,
       // Named apart from the lanes, which count up from 0, whenever their
       // count is already known.
       WorkerSandbox.create(
@@ -722,14 +721,14 @@ class MutationTestRunner {
     if (path == null) {
       return null;
     }
-    final CompileSafetyGate gate = compileSafetyGate;
+    final CompileCheck check = compileCheck;
     final RunJournal journal = RunJournal.open(path, <String, Object?>{
       'format': RunJournal.format,
       'testCommand': testCommand.toString(),
       'operators': operators.map((MutationOperator o) => o.name).toList(),
-      'gate': gate is AnalyzerProcessGate
-          ? gate.analyzeCommand.toString()
-          : gate.runtimeType.toString(),
+      'compileCheck': check is AnalyzerProcessCheck
+          ? check.analyzeCommand.toString()
+          : check.runtimeType.toString(),
       'selectByCoverage': selectByCoverage,
       'fingerprint': RunJournal.fingerprint(
         testCommand.workingDirectory ?? Directory.current.path,
@@ -742,17 +741,17 @@ class MutationTestRunner {
     return journal;
   }
 
-  /// The gate that can judge [filePath], asked while the file is still
-  /// unmodified — or `null` when neither gate accepts it. See [run].
-  Future<CompileSafetyGate?> _gateFor(String filePath) async {
-    if (await compileSafetyGate.compiles(filePath)) {
-      return compileSafetyGate;
+  /// The check that can judge [filePath], asked while the file is still
+  /// unmodified — or `null` when neither check accepts it. See [run].
+  Future<CompileCheck?> _compileCheckFor(String filePath) async {
+    if (await compileCheck.compiles(filePath)) {
+      return compileCheck;
     }
-    final CompileSafetyGate? fallback = fallbackCompileSafetyGate;
+    final CompileCheck? fallback = fallbackCompileCheck;
     if (fallback == null || !await fallback.compiles(filePath)) {
       return null;
     }
-    onGateFallback?.call(filePath);
+    onCompileCheckFallback?.call(filePath);
     return fallback;
   }
 
@@ -898,7 +897,7 @@ class MutationTestRunner {
   /// does there.
   List<_Job> _jobsFor(
     List<_PlannedFile> plan,
-    Map<String, SourceCompileSafetyGate> gates,
+    Map<String, SourceCompileCheck> checks,
     _Switched switched,
   ) {
     final List<String> all = switched.invocation.testFiles();
@@ -908,7 +907,7 @@ class MutationTestRunner {
           _Job(
             mutant,
             file.source,
-            gates[file.path]!,
+            checks[file.path]!,
             _loading?[file.path] ?? all,
             selected: selectByCoverage,
           ),
@@ -939,7 +938,7 @@ class MutationTestRunner {
   ];
 
   /// Finishes the [pending] jobs that need no test run, `invalid` where the
-  /// gate rejects the mutant and uncovered where no test reaches it, and
+  /// check rejects the mutant and uncovered where no test reaches it, and
   /// returns the rest by the id a [SwitchedJob] carries. It stops early when
   /// the run is over budget.
   Future<Map<int, _Job>> _sortPending(List<_Job> pending) async {
@@ -949,12 +948,12 @@ class MutationTestRunner {
         break;
       }
       final Stopwatch clock = Stopwatch()..start();
-      final bool compiles = await job.gate.compilesSource(
-        job.mutant.filePath,
-        job.mutant.applyTo(job.source),
-      );
-      job.timing.gate = clock.elapsed;
-      if (!compiles) {
+      final String mutated = job.mutant.applyTo(job.source);
+      final bool valid =
+          await job.check.compilesSource(job.mutant.filePath, mutated) &&
+          !await _dropsRequiredSuperCall(job, mutated);
+      job.timing.compileCheck = clock.elapsed;
+      if (!valid) {
         _finish(
           job,
           MutantResult(mutant: job.mutant, verdict: MutantVerdict.invalid),
@@ -975,19 +974,32 @@ class MutationTestRunner {
     return runnable;
   }
 
-  /// The gate of the file [file], which every runnable job's file has.
-  static SourceCompileSafetyGate _gateOf(
-    Map<String, SourceCompileSafetyGate> gates,
-    String file,
-  ) {
-    final SourceCompileSafetyGate? gate = gates[file];
-    if (gate == null) {
-      throw StateError('no gate was made for $file');
-    }
-    return gate;
+  /// Whether [job]'s mutant, [mutated], deletes a `super` call the analyzer
+  /// requires — see [RequiredSuperCallCheck]. Only a mutant whose original
+  /// text has a `super.` call is asked about, since only it can delete one;
+  /// the rest skip the second analysis.
+  static Future<bool> _dropsRequiredSuperCall(_Job job, String mutated) async {
+    final SourceCompileCheck check = job.check;
+    return check is RequiredSuperCallCheck &&
+        _superCall.hasMatch(job.mutant.original) &&
+        await check.dropsRequiredSuperCall(job.mutant.filePath, mutated);
   }
 
-  /// Gives each of [pending] its result: `invalid` where the gate rejects
+  static final RegExp _superCall = RegExp(r'\bsuper\s*\.');
+
+  /// The check of the file [file], which every runnable job's file has.
+  static SourceCompileCheck _checkOf(
+    Map<String, SourceCompileCheck> checks,
+    String file,
+  ) {
+    final SourceCompileCheck? check = checks[file];
+    if (check == null) {
+      throw StateError('no check was made for $file');
+    }
+    return check;
+  }
+
+  /// Gives each of [pending] its result: `invalid` where the check rejects
   /// it, undetected and uncovered where no test reaches it, and the rest
   /// from a [SwitchedRunner]. Why the switched run stopped, or `null`.
   Future<String?> _runPending(
@@ -1007,14 +1019,13 @@ class MutationTestRunner {
       return null;
     }
     final SwitchedStats stats = _stats.switched = SwitchedStats();
-    final Map<String, SourceCompileSafetyGate> gates =
-        <String, SourceCompileSafetyGate>{
-          for (final _Job job in runnable.values) job.mutant.filePath: job.gate,
-        };
+    final Map<String, SourceCompileCheck> checks = <String, SourceCompileCheck>{
+      for (final _Job job in runnable.values) job.mutant.filePath: job.check,
+    };
     return SwitchedRunner(
       toolchain: switched.toolchain,
       root: switched.root,
-      gateFor: (String file) => _gateOf(gates, file),
+      checkFor: (String file) => _checkOf(checks, file),
       temps: tempSpace,
       workers: _lanes,
       slots: slots,
@@ -1114,7 +1125,7 @@ class MutationTestRunner {
         completed: _completed,
         total: _planned,
         result: result,
-        elapsed: job.timing.gate + (job.timing.test ?? Duration.zero),
+        elapsed: job.timing.compileCheck + (job.timing.test ?? Duration.zero),
         projectedRemaining: remaining,
       ),
     );
@@ -1186,7 +1197,7 @@ class MutationTestRunner {
           invalid++;
           // Kept, not just counted — same reasoning as timedOutResults
           // below: a bare count cannot tell a caller which lines the
-          // compile-safety gate rejected, or whether 27 of them share one
+          // compile check rejected, or whether 27 of them share one
           // cause.
           invalidResults.add(result);
         case MutantVerdict.timeout:
@@ -1368,23 +1379,23 @@ class _Switched {
   /// The test command's options every compiled test file applies.
   final List<String> arguments;
 
-  /// A gate that only reads files from disk, wrapped once each.
-  final Map<CompileSafetyGate, SourceCompileSafetyGate> copyGates =
-      <CompileSafetyGate, SourceCompileSafetyGate>{};
+  /// A check that only reads files from disk, wrapped once each.
+  final Map<CompileCheck, SourceCompileCheck> copyChecks =
+      <CompileCheck, SourceCompileCheck>{};
 }
 
-/// A gate that only reads files from disk, asked about content in memory by
+/// A check that only reads files from disk, asked about content in memory by
 /// writing it into a copy of the package — so the package itself is never
 /// written to. One question at a time.
-class _CopyGate implements SourceCompileSafetyGate {
-  _CopyGate(this._gate, this._copy);
+class _CopyCheck implements SourceCompileCheck {
+  _CopyCheck(this._check, this._copy);
 
-  final CompileSafetyGate _gate;
+  final CompileCheck _check;
   final WorkerSandbox _copy;
   Future<void> _previous = Future<void>.value();
 
   @override
-  Future<bool> compiles(String filePath) => _gate.compiles(filePath);
+  Future<bool> compiles(String filePath) => _check.compiles(filePath);
 
   @override
   Future<bool> compilesSource(String filePath, String source) {
@@ -1392,7 +1403,7 @@ class _CopyGate implements SourceCompileSafetyGate {
       final String path = _copy.pathFor(filePath);
       _copy.write(path, source);
       try {
-        return await _gate.compiles(path);
+        return await _check.compiles(path);
       } finally {
         _copy.write(path, File(filePath).readAsStringSync());
       }
@@ -1425,17 +1436,17 @@ class _PlannedFile {
   final List<Mutant> mutants;
 }
 
-/// The target files read and put to their gates, or the abort that ended the
-/// run because a gate rejected a file.
+/// The target files, read and checked, or the abort that ended the run
+/// because a check rejected a file.
 class _Enumerated {
-  const _Enumerated(this.files, this.gates) : abort = null;
+  const _Enumerated(this.files, this.checks) : abort = null;
 
   const _Enumerated.rejected(MutationRunReport this.abort)
     : files = const <_PlannedFile>[],
-      gates = const <String, SourceCompileSafetyGate>{};
+      checks = const <String, SourceCompileCheck>{};
 
   final List<_PlannedFile> files;
-  final Map<String, SourceCompileSafetyGate> gates;
+  final Map<String, SourceCompileCheck> checks;
   final MutationRunReport? abort;
 }
 
@@ -1445,14 +1456,14 @@ class _Timing {
 
   final bool selected;
   int worker = 0;
-  Duration gate = Duration.zero;
+  Duration compileCheck = Duration.zero;
   Duration? test;
 
   MutantTiming build(MutantResult result) => MutantTiming(
     result: result,
     worker: worker,
-    elapsed: gate + (test ?? Duration.zero),
-    gate: gate,
+    elapsed: compileCheck + (test ?? Duration.zero),
+    compileCheck: compileCheck,
     selected: selected,
     test: test,
   );
@@ -1463,7 +1474,7 @@ class _Job {
   _Job(
     this.mutant,
     this.source,
-    this.gate,
+    this.check,
     this.tests, {
     required bool selected,
   }) : timing = _Timing(selected: selected);
@@ -1473,7 +1484,7 @@ class _Job {
   /// Its file's unmodified content.
   final String source;
 
-  final SourceCompileSafetyGate gate;
+  final SourceCompileCheck check;
 
   /// The test files it runs against, relative to the package — empty when
   /// no test reaches it.

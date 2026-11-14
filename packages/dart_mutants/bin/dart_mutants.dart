@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:args/args.dart';
 import 'package:dart_mutants/src/review/diff_scope.dart';
 import 'package:dart_mutants/src/review/review_comments.dart';
-import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
+import 'package:dart_mutants/src/runner/compile_check.dart';
 import 'package:dart_mutants/src/runner/file_mutation_report.dart';
 import 'package:dart_mutants/src/runner/line_selection.dart';
 import 'package:dart_mutants/src/runner/mutant_progress.dart';
@@ -159,27 +159,30 @@ int _nothingToMutate(ArgResults args) {
 
 /// The analyzers that judge whether a mutant compiles, and the closing of
 /// them: the runner is handed them, so it does not close them.
-class _Gates {
-  const _Gates(this.gate, this.fallback);
+class _CompileChecks {
+  const _CompileChecks(this.check, this.fallback);
 
-  /// With no --analyze-command: the in-process gate, backed by `dart analyze`
+  /// With no --analyze-command: the in-process check, backed by `dart analyze`
   /// for any file it cannot judge (see MutationTestRunner.run). With one:
   /// that command alone — a caller who named their judge gets no substitute.
-  factory _Gates.of(String? analyzeCommand, List<String> targets) =>
+  factory _CompileChecks.of(String? analyzeCommand, List<String> targets) =>
       analyzeCommand == null
-      ? _Gates(
-          InProcessAnalyzerGate(targets),
-          const AnalyzerProcessGate(
+      ? _CompileChecks(
+          InProcessAnalyzerCheck(targets),
+          const AnalyzerProcessCheck(
             ProcessCommand('dart', <String>['analyze']),
           ),
         )
-      : _Gates(AnalyzerProcessGate(_parseCommand(analyzeCommand)), null);
+      : _CompileChecks(
+          AnalyzerProcessCheck(_parseCommand(analyzeCommand)),
+          null,
+        );
 
-  final CompileSafetyGate gate;
-  final CompileSafetyGate? fallback;
+  final CompileCheck check;
+  final CompileCheck? fallback;
 
   Future<void> close() async {
-    await gate.close();
+    await check.close();
     await fallback?.close();
   }
 }
@@ -191,7 +194,10 @@ Future<int> _runAndReport(
   TestSlots slots,
 ) async {
   final List<String> targets = scope?.files ?? args.rest;
-  final _Gates gates = _Gates.of(args['analyze-command'] as String?, targets);
+  final _CompileChecks checks = _CompileChecks.of(
+    args['analyze-command'] as String?,
+    targets,
+  );
   // stdout is the JSON report's under --json, and nothing else may share it.
   final bool jsonOnStdout = args['json'] as bool;
 
@@ -206,7 +212,7 @@ Future<int> _runAndReport(
   final MutationTestRunner runner = _runner(
     args,
     scope,
-    gates,
+    checks,
     slots,
     quiet: jsonOnStdout,
     onStopped: (MutationRunReport stopped) {
@@ -222,7 +228,7 @@ Future<int> _runAndReport(
     report = await runner.run(targets);
   } finally {
     record?.delete();
-    await gates.close();
+    await checks.close();
   }
 
   // The report is always printed here, before the exit code is chosen — a
@@ -255,16 +261,16 @@ RunRecord? _announce() {
 MutationTestRunner _runner(
   ArgResults args,
   DiffScope? scope,
-  _Gates gates,
+  _CompileChecks checks,
   TestSlots slots, {
   required bool quiet,
   required void Function(MutationRunReport stopped) onStopped,
 }) => MutationTestRunner(
   onStopped: onStopped,
   testCommand: _parseCommand(args['test-command'] as String),
-  compileSafetyGate: gates.gate,
-  fallbackCompileSafetyGate: gates.fallback,
-  onGateFallback: (String filePath) => stderr.writeln(
+  compileCheck: checks.check,
+  fallbackCompileCheck: checks.fallback,
+  onCompileCheckFallback: (String filePath) => stderr.writeln(
     'note: the in-process analyzer rejects $filePath before it has been '
     'mutated, so its mutants are judged by `dart analyze` instead — one '
     'process per mutant, much slower. One known cause: the file uses '
@@ -443,7 +449,7 @@ ArgParser _buildParser() {
           'Record the baseline and each mutant\'s result in '
           'this file as they finish. A run started again with the same file '
           'reuses all of them, except timeouts, and runs only the rest — as '
-          'long as the test command, gate, operators, --select-by-coverage '
+          'long as the test command, check, operators, --select-by-coverage '
           'and the content of pubspec.yaml, pubspec.lock, lib/, test/ and the '
           'files given are unchanged, and no release since changed how a '
           'verdict is reached; otherwise the file is started over.',

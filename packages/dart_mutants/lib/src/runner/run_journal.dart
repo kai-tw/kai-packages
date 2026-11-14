@@ -20,7 +20,7 @@ import 'mutant_verdict.dart';
 /// [discarded] says why. The header has two halves:
 ///
 /// - the run's configuration — [format], test command, operators,
-///   compile-safety gate, test selection. Not the engine version, so a run
+///   compile check, test selection. Not the engine version, so a run
 ///   stopped on one release resumes on the next; not the timeouts or the
 ///   workers: none of them can change a verdict that is reused (below).
 /// - a fingerprint of the package's content, see [fingerprint]. Any edit to
@@ -78,8 +78,9 @@ class RunJournal {
   /// is started over. 2: every mutant runs as a switched file, against the
   /// tests `dart_test.yaml` and the command's filters keep. 3: under the
   /// selection, against the test files that reach its switch rather than
-  /// the ones that enter its function.
-  static const int format = 3;
+  /// the ones that enter its function. 4: a mutant that deletes a `super`
+  /// call the analyzer requires is `invalid`, not run.
+  static const int format = 4;
 
   /// [firstLine] decoded, with the header 0.5.0 wrote read as [format] 1:
   /// it named the engine version first where [format] now stands, and its

@@ -14,8 +14,8 @@ import '../mutation_visitor.dart';
 /// nullability this operator does not itself analyze — `a`'s static type is
 /// very often nullable exactly because it is the left side of a `??`, so `a`
 /// alone frequently fails the surrounding context's non-null requirement and
-/// gets discarded by the compile-safety gate. That is expected; proposing it
-/// anyway costs nothing but one gate check, and `b` alone is usually the one
+/// gets discarded by the compile check. That is expected; proposing it
+/// anyway costs nothing but one compile check, and `b` alone is usually the one
 /// that survives to actually run.
 ///
 /// This is a blind spot for a regex-based mutator for the same reason the

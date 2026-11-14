@@ -336,7 +336,7 @@ void main() {
     // run through real `dart pub get`/`analyze`/`test` subprocesses — roughly
     // double the single-run cost the package default (30s) is sized for.
     // Measured at ~19s for one run alone; the two together tripped the
-    // default, which is a test-runtime ceiling, not a `dart_mutants` gate —
+    // default, which is a test-runtime ceiling, not a `dart_mutants` check —
     // unlike a mutant's budget, doubling it cannot hide a genuine hang here.
     timeout: const Timeout(Duration(seconds: 90)),
   );
