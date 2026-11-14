@@ -15,8 +15,8 @@ declaration and nothing else is scored `diagnostic`.
   assignment too), `++`, `--`, `throw`, a cascade, a null assertion `!` or
   `as` cast (a pattern's `p!` and `p as T` too), or an `await for` in a
   collection literal in them makes the mutant run as usual, since deleting the
-  statement would delete that effect too. Reading a getter and applying an
-  operator do not count.
+  statement would delete that effect too. Reading a getter and applying any
+  other operator, such as `+` or `[]`, do not count.
 - **The mark is read from the declaration the call resolves to**, never from
   a name. A call through a `dynamic` receiver or a function value runs as
   usual.

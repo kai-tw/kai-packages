@@ -101,10 +101,10 @@ the file over, with a note on stderr saying which — an edit anywhere can
 change any verdict, so none is guessed at. So does a release that changes
 how a verdict is reached; other releases resume a journal an earlier one
 wrote. 0.9.0, 0.11.0, 0.12.0 and 0.13.0 are such releases, so a journal an
-earlier one wrote starts over once. A file a test reads from outside `test/`, or a
-Dart SDK upgrade, is not seen; delete the journal after changing one. A recorded timeout is
-always asked again: the budget decided it, and the next start may have a
-larger one.
+earlier one wrote starts over once. A file a test reads from outside
+`test/`, or a Dart SDK upgrade, is not seen; delete the journal after
+changing one. A recorded timeout is always asked again: the budget decided
+it, and the next start may have a larger one.
 
 What a start still does every time: the compile checks. The plan line counts
 the mutants that will run, names how many more were reused, and says when
@@ -343,9 +343,10 @@ What does not count, so the mutant runs as any other:
   constructor call, `await`, an assignment (a pattern assignment too), `++`,
   `--`, `throw`, a cascade, a null assertion `!` or `as` cast (a pattern's
   `p!` and `p as T` too), which may throw, or an `await for` in a collection
-  literal, which reads a whole stream. Deleting `Sink.info(describe(next()));` deletes `next()` too.
-  Reading a property (a getter) and applying an operator do not count as
-  effects, or `Sink.info('saved ${order.id}')` could never qualify.
+  literal, which reads a whole stream. Deleting
+  `Sink.info(describe(next()));` deletes `next()` too. Reading a property (a
+  getter) and applying any other operator, such as `+` or `[]`, do not count
+  as effects, or `Sink.info('saved ${order.id}')` could never qualify.
 - **A call that is not a statement of its own** — `return Sink.info('x');`,
   `x = Sink.info('x');`, a call inside a condition or another expression.
 - **A call that does not resolve to a declaration** — through a `dynamic`
@@ -916,8 +917,8 @@ real CLI binary, not just the internal report types:
   decided it, derived from that file's unmutated run (see *The budget
   follows the baseline*), and a caller reading `timedOutMutants` needs to
   know what they timed out against. An `invalid`, `diagnostic` or
-  `uncovered` mutant ran nothing and has no `timeoutSeconds`. Beside them, `mutantTimeoutSeconds`
-  is the fixed headroom the floor was built from, and `baselineSeconds` the
+  `uncovered` mutant ran nothing and has no `timeoutSeconds`. Beside them,
+  `mutantTimeoutSeconds` is the fixed headroom the floor was built from, and `baselineSeconds` the
   test command's wall time against unmodified code. Both are present on
   every run whose baseline passed; a red baseline has only
   `baselineSeconds`, and a baseline that never finished, or a run stopped

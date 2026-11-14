@@ -107,8 +107,9 @@ abstract interface class DiagnosticCallCheck implements SourceCompileCheck {
   /// whose receiver and arguments do nothing but give values: no call, no
   /// `await`, assignment, `++`, `--`, `throw`, cascade, null assertion `!` or
   /// `as` cast (a pattern's `p!` and `p as T` too), or `await for` in a
-  /// collection literal. Deleting one that does would delete that effect too, so it
-  /// runs as usual. Reading a getter and applying an operator are not counted.
+  /// collection literal. Deleting one that does would delete that effect too,
+  /// so it runs as usual. Reading a getter and applying any other operator,
+  /// such as `+` or `[]`, are not counted.
   Future<bool> onlyChangesDiagnosticCall(
     String filePath,
     int offset,
@@ -517,7 +518,6 @@ class _EffectFinder extends GeneralizingAstVisitor<void> {
     super.visitPrefixExpression(node);
   }
 
-  /// Every postfix operator is one: `++`, `--` or the null assertion `!`.
   @override
   void visitPostfixExpression(PostfixExpression node) => found = true;
 
