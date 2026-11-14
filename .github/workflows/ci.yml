@@ -25,8 +25,8 @@ jobs:
       # `package:flutter/material.dart` in favour of the separate
       # material_ui package, which ui_kit and design_mockups import. Moving
       # to 3.50 means doing both at once, together with the apps that use
-      # these packages. Every job below sets up the same way, so change the
-      # version in all of them together.
+      # these packages. Every job below sets up the same way, and so does
+      # package-tag.yml, so change the version in all of them together.
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
