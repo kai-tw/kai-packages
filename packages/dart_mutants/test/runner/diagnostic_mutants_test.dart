@@ -46,6 +46,32 @@ class Sink {
 }
 ''';
 
+/// Marked methods on an object, for a receiver that is more than a name:
+/// `channelOf()` is a call, `Box` has a `const` constructor and a method.
+const String _effectSink = '''
+class Sink {
+  @pragma('dart_mutants:diagnostic')
+  static void info(String message, {String? tag}) {}
+
+  @pragma('dart_mutants:diagnostic')
+  static void items(List<String> items) {}
+}
+
+class Channel {
+  @pragma('dart_mutants:diagnostic')
+  void note(String message) {}
+}
+
+Channel channelOf() => Channel();
+
+class Box {
+  const Box();
+
+  @pragma('dart_mutants:diagnostic')
+  void note(String message) {}
+}
+''';
+
 /// A real temp package with [lib] (file name to source) under `lib/` and the
 /// test [testSource] as `test/fixture_test.dart`. The mutants are decided by
 /// what the analyzer resolves, so the fixture has to be a package the
@@ -791,6 +817,234 @@ void work() {
           expect(undetected, contains(mutant), reason: needle);
         }
       },
+    );
+  });
+
+  group('[S4] a marked call whose receiver or arguments do something', () {
+    const String work = '''
+import 'sink.dart';
+
+final List<String> items = <String>['a'];
+
+void work() {
+  channelOf().note('x');
+  Box().note('x');
+  Sink.info('\${Box()}');
+  Sink.info('\${const Box()}');
+  Sink.items(items..length);
+}
+''';
+
+    late final Future<FileMutationReport> file = _runFileFixture(
+      lib: <String, String>{'sink.dart': _effectSink, 'work.dart': work},
+      testSource: _callsWork,
+      operators: <MutationOperator>[StatementDeletion()],
+    );
+
+    for (final (String what, String needle) in <(String, String)>[
+      ('a call', 'channelOf().note'),
+      ('a non-const constructor call', 'Box().note'),
+      ('a non-const constructor call in an interpolation', "info('\${Box()}')"),
+      ('a cascade with no call in it', 'items..length'),
+    ]) {
+      test(
+        '[S4] with $what in the receiver or argument, deleting the call is a '
+        'survivor to read, not diagnostic',
+        () async {
+          final FileMutationReport f = await file;
+          final String mutant = 'statement_deletion:${_lineOf(work, needle)}';
+
+          expect(_listed(f, 'diagnosticMutants'), isNot(contains(mutant)));
+          expect(_listed(f, 'undetectedMutants'), contains(mutant));
+        },
+      );
+    }
+
+    test(
+      '[S4] a `const` constructor call in the argument does nothing, so '
+      'deleting the call is diagnostic',
+      () async {
+        final FileMutationReport f = await file;
+        final String mutant =
+            'statement_deletion:${_lineOf(work, "const Box()")}';
+
+        expect(_listed(f, 'diagnosticMutants'), contains(mutant));
+        expect(_listed(f, 'undetectedMutants'), isNot(contains(mutant)));
+      },
+    );
+  });
+
+  group('[S4] a marked call whose deletion could drop a throw or a write', () {
+    const String work = '''
+import 'sink.dart';
+
+Channel? logger = Channel();
+Object channel = Channel();
+String? text = 't';
+Object value = 'v';
+
+void work() {
+  String a = '1';
+  String b = '2';
+  logger!.note('x');
+  Sink.info(text!);
+  (channel as Channel).note('x');
+  Sink.info(value as String);
+  Sink.info('\${(a, b) = (b, a)}');
+}
+''';
+
+    late final Future<FileMutationReport> file = _runFileFixture(
+      lib: <String, String>{'sink.dart': _effectSink, 'work.dart': work},
+      testSource: _callsWork,
+      operators: <MutationOperator>[StatementDeletion()],
+    );
+
+    for (final (String what, String needle) in <(String, String)>[
+      ('a null assertion on the receiver', 'logger!.note'),
+      ('a null assertion in the argument', 'info(text!)'),
+      ('an `as` cast on the receiver', '(channel as Channel)'),
+      ('an `as` cast in the argument', 'info(value as String)'),
+      ('a pattern assignment in the argument', '(a, b) = (b, a)'),
+    ]) {
+      test(
+        '[S4] with $what, deleting the call is a survivor to read, not '
+        'diagnostic: the deletion could drop a throw or a write',
+        () async {
+          final FileMutationReport f = await file;
+          final String mutant = 'statement_deletion:${_lineOf(work, needle)}';
+
+          expect(_listed(f, 'diagnosticMutants'), isNot(contains(mutant)));
+          expect(_listed(f, 'undetectedMutants'), contains(mutant));
+        },
+        skip: 'not implemented yet',
+      );
+    }
+  });
+
+  group('[S6] a marked call in other statement shapes', () {
+    const String work = '''
+import 'sink.dart';
+
+Channel? sink = Channel();
+
+void work() {
+  sink?.note('x');
+  Sink.info('x', tag: 't');
+}
+''';
+
+    late final Future<FileMutationReport> file = _runFileFixture(
+      lib: <String, String>{'sink.dart': _effectSink, 'work.dart': work},
+      testSource: _callsWork,
+      operators: <MutationOperator>[StatementDeletion()],
+    );
+
+    for (final (String what, String needle) in <(String, String)>[
+      ('a null-aware call', 'sink?.note'),
+      ('a call with a named argument', 'tag:'),
+    ]) {
+      test(
+        '[S6] deleting $what is diagnostic',
+        () async {
+          final FileMutationReport f = await file;
+
+          expect(
+            _listed(f, 'diagnosticMutants'),
+            contains('statement_deletion:${_lineOf(work, needle)}'),
+          );
+          expect(_listed(f, 'undetectedMutants'), isEmpty);
+        },
+      );
+    }
+  });
+
+  group('[S5] a marked call as the body of a function', () {
+    const String work = '''
+import 'sink.dart';
+
+void viaArrow() => Sink.info('x');
+
+void work() {
+  viaArrow();
+}
+''';
+
+    test(
+      '[S5] `=> Sink.info(..)` is the value of the function, not a '
+      'statement: nothing about it is diagnostic',
+      () async {
+        final FileMutationReport f = await _runFileFixture(
+          lib: <String, String>{'sink.dart': _markedSink, 'work.dart': work},
+          testSource: _callsWork,
+          operators: <MutationOperator>[
+            StatementDeletion(),
+            ConditionNegation(),
+            NullCoalescingDeletion(),
+          ],
+        );
+
+        expect(_listed(f, 'diagnosticMutants'), isEmpty);
+        expect(f.toJson()['diagnostic'], 0);
+        // The arrow body is not a mutation site; only the call to `viaArrow`
+        // on line 6 is, and it is no marked call.
+        expect(_listed(f, 'undetectedMutants'), <String>[
+          'statement_deletion:6',
+        ]);
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+  });
+
+  group('[S13] a branch without braces that only wraps a marked call', () {
+    const String work = '''
+import 'sink.dart';
+
+void work(bool x) {
+  if (x) Sink.info('a');
+}
+''';
+
+    test(
+      '[S13] negating the condition runs as usual, like the braced form',
+      () async {
+        final Directory dir = await _fixture(
+          lib: <String, String>{'sink.dart': _markedSink, 'work.dart': work},
+          testSource: '''
+import 'package:fixture/work.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('work', () {
+    work(true);
+    work(false);
+  });
+}
+''',
+        );
+
+        final MutationRunReport report = await _run(
+          dir,
+          <String>['work.dart'],
+          operators: <MutationOperator>[
+            StatementDeletion(),
+            ConditionNegation(),
+          ],
+        );
+
+        final FileMutationReport f = _fileOf(report, 'work.dart');
+        expect(_listed(f, 'diagnosticMutants'), isEmpty);
+        // Without braces the call is not a statement of its own: the `if`
+        // as a whole is deleted and negated, and both are scored.
+        expect(
+          _listed(f, 'undetectedMutants'),
+          unorderedEquals(<String>[
+            'statement_deletion:4',
+            'condition_negation:4',
+          ]),
+        );
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
     );
   });
 }

@@ -236,6 +236,32 @@ void main() {
     );
   });
 
+  group('a plain run with nothing but diagnostic mutants', () {
+    test(
+      '[S8] exits 0: only an undetected mutant makes a run exit 1',
+      () async {
+        final Directory dir = await _fixture(_callOnly);
+
+        final ProcessResult result = await Process.run(
+          'dart',
+          <String>[
+            'run',
+            _binPath,
+            '--test-command',
+            'dart test',
+            'lib/work.dart',
+          ],
+          workingDirectory: dir.path,
+          environment: cliEnvironment,
+        );
+
+        expect(result.exitCode, 0, reason: '${result.stdout}${result.stderr}');
+        expect(result.stdout, contains('1 diagnostic'));
+      },
+      timeout: const Timeout(Duration(seconds: 120)),
+    );
+  });
+
   group('--review and --fail-on-survivors', () {
     test(
       '[S8] with only diagnostic mutants left, --fail-on-survivors exits 0',
