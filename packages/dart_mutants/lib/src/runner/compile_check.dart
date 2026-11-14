@@ -106,7 +106,8 @@ abstract interface class DiagnosticCallCheck implements SourceCompileCheck {
   /// a call to a marked declaration — under any `await` or parentheses —
   /// whose receiver and arguments do nothing but give values: no call, no
   /// `await`, assignment, `++`, `--`, `throw`, cascade, null assertion `!` or
-  /// `as` cast. Deleting one that does would delete that effect too, so it
+  /// `as` cast (a pattern's `p!` and `p as T` too), or `await for` in a
+  /// collection literal. Deleting one that does would delete that effect too, so it
   /// runs as usual. Reading a getter and applying an operator are not counted.
   Future<bool> onlyChangesDiagnosticCall(
     String filePath,
@@ -483,8 +484,9 @@ class _StatementSpanCollector extends GeneralizingAstVisitor<void> {
 
 /// Finds whether an expression does anything besides give a value: a call,
 /// a non-`const` constructor call, `await`, an assignment (a pattern one
-/// too), `++`, `--`, `throw`, a cascade, or a null assertion `!` or `as`
-/// cast that may throw.
+/// too), `++`, `--`, `throw`, a cascade, a null assertion `!` or `as` cast
+/// that may throw (a pattern's `p!` and `p as T` too), or an `await for` in a
+/// collection literal.
 class _EffectFinder extends GeneralizingAstVisitor<void> {
   bool found = false;
 
@@ -524,6 +526,25 @@ class _EffectFinder extends GeneralizingAstVisitor<void> {
 
   @override
   void visitPatternAssignment(PatternAssignment node) => found = true;
+
+  /// `p!` in a pattern throws on `null`, like the `!` of an expression.
+  @override
+  void visitNullAssertPattern(NullAssertPattern node) => found = true;
+
+  /// `p as T` in a pattern throws on a mismatch, like an `as` cast.
+  @override
+  void visitCastPattern(CastPattern node) => found = true;
+
+  /// `await for` in a collection literal reads a whole stream, like `await`
+  /// waits for a future. A `for` element without `await` is not one.
+  @override
+  void visitForElement(ForElement node) {
+    if (node.awaitKeyword != null) {
+      found = true;
+      return;
+    }
+    super.visitForElement(node);
+  }
 
   @override
   void visitThrowExpression(ThrowExpression node) => found = true;

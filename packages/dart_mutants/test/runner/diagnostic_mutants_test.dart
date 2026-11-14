@@ -965,7 +965,6 @@ Future<void> work() async {
           expect(_listed(f, 'diagnosticMutants'), isNot(contains(mutant)));
           expect(_listed(f, 'undetectedMutants'), contains(mutant));
         },
-        skip: 'not implemented yet',
       );
     }
   });

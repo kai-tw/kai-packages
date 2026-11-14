@@ -341,8 +341,9 @@ What does not count, so the mutant runs as any other:
 
 - **An argument or receiver with an effect** — a call, a non-`const`
   constructor call, `await`, an assignment (a pattern assignment too), `++`,
-  `--`, `throw`, a cascade, or a null assertion `!` or `as` cast, which may
-  throw. Deleting `Sink.info(describe(next()));` deletes `next()` too.
+  `--`, `throw`, a cascade, a null assertion `!` or `as` cast (a pattern's
+  `p!` and `p as T` too), which may throw, or an `await for` in a collection
+  literal, which reads a whole stream. Deleting `Sink.info(describe(next()));` deletes `next()` too.
   Reading a property (a getter) and applying an operator do not count as
   effects, or `Sink.info('saved ${order.id}')` could never qualify.
 - **A call that is not a statement of its own** — `return Sink.info('x');`,
