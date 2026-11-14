@@ -79,8 +79,9 @@ class RunJournal {
   /// tests `dart_test.yaml` and the command's filters keep. 3: under the
   /// selection, against the test files that reach its switch rather than
   /// the ones that enter its function. 4: a mutant that deletes a `super`
-  /// call the analyzer requires is `invalid`, not run.
-  static const int format = 4;
+  /// call the analyzer requires is `invalid`, not run. 5: a mutant that only
+  /// changes a call to a diagnostic API is `diagnostic`, not run.
+  static const int format = 5;
 
   /// [firstLine] decoded, with the header 0.5.0 wrote read as [format] 1:
   /// it named the engine version first where [format] now stands, and its

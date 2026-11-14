@@ -103,9 +103,11 @@ void main() {
         'uncovered': 0,
         'invalid': 2,
         'timedOut': 1,
+        'diagnostic': 0,
         'undetectedMutants': <Object?>[undetected.toJson()],
         'invalidMutants': <Object?>[invalid.toJson()],
         'timedOutMutants': <Object?>[timedOut.toJson()],
+        'diagnosticMutants': <Object?>[],
       });
     },
   );

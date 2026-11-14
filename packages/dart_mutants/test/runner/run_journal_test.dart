@@ -175,7 +175,6 @@ void main() {
       expect(opened.discarded, 'it was recorded with a different format');
       expect(opened.recall(_mutant(3)), isNull);
     },
-    skip: 'not implemented yet',
   );
 
   test(

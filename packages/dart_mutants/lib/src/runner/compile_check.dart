@@ -4,6 +4,11 @@ import 'package:analyzer/dart/analysis/analysis_context.dart';
 import 'package:analyzer/dart/analysis/analysis_context_collection.dart';
 import 'package:analyzer/dart/analysis/analysis_options.dart';
 import 'package:analyzer/dart/analysis/results.dart';
+import 'package:analyzer/dart/ast/ast.dart';
+import 'package:analyzer/dart/ast/visitor.dart';
+import 'package:analyzer/dart/constant/value.dart';
+import 'package:analyzer/dart/element/element.dart';
+import 'package:analyzer/dart/element/type.dart';
 import 'package:analyzer/diagnostic/diagnostic.dart';
 import 'package:analyzer/error/error.dart';
 import 'package:analyzer/file_system/overlay_file_system.dart';
@@ -81,6 +86,34 @@ abstract interface class RequiredSuperCallCheck implements SourceCompileCheck {
   Future<bool> dropsRequiredSuperCall(String filePath, String source);
 }
 
+/// A compile check that can also tell when a mutant changes nothing but a
+/// call to a diagnostic API: a function or method whose declaration carries
+/// `@pragma('dart_mutants:diagnostic')`.
+///
+/// Deleting `log.info('saved $id');`, or a `??` inside its message, survives
+/// every suite that does not assert the log line itself, and a test written
+/// only to kill it checks the message, not the code around it. The API's
+/// owner marks it, so the mutant is scored `diagnostic` and is not run.
+///
+/// The mark is read from the declaration the call resolves to, never from a
+/// name: a call on a `dynamic` receiver, or through a function value, does not
+/// resolve to one and runs as usual.
+abstract interface class DiagnosticCallCheck implements SourceCompileCheck {
+  /// Whether the [length] characters at [offset] of [filePath], as it is on
+  /// disk, lie in a statement that is a diagnostic call and nothing else.
+  ///
+  /// That statement is the innermost one holding those characters, and it is
+  /// a call to a marked declaration — under any `await` or parentheses —
+  /// whose receiver and arguments do nothing but give values: no call, no
+  /// `await`, assignment, `++`, `--`, `throw` or cascade. Deleting one that
+  /// does would delete that effect too, so it runs as usual.
+  Future<bool> onlyChangesDiagnosticCall(
+    String filePath,
+    int offset,
+    int length,
+  );
+}
+
 /// Asks the analyzer in this process whether a mutated file still compiles,
 /// reusing one [AnalysisContextCollection] across every mutant of a run.
 ///
@@ -130,7 +163,8 @@ abstract interface class RequiredSuperCallCheck implements SourceCompileCheck {
 /// runs every target through the check before mutating anything, and a file the
 /// check rejects unmodified is judged by a fallback instead (see
 /// `MutationTestRunner.run`).
-class InProcessAnalyzerCheck implements RequiredSuperCallCheck {
+class InProcessAnalyzerCheck
+    implements RequiredSuperCallCheck, DiagnosticCallCheck {
   /// [includedPaths] must cover every file [compiles] will be asked about —
   /// the analyzer refuses a file outside them. Passing the run's own target
   /// files is enough; each is resolved within its enclosing package.
@@ -164,6 +198,12 @@ class InProcessAnalyzerCheck implements RequiredSuperCallCheck {
   /// file holds for the whole run.
   final Map<String, int> _requiredSuperCallsOnDisk = <String, int>{};
 
+  /// Every statement of each file on disk, by its normalized path, resolved
+  /// once: like [_requiredSuperCallsOnDisk], one entry per target for the
+  /// whole run.
+  final Map<String, List<_StatementSpan>> _statementsOnDisk =
+      <String, List<_StatementSpan>>{};
+
   @override
   Future<bool> compiles(String filePath) =>
       _serially(() => _judge(_normalize(filePath)));
@@ -187,6 +227,39 @@ class InProcessAnalyzerCheck implements RequiredSuperCallCheck {
       );
       return mutated > onDisk;
     });
+  }
+
+  @override
+  Future<bool> onlyChangesDiagnosticCall(
+    String filePath,
+    int offset,
+    int length,
+  ) {
+    final String path = _normalize(filePath);
+    return _serially(() async {
+      final List<_StatementSpan> statements = _statementsOnDisk[path] ??=
+          await _statements(path);
+      return _StatementSpan.innermost(
+            statements,
+            offset,
+            offset + length,
+          )?.diagnosticCall ??
+          false;
+    });
+  }
+
+  /// Every statement of [path] as it is on disk. A file the analyzer cannot
+  /// resolve has none, so each of its mutants runs.
+  Future<List<_StatementSpan>> _statements(String path) async {
+    final AnalysisContext? context = await _contextFor(path);
+    final SomeResolvedUnitResult? result = await context?.currentSession
+        .getResolvedUnit(path);
+    if (result is! ResolvedUnitResult) {
+      return const <_StatementSpan>[];
+    }
+    final _StatementSpanCollector collector = _StatementSpanCollector();
+    result.unit.accept(collector);
+    return collector.spans;
   }
 
   /// Answers [question] with [source] laid over [path].
@@ -256,6 +329,25 @@ class InProcessAnalyzerCheck implements RequiredSuperCallCheck {
   /// What the analyzer reports for [path], or `null` when it can't judge the
   /// file at all, which counts as not compiling.
   Future<List<Diagnostic>?> _diagnostics(String path) async {
+    final AnalysisContext? context = await _contextFor(path);
+    if (context == null) {
+      return null;
+    }
+    final SomeErrorsResult result = await context.currentSession.getErrors(
+      path,
+    );
+    // Anything but a real errors result — not a Dart file, not analyzable —
+    // is treated as not compiling, for the reason the interface doc gives.
+    // (A missing file never gets this far; see [_contextFor].)
+    if (result is! ErrorsResult) {
+      return null;
+    }
+    return result.diagnostics;
+  }
+
+  /// The context [path] is analyzed in, holding the content it has now — on
+  /// disk, or laid over it — or `null` when [path] does not exist.
+  Future<AnalysisContext?> _contextFor(String path) async {
     // The analyzer resolves a missing file as an empty one — which has no
     // errors, and would read as compiling. Checked here, before anything
     // below can be asked about it.
@@ -296,17 +388,7 @@ class InProcessAnalyzerCheck implements RequiredSuperCallCheck {
     for (final AnalysisContext c in collection.contexts) {
       await c.applyPendingFileChanges();
     }
-
-    final SomeErrorsResult result = await context.currentSession.getErrors(
-      path,
-    );
-    // Anything but a real errors result — not a Dart file, not analyzable —
-    // is treated as not compiling, for the reason the interface doc gives.
-    // (A missing file never gets this far; see the check at the top.)
-    if (result is! ErrorsResult) {
-      return null;
-    }
-    return result.diagnostics;
+    return context;
   }
 
   @override
@@ -315,6 +397,136 @@ class InProcessAnalyzerCheck implements RequiredSuperCallCheck {
     _collection = null;
     await collection?.dispose();
   }
+}
+
+/// Where one statement of a file sits, and whether it is a diagnostic call —
+/// see [DiagnosticCallCheck.onlyChangesDiagnosticCall].
+class _StatementSpan {
+  const _StatementSpan(this.offset, this.end, {required this.diagnosticCall});
+
+  final int offset;
+  final int end;
+  final bool diagnosticCall;
+
+  /// The innermost of [statements] holding [start] to [end]. Statements nest
+  /// and never overlap otherwise, so that is the shortest one holding them.
+  static _StatementSpan? innermost(
+    List<_StatementSpan> statements,
+    int start,
+    int end,
+  ) {
+    _StatementSpan? found;
+    for (final _StatementSpan s in statements) {
+      if (s.offset <= start &&
+          end <= s.end &&
+          (found == null || s.end - s.offset < found.end - found.offset)) {
+        found = s;
+      }
+    }
+    return found;
+  }
+}
+
+/// Collects a resolved unit's statements as [_StatementSpan]s.
+class _StatementSpanCollector extends GeneralizingAstVisitor<void> {
+  final List<_StatementSpan> spans = <_StatementSpan>[];
+
+  static const String _marker = 'dart_mutants:diagnostic';
+
+  @override
+  void visitStatement(Statement node) {
+    spans.add(
+      _StatementSpan(
+        node.offset,
+        node.end,
+        diagnosticCall: node is ExpressionStatement && _isDiagnosticCall(node),
+      ),
+    );
+    super.visitStatement(node);
+  }
+
+  static bool _isDiagnosticCall(ExpressionStatement statement) {
+    final Expression call = _bare(statement.expression);
+    if (call is! MethodInvocation) {
+      return false;
+    }
+    final Element? target = call.methodName.element;
+    if (target is! ExecutableElement || !_isMarked(target)) {
+      return false;
+    }
+    final _EffectFinder effects = _EffectFinder();
+    call.realTarget?.accept(effects);
+    call.argumentList.accept(effects);
+    return !effects.found;
+  }
+
+  /// [expression] without the `await`s and parentheses around it.
+  static Expression _bare(Expression expression) => switch (expression) {
+    AwaitExpression(expression: final Expression inner) ||
+    ParenthesizedExpression(expression: final Expression inner) => _bare(inner),
+    _ => expression,
+  };
+
+  /// Whether [declaration] carries `@pragma('dart_mutants:diagnostic')`, the
+  /// `pragma` of `dart:core`.
+  static bool _isMarked(ExecutableElement declaration) =>
+      declaration.metadata.annotations.any((ElementAnnotation annotation) {
+        final DartObject? value = annotation.computeConstantValue();
+        final DartType? type = value?.type;
+        return type is InterfaceType &&
+            type.element.name == 'pragma' &&
+            type.element.library.isDartCore &&
+            value?.getField('name')?.toStringValue() == _marker;
+      });
+}
+
+/// Finds whether an expression does anything besides give a value: a call,
+/// a non-`const` constructor call, `await`, an assignment, `++`, `--`,
+/// `throw` or a cascade.
+class _EffectFinder extends GeneralizingAstVisitor<void> {
+  bool found = false;
+
+  @override
+  void visitInvocationExpression(InvocationExpression node) => found = true;
+
+  @override
+  void visitInstanceCreationExpression(InstanceCreationExpression node) {
+    if (!node.isConst) {
+      found = true;
+      return;
+    }
+    super.visitInstanceCreationExpression(node);
+  }
+
+  @override
+  void visitAwaitExpression(AwaitExpression node) => found = true;
+
+  @override
+  void visitAssignmentExpression(AssignmentExpression node) => found = true;
+
+  @override
+  void visitPrefixExpression(PrefixExpression node) {
+    if (node.operator.type.isIncrementOperator) {
+      found = true;
+      return;
+    }
+    super.visitPrefixExpression(node);
+  }
+
+  @override
+  void visitPostfixExpression(PostfixExpression node) {
+    if (node.operator.type.isIncrementOperator) {
+      found = true;
+      return;
+    }
+    super.visitPostfixExpression(node);
+  }
+
+  @override
+  void visitThrowExpression(ThrowExpression node) => found = true;
+
+  @override
+  void visitCascadeExpression(CascadeExpression node) => found = true;
 }
 
 /// Runs a full analyzer invocation per mutant and reads its exit code.

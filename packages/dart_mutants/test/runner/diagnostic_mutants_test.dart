@@ -15,8 +15,6 @@ import 'package:test/test.dart';
 
 import '../support/fixture_pubspec.dart';
 
-const String _notImplemented = 'not implemented yet';
-
 /// A logging-style API: every method that only reports something is marked
 /// `dart_mutants:diagnostic`, the way a consumer's logger would mark its own.
 /// `count` and `ready` return values, so a statement can use them.
@@ -202,7 +200,6 @@ void work() {
         expect(f.total, 0);
         expect(f.detectionRate, isNull);
       },
-      skip: _notImplemented,
     );
 
     test(
@@ -215,7 +212,6 @@ void work() {
         expect(timing.test, isNull);
         expect(timing.result.timeout, isNull);
       },
-      skip: _notImplemented,
     );
   });
 
@@ -261,7 +257,6 @@ void main() {
         ]);
         expect(<int>[f.detected, f.undetected], <int>[0, 0]);
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(minutes: 2)),
     );
   });
@@ -318,7 +313,6 @@ void main() {
         );
         expect(f.total, 4);
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(minutes: 2)),
     );
   });
@@ -374,7 +368,6 @@ ${effects.map(((String, String) e) => '  ${e.$2}').join('\n')}
             contains('statement_deletion:$line'),
           );
         },
-        skip: _notImplemented,
       );
     }
   });
@@ -444,7 +437,6 @@ void work() {
           expect(_listed(f, 'diagnosticMutants'), isNot(contains(mutant)));
           expect(_listed(f, 'undetectedMutants'), contains(mutant));
         },
-        skip: _notImplemented,
       );
     }
   });
@@ -476,7 +468,6 @@ Future<void> work() async {
         );
         expect(_listed(f, 'undetectedMutants'), isEmpty);
       },
-      skip: _notImplemented,
     );
 
     test(
@@ -491,7 +482,6 @@ Future<void> work() async {
         );
         expect(_listed(f, 'undetectedMutants'), isEmpty);
       },
-      skip: _notImplemented,
     );
   });
 
@@ -554,7 +544,6 @@ void main() {
           'statement_deletion:4',
         ]);
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(minutes: 2)),
     );
   });
@@ -593,7 +582,6 @@ void work() {
           'statement_deletion:4',
         ]);
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(minutes: 2)),
     );
   });
@@ -649,7 +637,6 @@ void main() {
           ]),
         );
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(minutes: 2)),
     );
   });
@@ -696,7 +683,6 @@ void work() {
           contains('statement_deletion:${_lineOf(work, "channel.note")}'),
         );
       },
-      skip: _notImplemented,
     );
 
     test(
@@ -711,7 +697,6 @@ void work() {
           contains('statement_deletion:${_lineOf(work, "log('y')")}'),
         );
       },
-      skip: _notImplemented,
     );
   });
 
@@ -784,7 +769,6 @@ void work() {
             contains('statement_deletion:${_lineOf(work, needle)}'),
           );
         },
-        skip: _notImplemented,
       );
     }
 
@@ -807,7 +791,6 @@ void work() {
           expect(undetected, contains(mutant), reason: needle);
         }
       },
-      skip: _notImplemented,
     );
   });
 }
