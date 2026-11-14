@@ -833,37 +833,48 @@ void _printText(MutationRunReport report) {
         : '${(f.detectionRate! * 100).toStringAsFixed(0)}%';
     stdout.writeln(
       '${f.filePath}: $rate (${f.detected}/${f.total} detected, '
-      '${f.invalid} invalid, ${f.timedOut} timed out)',
+      '${f.invalid} invalid, ${f.timedOut} timed out, '
+      '${f.diagnostic} diagnostic)',
     );
-    for (final MutantResult r in f.undetectedMutants) {
-      stdout.writeln(
-        '  ${r.uncovered ? 'undetected (no test enters it)' : 'undetected'}: '
-        '${r.mutant.operatorName} at '
-        '${f.filePath}:${r.mutant.line}:${r.mutant.column} — '
-        '${r.mutant.description}',
-      );
-    }
+    _printMutants(
+      f,
+      f.undetectedMutants,
+      (MutantResult r) =>
+          r.uncovered ? 'undetected (no test enters it)' : 'undetected',
+    );
     // Printed with the same weight as an undetected one — see
     // FileMutationReport.invalidMutants for why a bare `invalid` count is
     // not something a caller can act on.
-    for (final MutantResult r in f.invalidMutants) {
-      stdout.writeln(
-        '  invalid (NOT scored): ${r.mutant.operatorName} at '
-        '${f.filePath}:${r.mutant.line}:${r.mutant.column} — '
-        '${r.mutant.description}',
-      );
-    }
+    _printMutants(f, f.invalidMutants, (_) => 'invalid (NOT scored)');
     // Printed with the same weight as an undetected one. A timed-out mutant is
     // real code that went unmeasured, and the count on the line above says so
     // without saying which — so on its own it is a number nobody acts on.
     // A timed-out mutant always ran, so it always has a budget.
-    for (final MutantResult r in f.timedOutMutants) {
-      stdout.writeln(
-        '  timed out at ${_formatSeconds(r.timeout!)} '
-        '(NOT scored): ${r.mutant.operatorName} at '
-        '${f.filePath}:${r.mutant.line}:${r.mutant.column} — '
-        '${r.mutant.description}',
-      );
-    }
+    _printMutants(
+      f,
+      f.timedOutMutants,
+      (MutantResult r) =>
+          'timed out at ${_formatSeconds(r.timeout!)} (NOT scored)',
+    );
+    // Each one named: the score leaves these out on the word of the API's
+    // owner, not of a test, and a count alone gives nobody a line to check
+    // that word against.
+    _printMutants(f, f.diagnosticMutants, (_) => 'diagnostic (NOT scored)');
+  }
+}
+
+/// One line per mutant of [mutants], all of [file]'s:
+/// `  <label>: operator at path:line:column — description`.
+void _printMutants(
+  FileMutationReport file,
+  List<MutantResult> mutants,
+  String Function(MutantResult) label,
+) {
+  for (final MutantResult r in mutants) {
+    stdout.writeln(
+      '  ${label(r)}: ${r.mutant.operatorName} at '
+      '${file.filePath}:${r.mutant.line}:${r.mutant.column} — '
+      '${r.mutant.description}',
+    );
   }
 }

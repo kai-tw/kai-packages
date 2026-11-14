@@ -6,8 +6,6 @@ import 'package:test/test.dart';
 
 import 'support/fixture_pubspec.dart';
 
-const String _notImplemented = 'not implemented yet';
-
 final String _binPath = p.join(
   Directory.current.path,
   'bin',
@@ -188,7 +186,6 @@ void main() {
         expect(file['invalid'], 0);
         expect(file['invalidMutants'], isEmpty);
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(seconds: 120)),
     );
 
@@ -220,7 +217,6 @@ void main() {
           ),
         );
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(seconds: 120)),
     );
 
@@ -237,7 +233,6 @@ void main() {
           ),
         );
       },
-      skip: _notImplemented,
     );
   });
 
@@ -253,7 +248,6 @@ void main() {
 
         expect(result.exitCode, 0, reason: '${result.stdout}${result.stderr}');
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(seconds: 120)),
     );
 
@@ -269,7 +263,6 @@ void main() {
 
         expect(result.exitCode, 1, reason: '${result.stdout}${result.stderr}');
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(seconds: 120)),
     );
 
@@ -289,7 +282,6 @@ void main() {
           everyElement(isNot(contains('diagnostic'))),
         );
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(seconds: 120)),
     );
 
@@ -303,7 +295,6 @@ void main() {
         expect(result.exitCode, 0, reason: '${result.stdout}${result.stderr}');
         expect(_comments(dir), isEmpty);
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(seconds: 120)),
     );
   });

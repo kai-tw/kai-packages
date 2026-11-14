@@ -100,8 +100,8 @@ everything under `lib/` and `test/`, and the files given. Any change starts
 the file over, with a note on stderr saying which — an edit anywhere can
 change any verdict, so none is guessed at. So does a release that changes
 how a verdict is reached; other releases resume a journal an earlier one
-wrote. 0.9.0, 0.11.0 and 0.12.0 are such releases, so a journal an earlier
-one wrote starts over once. A file a test reads from outside `test/`, or a
+wrote. 0.9.0, 0.11.0, 0.12.0 and 0.13.0 are such releases, so a journal an
+earlier one wrote starts over once. A file a test reads from outside `test/`, or a
 Dart SDK upgrade, is not seen; delete the journal after changing one. A recorded timeout is
 always asked again: the budget decided it, and the next start may have a
 larger one.
@@ -182,7 +182,8 @@ A survivor on a line no test executes is left out: that is line coverage's
 finding, not this one's. A review run exits 0 whatever the scores once the
 file is written — the comments are the finding — and
 `--fail-on-survivors` makes it exit 1 when any mutant survived, on a covered
-line or not.
+line or not. A [diagnostic](#diagnostic-calls-not-run-not-scored) mutant is
+not a survivor: it gets no comment and does not fail the run.
 
 A change that only deletes lines, or touches no Dart file under `lib/`, says
 there is nothing new to mutate, writes an empty list (`[]`) to the review
@@ -305,6 +306,69 @@ flags it. Measured over 120 mutants of two Flutter packages, bare
 package too. The unmodified-file check above only catches this when the
 file already trips a lint before it is mutated; a lint-clean file passes
 it, and then loses its mutants one lint at a time.
+
+## Diagnostic calls: not run, not scored
+
+Deleting a log line, or a `??` inside its message, survives every suite that
+does not assert the log output itself, and a test written only to kill that
+mutant checks the message rather than the code around it. When a call only
+reports what the code is doing, its API's owner can say so on the
+declaration, with `pragma` from `dart:core` — no dependency on this package:
+
+```dart
+class Sink {
+  @pragma('dart_mutants:diagnostic')
+  static void info(String message) { /* ... */ }
+}
+```
+
+A mutant is then `diagnostic` when everything it changes lies in a statement
+that is a call to a marked declaration and nothing else. That covers deleting
+the whole statement and mutating inside its arguments:
+
+```dart
+Sink.info('saved');                 // deleted: diagnostic
+Sink.info('saved ${name ?? '-'}');  // either side of the ??: diagnostic
+await Sink.send('saved');           // marked too: an await or parentheses are fine
+```
+
+A `diagnostic` mutant is not run, is in neither side of the score, does not
+fail `--fail-on-survivors`, and gets no `--review` comment. It is listed,
+though, one line each, because the score leaves it out on the API owner's
+word and not on a test's.
+
+What does not count, so the mutant runs as any other:
+
+- **An argument or receiver with an effect** — a call, a non-`const`
+  constructor call, `await`, an assignment, `++`, `--`, `throw` or a
+  cascade. Deleting `Sink.info(describe(next()));` deletes `next()` too.
+- **A call that is not a statement of its own** — `return Sink.info('x');`,
+  `x = Sink.info('x');`, a call inside a condition or another expression.
+- **A call that does not resolve to a declaration** — through a `dynamic`
+  receiver or a function value. The mark is read from the declaration the
+  call resolves to, never from a name: an unmarked `info` on another class
+  is not one.
+- **A branch around a diagnostic call** — negating the condition of
+  `if (verbose) { Sink.info('x'); }`, or deleting the whole `if`, changes
+  which code runs, and is measured.
+
+The mark is read by the in-process analyzer, so under `--analyze-command`
+every mutant runs. A project with no marked declaration runs exactly as
+before.
+
+The file summary counts them, and each is listed beside the invalid and
+timed-out ones:
+
+```text
+[1/2] diagnostic lib/work.dart:6:3 statement_deletion (0.0s, ~0s left)
+[2/2] undetected lib/work.dart:7:3 statement_deletion (0.1s)
+lib/work.dart: 0% (0/1 detected, 0 invalid, 0 timed out, 1 diagnostic)
+  undetected: statement_deletion at lib/work.dart:7:3 — deleted 'total++;'
+  diagnostic (NOT scored): statement_deletion at lib/work.dart:6:3 — deleted 'Sink.info('x');'
+```
+
+The JSON report gives the count in `diagnostic` and the mutants in
+`diagnosticMutants`, each entry shaped like those of `invalidMutants`.
 
 ## The timeout check
 
@@ -752,8 +816,8 @@ Which files to run against, how big a mutant budget to spend, what
 detection rate is acceptable, and what a surviving mutant's write-up should
 look like are policy — that lives one layer up, in whatever calls this. The
 contract here is a file list and a test command in, per-file
-detected/undetected/invalid/timeout counts and the actual undetected,
-invalid, and timed-out mutants out.
+detected/undetected/invalid/timeout/diagnostic counts and the actual
+undetected, invalid, timed-out and diagnostic mutants out.
 
 ## The output contract
 
@@ -776,7 +840,8 @@ real CLI binary, not just the internal report types:
   `total` or summed away. A file where most candidates ended up `invalid`
   or `timeout` has a hollow-looking 100% the same way a file with only one
   real mutant does — comparing either against `total` is how a policy layer
-  catches that, so both are reported, not just counted internally.
+  catches that, so both are reported, not just counted internally. So does
+  `diagnostic`, with its mutants in `diagnosticMutants`.
 - **A timed-out or invalid mutant is reported with its identity**, in
   `timedOutMutants` and `invalidMutants`, alongside their counts. Comparing
   either count against `total` tells a caller THAT something was excluded
@@ -839,8 +904,8 @@ real CLI binary, not just the internal report types:
   test carries its own, `timeoutSeconds`: the budget on the test file that
   decided it, derived from that file's unmutated run (see *The budget
   follows the baseline*), and a caller reading `timedOutMutants` needs to
-  know what they timed out against. An `invalid` or `uncovered` mutant ran
-  nothing and has no `timeoutSeconds`. Beside them, `mutantTimeoutSeconds`
+  know what they timed out against. An `invalid`, `diagnostic` or
+  `uncovered` mutant ran nothing and has no `timeoutSeconds`. Beside them, `mutantTimeoutSeconds`
   is the fixed headroom the floor was built from, and `baselineSeconds` the
   test command's wall time against unmodified code. Both are present on
   every run whose baseline passed; a red baseline has only

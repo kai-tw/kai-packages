@@ -1,3 +1,37 @@
+## 0.13.0
+
+**A mutant that only changes a diagnostic call is `diagnostic`: not run,
+not scored, and listed.** Deleting a log line, or a `??` inside its message,
+survives every suite that does not assert the log output, and a test written
+only to kill it checks the message rather than the code around it. An API's
+owner can now mark its declaration with `@pragma('dart_mutants:diagnostic')`
+(the `pragma` of `dart:core`, so no dependency on this package). A mutant
+whose change lies wholly in a statement that is a call to a marked
+declaration and nothing else is scored `diagnostic`.
+
+- **Only a call that is a statement of its own**, under any `await` or
+  parentheses, and only when its receiver and arguments have no effect: a
+  call, a non-`const` constructor call, `await`, an assignment, `++`, `--`,
+  `throw` or a cascade in them makes the mutant run as usual, since deleting
+  the statement would delete that effect too.
+- **The mark is read from the declaration the call resolves to**, never from
+  a name. A call through a `dynamic` receiver or a function value runs as
+  usual.
+- **A branch around a diagnostic call is still measured**: negating its
+  condition, or deleting the whole `if`, runs as usual.
+- **Not run, not scored, no review comment, and `--fail-on-survivors`
+  ignores it.** The file summary counts them (`1 diagnostic`), and each is
+  listed as `diagnostic (NOT scored): …`, like an invalid one.
+- **The JSON report has `diagnostic` and `diagnosticMutants`** on every file,
+  shaped like `invalid` and `invalidMutants`, and left out of `total`.
+- **Only with the in-process analyzer.** Under `--analyze-command`, these
+  mutants run like any other.
+- **The journal's format is now 5**, so a journal an earlier release wrote is
+  started over once.
+
+A project with no marked declaration runs as it did on 0.12.0, apart from
+the new `0 diagnostic` in the file summary and the two new JSON keys.
+
 ## 0.12.0
 
 **A mutant that deletes a `super` call the analyzer requires is `invalid`,
