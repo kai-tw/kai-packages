@@ -998,6 +998,36 @@ void work() {
     );
   });
 
+  group('[S4] a marked call with a plain for element in the argument', () {
+    const String work = '''
+import 'sink.dart';
+
+void work() {
+  final List<String> items = <String>['a'];
+  Sink.items(<String>[for (final String x in items) x]);
+}
+''';
+
+    late final Future<FileMutationReport> file = _runFileFixture(
+      lib: <String, String>{'sink.dart': _effectSink, 'work.dart': work},
+      testSource: _callsWork,
+      operators: <MutationOperator>[StatementDeletion()],
+    );
+
+    test(
+      '[S4] a for element without await only reads a list, so deleting the '
+      'call stays diagnostic',
+      () async {
+        final FileMutationReport f = await file;
+        final String mutant =
+            'statement_deletion:${_lineOf(work, 'Sink.items')}';
+
+        expect(_listed(f, 'diagnosticMutants'), contains(mutant));
+        expect(_listed(f, 'undetectedMutants'), isNot(contains(mutant)));
+      },
+    );
+  });
+
   group('[S6] a marked call in other statement shapes', () {
     const String work = '''
 import 'sink.dart';
