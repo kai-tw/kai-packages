@@ -921,6 +921,84 @@ void work() {
     }
   });
 
+  group('[S4] a marked call whose argument can throw from a pattern or '
+      'read a stream', () {
+    const String work = '''
+import 'sink.dart';
+
+String? maybe = 'm';
+Object any = 'a';
+final Stream<String> source = Stream<String>.fromIterable(<String>['s']);
+
+Future<void> work() async {
+  Sink.info(switch (maybe) { var s! => s });
+  Sink.info(switch (any) { var s as String => s });
+  Sink.items(<String>[if (maybe case var s!) s]);
+  Sink.items(<String>[if (any case var s as String) s]);
+  Sink.items(<String>[await for (final String x in source) x]);
+}
+''';
+
+    late final Future<FileMutationReport> file = _runFileFixture(
+      lib: <String, String>{'sink.dart': _effectSink, 'work.dart': work},
+      testSource: _callsWork,
+      operators: <MutationOperator>[StatementDeletion()],
+    );
+
+    for (final (String what, String needle) in <(String, String)>[
+      (
+        'a null assertion pattern in a switch expression',
+        'info(switch (maybe)',
+      ),
+      ('a cast pattern in a switch expression', 'info(switch (any)'),
+      ('a null assertion pattern in an if-case', 'case var s!'),
+      ('a cast pattern in an if-case', 'case var s as String'),
+      ('an `await for` in a collection literal', 'await for'),
+    ]) {
+      test(
+        '[S4] with $what, deleting the call is a survivor to read, not '
+        'diagnostic: the deletion could drop a throw or a read',
+        () async {
+          final FileMutationReport f = await file;
+          final String mutant = 'statement_deletion:${_lineOf(work, needle)}';
+
+          expect(_listed(f, 'diagnosticMutants'), isNot(contains(mutant)));
+          expect(_listed(f, 'undetectedMutants'), contains(mutant));
+        },
+        skip: 'not implemented yet',
+      );
+    }
+  });
+
+  group('[S4] a marked call with a spread in the argument', () {
+    const String work = '''
+import 'sink.dart';
+
+void work() {
+  final List<String> items = <String>['a'];
+  Sink.items(<String>[...items]);
+}
+''';
+
+    late final Future<FileMutationReport> file = _runFileFixture(
+      lib: <String, String>{'sink.dart': _effectSink, 'work.dart': work},
+      testSource: _callsWork,
+      operators: <MutationOperator>[StatementDeletion()],
+    );
+
+    test(
+      '[S4] a spread only reads a list, so deleting the call stays diagnostic',
+      () async {
+        final FileMutationReport f = await file;
+        final String mutant =
+            'statement_deletion:${_lineOf(work, 'Sink.items')}';
+
+        expect(_listed(f, 'diagnosticMutants'), contains(mutant));
+        expect(_listed(f, 'undetectedMutants'), isNot(contains(mutant)));
+      },
+    );
+  });
+
   group('[S6] a marked call in other statement shapes', () {
     const String work = '''
 import 'sink.dart';
