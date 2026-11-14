@@ -42,6 +42,7 @@ void main() {
             ],
             invalidMutants: const <MutantResult>[],
             timedOutMutants: const <MutantResult>[],
+            diagnosticMutants: const <MutantResult>[],
           ),
         ],
       );

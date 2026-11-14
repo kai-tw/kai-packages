@@ -8,7 +8,8 @@ mutant that only touches one of these calls is listed as `diagnostic` and is
 neither run nor scored, so a consumer need not write a test that asserts a log
 string to keep its score. `error` and `fatal` are deliberately unmarked: they
 report an error record to the crash reporter, so deleting one is scored as
-usual. A failure that is already handled belongs on a lower level.
+usual. A failure that is already handled and needs no one's attention belongs
+on a lower level.
 
 The mark is on the declaration; a consumer sets nothing. Under
 `--analyze-command` it has no effect and those mutants run as before. The

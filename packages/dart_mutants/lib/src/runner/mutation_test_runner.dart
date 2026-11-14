@@ -1208,7 +1208,6 @@ class MutationTestRunner {
     int undetected = 0;
     int invalid = 0;
     int timedOut = 0;
-    int diagnostic = 0;
     final List<MutantResult> undetectedResults = <MutantResult>[];
     final List<MutantResult> invalidResults = <MutantResult>[];
     final List<MutantResult> timedOutResults = <MutantResult>[];
@@ -1233,7 +1232,6 @@ class MutationTestRunner {
           // count nobody reads per-mutant.
           timedOutResults.add(result);
         case MutantVerdict.diagnostic:
-          diagnostic++;
           diagnosticResults.add(result);
         case MutantVerdict.detected:
           detected++;
@@ -1252,7 +1250,6 @@ class MutationTestRunner {
       undetectedMutants: undetectedResults,
       invalidMutants: invalidResults,
       timedOutMutants: timedOutResults,
-      diagnostic: diagnostic,
       diagnosticMutants: diagnosticResults,
     );
   }

@@ -11,9 +11,11 @@ declaration and nothing else is scored `diagnostic`.
 
 - **Only a call that is a statement of its own**, under any `await` or
   parentheses, and only when its receiver and arguments have no effect: a
-  call, a non-`const` constructor call, `await`, an assignment, `++`, `--`,
-  `throw` or a cascade in them makes the mutant run as usual, since deleting
-  the statement would delete that effect too.
+  call, a non-`const` constructor call, `await`, an assignment (a pattern
+  assignment too), `++`, `--`, `throw`, a cascade, or a null assertion `!`
+  or `as` cast in them makes the mutant run as usual, since deleting the
+  statement would delete that effect too. Reading a getter and applying an
+  operator do not count.
 - **The mark is read from the declaration the call resolves to**, never from
   a name. A call through a `dynamic` receiver or a function value runs as
   usual.

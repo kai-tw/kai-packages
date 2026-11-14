@@ -40,8 +40,7 @@ class FileMutationReport {
     required this.undetectedMutants,
     required this.invalidMutants,
     required this.timedOutMutants,
-    this.diagnostic = 0,
-    this.diagnosticMutants = const <MutantResult>[],
+    required this.diagnosticMutants,
   });
 
   final String filePath;
@@ -86,13 +85,14 @@ class FileMutationReport {
   /// true, and this list is the other half.
   final List<MutantResult> timedOutMutants;
 
-  /// How many mutants only changed a diagnostic call, and were not run — see
-  /// `DiagnosticCallCheck`. Not in [total], for the reason [invalid] is not.
-  final int diagnostic;
-
-  /// Those mutants, not just how many: the score leaves them out on the API
-  /// owner's word, so a caller has to be able to see which lines that was.
+  /// The mutants that only changed a diagnostic call, and were not run — see
+  /// `DiagnosticCallCheck`. The score leaves them out on the API owner's
+  /// word, so a caller has to be able to see which lines that was.
   final List<MutantResult> diagnosticMutants;
+
+  /// How many [diagnosticMutants] there are. Not in [total], for the reason
+  /// [invalid] is not.
+  int get diagnostic => diagnosticMutants.length;
 
   int get total => detected + undetected;
 

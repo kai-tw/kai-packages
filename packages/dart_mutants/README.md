@@ -340,8 +340,11 @@ word and not on a test's.
 What does not count, so the mutant runs as any other:
 
 - **An argument or receiver with an effect** — a call, a non-`const`
-  constructor call, `await`, an assignment, `++`, `--`, `throw` or a
-  cascade. Deleting `Sink.info(describe(next()));` deletes `next()` too.
+  constructor call, `await`, an assignment (a pattern assignment too), `++`,
+  `--`, `throw`, a cascade, or a null assertion `!` or `as` cast, which may
+  throw. Deleting `Sink.info(describe(next()));` deletes `next()` too.
+  Reading a property (a getter) and applying an operator do not count as
+  effects, or `Sink.info('saved ${order.id}')` could never qualify.
 - **A call that is not a statement of its own** — `return Sink.info('x');`,
   `x = Sink.info('x');`, a call inside a condition or another expression.
 - **A call that does not resolve to a declaration** — through a `dynamic`
@@ -351,6 +354,10 @@ What does not count, so the mutant runs as any other:
 - **A branch around a diagnostic call** — negating the condition of
   `if (verbose) { Sink.info('x'); }`, or deleting the whole `if`, changes
   which code runs, and is measured.
+
+A mark on an instance method that can be overridden speaks for every
+override too. The declaration is the one the call resolves to statically, so
+a call through the supertype is `diagnostic` whichever override runs.
 
 `log_system` 0.5.0 and later marks its `debug`, `info`, `warning` and `event`
 this way; `error` and `fatal` stay scored.

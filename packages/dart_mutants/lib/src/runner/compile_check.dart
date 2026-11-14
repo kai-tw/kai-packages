@@ -105,8 +105,9 @@ abstract interface class DiagnosticCallCheck implements SourceCompileCheck {
   /// That statement is the innermost one holding those characters, and it is
   /// a call to a marked declaration — under any `await` or parentheses —
   /// whose receiver and arguments do nothing but give values: no call, no
-  /// `await`, assignment, `++`, `--`, `throw` or cascade. Deleting one that
-  /// does would delete that effect too, so it runs as usual.
+  /// `await`, assignment, `++`, `--`, `throw`, cascade, null assertion `!` or
+  /// `as` cast. Deleting one that does would delete that effect too, so it
+  /// runs as usual. Reading a getter and applying an operator are not counted.
   Future<bool> onlyChangesDiagnosticCall(
     String filePath,
     int offset,
@@ -481,8 +482,9 @@ class _StatementSpanCollector extends GeneralizingAstVisitor<void> {
 }
 
 /// Finds whether an expression does anything besides give a value: a call,
-/// a non-`const` constructor call, `await`, an assignment, `++`, `--`,
-/// `throw` or a cascade.
+/// a non-`const` constructor call, `await`, an assignment (a pattern one
+/// too), `++`, `--`, `throw`, a cascade, or a null assertion `!` or `as`
+/// cast that may throw.
 class _EffectFinder extends GeneralizingAstVisitor<void> {
   bool found = false;
 
@@ -513,14 +515,15 @@ class _EffectFinder extends GeneralizingAstVisitor<void> {
     super.visitPrefixExpression(node);
   }
 
+  /// Every postfix operator is one: `++`, `--` or the null assertion `!`.
   @override
-  void visitPostfixExpression(PostfixExpression node) {
-    if (node.operator.type.isIncrementOperator) {
-      found = true;
-      return;
-    }
-    super.visitPostfixExpression(node);
-  }
+  void visitPostfixExpression(PostfixExpression node) => found = true;
+
+  @override
+  void visitAsExpression(AsExpression node) => found = true;
+
+  @override
+  void visitPatternAssignment(PatternAssignment node) => found = true;
 
   @override
   void visitThrowExpression(ThrowExpression node) => found = true;
