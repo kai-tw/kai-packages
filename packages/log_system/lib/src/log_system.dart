@@ -400,6 +400,7 @@ class LogSystem {
   /// Local-only, for expected non-error events — a user cancelling, an
   /// expected offline transition. Never leaves the device, and is skipped
   /// entirely in release.
+  @pragma('dart_mutants:diagnostic')
   static void debug(String message, {Object? error, StackTrace? stackTrace}) {
     _instance?._debug(message, error: error, stackTrace: stackTrace);
   }
@@ -407,12 +408,14 @@ class LogSystem {
   /// Takes no error object, and that asymmetry is deliberate: `info` describes
   /// an expected condition. An exception worth keeping makes it a [warning] or
   /// an [error].
+  @pragma('dart_mutants:diagnostic')
   static void info(String message) {
     _instance?._info(message);
   }
 
   /// Something went wrong but the app carried on. Reaches the crash reporter
   /// as a breadcrumb, never as a fault entry.
+  @pragma('dart_mutants:diagnostic')
   static void warning(String message, {Object? error, StackTrace? stackTrace}) {
     _instance?._warning(message, error: error, stackTrace: stackTrace);
   }
@@ -435,6 +438,7 @@ class LogSystem {
   /// backend — the level exists so an app has one place to route to one
   /// later, and wiring that is a consent decision rather than a plumbing
   /// change.
+  @pragma('dart_mutants:diagnostic')
   static void event(String name, {Map<String, Object>? parameters}) {
     _instance?._event(name, parameters: parameters);
   }

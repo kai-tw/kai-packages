@@ -6,8 +6,6 @@ import 'package:test/test.dart';
 
 import 'support/fixture_pubspec.dart';
 
-const String _notImplemented = 'not implemented yet';
-
 /// What a package that uses `log_system` writes: one call to each level, one
 /// to a line. `lib/work.dart` line 4 is `debug`, 5 `info`, 6 `warning`, 7
 /// `error`, 8 `fatal`, 9 `event`.
@@ -117,7 +115,6 @@ void main() {
         expect(_lines(file, 'diagnosticMutants'), contains(level.value));
         expect(_lines(file, 'undetectedMutants'), isNot(contains(level.value)));
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(minutes: 3)),
     );
   }
@@ -136,7 +133,6 @@ void main() {
           isNot(contains(level.value)),
         );
       },
-      skip: _notImplemented,
       timeout: const Timeout(Duration(minutes: 3)),
     );
   }

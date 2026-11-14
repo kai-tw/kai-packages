@@ -352,6 +352,9 @@ What does not count, so the mutant runs as any other:
   `if (verbose) { Sink.info('x'); }`, or deleting the whole `if`, changes
   which code runs, and is measured.
 
+`log_system` 0.5.0 and later marks its `debug`, `info`, `warning` and `event`
+this way; `error` and `fatal` stay scored.
+
 The mark is read by the in-process analyzer, so under `--analyze-command`
 every mutant runs. A project with no marked declaration runs exactly as
 before.

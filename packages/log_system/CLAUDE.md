@@ -63,25 +63,31 @@ the reporter's column would show an app only the half of its logging that was
 never in question. What reaches a sink is bounded by **redaction**, not by
 level.
 
-## The package now lets an app assert a log call, and still takes no position on whether it should
+## Which levels a mutation run scores: `debug`/`info`/`warning`/`event` are diagnostic, `error`/`fatal` are not
 
-Both halves of this were got wrong once and nearly shipped as a conclusion:
+Since 0.4.0 an app *can* assert a log call (see the sink above). Since 0.5.0
+this package also says when it need not.
 
-- **A deleted log line is a real change, not an equivalent mutant.** The levels
-  here are differentiated by egress and each documents its own: `debug` never
-  leaves the device and is dropped in release, `info` is local-only, `warning`
-  reaches the crash reporter as a breadcrumb, `error`/`fatal` as a fault entry,
-  `event` is console-only and explicitly not analytics. Deleting an `error(...)`
-  removes a documented external consequence.
-- **And a test asserting the call is still a change detector.** It pins that a
-  particular line exists in a particular place, not that a fault reached the
-  reporter. Both statements are true at once; that is the uncomfortable shape
-  of this problem, and collapsing it to either half is what to avoid.
+- **`debug`, `info`, `warning` and `event` are marked
+  `@pragma('dart_mutants:diagnostic')`.** They leave context for whoever reads
+  the logs and change nothing the program does, so a mutant that only touches
+  one of these calls (deleting it, or mutating an argument) is not run and not
+  scored. A consumer need not write a test that asserts a log string to keep
+  its score.
+- **`error` and `fatal` are not marked.** They hand the crash reporter an
+  error record (`recordError`), which is an observable effect, so deleting one
+  is scored like any other change. Do not mark them to quiet a run.
+- **A failure that was already handled and needs no human is not an `error`.**
+  Log it at a lower level and it falls into the unscored group by itself.
+- The mark sits on the public static declaration the caller resolves to, not on
+  the private implementation behind it, and needs no setting in the consumer.
+  Under `--analyze-command` there is no analyzer to read it, so those mutants
+  run as usual.
 
-What changed in 0.4.0 is that the assertion is now *possible*. What did not
-change is that this package does not tell an app to write it. The
-generalisation to refuse is still "log calls have no verifiable effect" — they
-have one, it is documented per level, and now it is observable too.
+What the mark does not claim is that a log line has no effect: each level's
+egress is documented above and unchanged. It claims only that, for these four,
+the effect is context rather than behaviour. A test that pins one anyway stays
+legitimate; it is just no longer required.
 
 ## Startup behaviour that reads like a bug and is not
 
