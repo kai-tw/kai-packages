@@ -1,8 +1,10 @@
 /// What happened when one [Mutant] was run.
 enum MutantVerdict {
-  /// The compile-safety gate rejected it before the test command ever saw
-  /// it. Excluded from both the numerator and denominator of a score — an
-  /// invalid mutant is not evidence of anything, in either direction.
+  /// The compile check rejected it before the test command ever saw
+  /// it: it doesn't compile, or it deletes a `super` call the analyzer
+  /// requires (see `RequiredSuperCallCheck`). Excluded from both the
+  /// numerator and denominator of a score — an invalid mutant is not
+  /// evidence of anything, in either direction.
   invalid,
 
   /// The test command did not finish within the configured timeout and was
@@ -11,7 +13,7 @@ enum MutantVerdict {
   /// change behaviour (a genuine infinite loop): counting it as caught
   /// would let a hung test inflate the score the same way a mutant that
   /// fails to compile would, which is exactly the failure shape the
-  /// compile-safety gate exists to prevent for that case. Not folded into
+  /// compile check exists to prevent for that case. Not folded into
   /// `undetected` either — nothing actually ran to a real assertion, so
   /// there is no basis to call it a survivor.
   timeout,

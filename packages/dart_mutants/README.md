@@ -56,7 +56,7 @@ outdated release is updated, not run.
 The plan line doesn't say, because nothing before the first mutant knows. A
 mutant costs one run of each test file it reaches, until one of them fails,
 and how many files that is, how fast they run, how many candidates the
-compile-safety gate rejects for free and what parallel workers actually win
+compile check rejects for free and what parallel workers actually win
 all only exist once mutants have run.
 
 The `left` on each progress line is the one projection, and it is measured:
@@ -94,19 +94,19 @@ dart run dart_mutants --journal .mutation/journal.jsonl \
 ```
 
 What is recorded is reused only when nothing it depends on has changed: the
-test command, the operators, the compile-safety gate,
+test command, the operators, the compile check,
 `--select-by-coverage`, and the content of `pubspec.yaml`, `pubspec.lock`,
 everything under `lib/` and `test/`, and the files given. Any change starts
 the file over, with a note on stderr saying which — an edit anywhere can
 change any verdict, so none is guessed at. So does a release that changes
 how a verdict is reached; other releases resume a journal an earlier one
-wrote. 0.9.0 and 0.11.0 are such releases, so a journal an earlier one wrote
-starts over once. A file a test reads from outside `test/`, or a Dart SDK upgrade, is
-not seen; delete the journal after changing one. A recorded timeout is
+wrote. 0.9.0, 0.11.0 and 0.12.0 are such releases, so a journal an earlier
+one wrote starts over once. A file a test reads from outside `test/`, or a
+Dart SDK upgrade, is not seen; delete the journal after changing one. A recorded timeout is
 always asked again: the budget decided it, and the next start may have a
 larger one.
 
-What a start still does every time: the gate checks. The plan line counts
+What a start still does every time: the compile checks. The plan line counts
 the mutants that will run, names how many more were reused, and says when
 the baseline came from the journal; the report's
 `reusedMutants` gives the count.
@@ -221,7 +221,7 @@ and no comparison, so only the second group reaches it at all. Without those,
 a file's whole conditional structure can go unmeasured while the score reads
 clean.
 
-## The compile-safety gate
+## The compile check
 
 An AST-legal edit is not a type-legal one. A mutant that fails to compile
 still fails its test run, which — read naively — counts as "detected": a
@@ -243,7 +243,7 @@ whole-package run over `clock_anchor` (430 mutants) that took the run from
 "Compiles" means no diagnostic whose own severity is an error, whatever your
 `analysis_options.yaml` re-rates it to. Mostly that is where `dart analyze`
 draws its exit-code line too, but where a project re-rates a diagnostic the
-two differ, both ways, each time with the in-process gate on the compiler's
+two differ, both ways, each time with the in-process check on the compiler's
 side:
 
 - a lint **promoted** to an error does not make a mutant invalid — it still
@@ -252,9 +252,24 @@ side:
   analyze` accepts that file, the compiler does not, and the resulting
   failure would otherwise read as `detected`.
 
+A mutant that deletes a `super` call in an override of a `@mustCallSuper`
+method is `invalid` too, though it compiles. Take
+`super.didChangeDependencies();` in a Flutter `State`: the method it calls
+is empty, so no test can see the call go, and the mutant would survive every
+suite. The analyzer can, though. It reports `must_call_super`, and `dart
+analyze` and `flutter analyze` both fail on that warning by default, so the
+deletion can't ship. That holds for `super.dispose()` as well, which does
+real work: what guards these calls is the analyzer, not a test. If your app
+relies on what a `super` call does, test that effect directly. A mutant
+counts here only when it adds a `must_call_super` diagnostic the file
+didn't already have, and only while the project still reports that
+diagnostic: turn it off in `analysis_options.yaml` and these mutants run
+like any other. The check needs the in-process analyzer, so with
+`--analyze-command` they run like any other too.
+
 Before anything is mutated, every target file that has mutants is put to
-the gate as it stands — the same rule as the baseline test run, applied to
-the gate. A gate that rejects a target's unmodified code would score every
+the check as it stands — the same rule as the baseline test run, applied to
+the check. A check that rejects a target's unmodified code would score every
 one of its mutants `invalid`, which reads downstream as a file with nothing
 to measure. The in-process analyzer can do that: it is the
 `package:analyzer` this package was built with, not your SDK's own, and a
@@ -262,8 +277,8 @@ file using language features newer than it knows reads as broken. Such a
 file is judged by `dart analyze` instead, with a note on stderr. If
 `dart analyze` rejects it too — or there is no fallback, because you chose
 the analyzer yourself — the run aborts before touching anything, as
-`gate-rejects-unmodified`. The run cannot tell you why, and there are three
-candidates: the analyzer cannot read the file; the analyzer's own
+`compile-check-rejects-unmodified`. The run cannot tell you why, and there
+are three candidates: the analyzer cannot read the file; the analyzer's own
 configuration rejects code that does compile — bare `flutter analyze` on
 any lint, or `dart analyze` on a lint your options promote to an error;
 or the file genuinely does not compile. The baseline only vouches for files
@@ -291,7 +306,7 @@ package too. The unmodified-file check above only catches this when the
 file already trips a lint before it is mutated; a lint-clean file passes
 it, and then loses its mutants one lint at a time.
 
-## The timeout gate
+## The timeout check
 
 A mutant can turn a normal loop into an infinite one — sometimes the most
 real signal a mutation testing tool can produce. But `package:test`'s own
@@ -464,7 +479,7 @@ detection:
 - a mutant that changes a declaration's inferred type can break the
   compilation of a test file that never reaches it. Run against every test
   file, that failure reads as `detected` — a detection by compile error, the
-  kind the gate exists to keep out of the score;
+  kind the check exists to keep out of the score;
 - code reached only from a subprocess, which runs the package's own code
   rather than the switched copy;
 - code whose execution depends on timing or randomness, which one unmutated
@@ -486,7 +501,7 @@ on a large app even when nothing changed — so when mutants ran through the
 test command, one that 30 test files reach spent over a minute compiling
 before any test ran. Here each test file is compiled once for the whole run.
 
-Every mutant of a target file that the gate accepts is written into that
+Every mutant of a target file that the check accepts is written into that
 file at once, each behind a switch read from the `DART_MUTANTS_ID`
 environment variable:
 
@@ -498,7 +513,7 @@ save();         →  if (_dmOn(7)) { ; } else { save(); }
 Unset, the file behaves as it did. The switch sits on the whole expression
 around the mutant, not just the part it changes, so a null check that
 promotes a variable later in the same expression stays in one piece. The
-switched file has to pass the gate whole; a mutant that stops it compiling,
+switched file has to pass the check whole; a mutant that stops it compiling,
 typically one whose switch hides a null check that later code relies on, is
 left out of it.
 
@@ -631,7 +646,7 @@ compiles. The compiled program goes to a work directory of its own. Each
 sandbox is deleted with the run's other temporary directories, and the
 statistics record how much each one held at the end.
 
-The compile-safety gate is shared: the default in-process analyzer judges a
+The compile check is shared: the default in-process analyzer judges a
 mutant's content in memory, one question at a time, so a mutant that does not
 compile is never written anywhere. `--analyze-command` reads the mutant from
 a copy of the package kept for it alone.
@@ -704,9 +719,9 @@ dart run dart_mutants --select-by-coverage \
 - `loadAverage` at `start` and `end` (1-, 5- and 15-minute), where the OS
   gives one. The same suite has taken 9s and 29s on one machine depending on
   what else ran, so a slow run needs this to be read at all;
-- `phases`: `baselineSeconds`, `gateCheckSeconds` (every target put to the
-  gate unmodified), `assetBuildSeconds` (under `--select-by-coverage` and
-  `flutter test`) and `mutantsSeconds`. A phase that did not run is absent;
+- `phases`: `baselineSeconds`, `compileCheckSeconds` (the compile check of
+  every unmodified target), `assetBuildSeconds` (under
+  `--select-by-coverage` and `flutter test`) and `mutantsSeconds`. A phase that did not run is absent;
 - `workers`: how many lanes ran the mutants — under `--workers auto`, how
   many it opened;
 - `switched`, when any mutant ran a test: how many mutants were `switched`
@@ -725,8 +740,8 @@ dart run dart_mutants --select-by-coverage \
   target and so are the most that can run;
 - `mutants`: one entry per mutant, `detected` ones included, with its
   location, operator, verdict, the `worker` (lane) that settled it,
-  `seconds`, `gateSeconds`, whether it was `selected`, and `testSeconds` and
-  `timeoutSeconds` where they apply.
+  `seconds`, `compileCheckSeconds`, whether it was `selected`, and
+  `testSeconds` and `timeoutSeconds` where they apply.
 
 The statistics are for comparing runs. They are not part of the output
 contract below: keys may be added.
@@ -775,7 +790,7 @@ real CLI binary, not just the internal report types:
   with no per-file breakdown left a caller unable to name even one of the 27
   without spending a whole extra mutation run to reverse-engineer which
   lines they were — an invalid mutant is not legal code and was never going
-  to move the score, but the gate rejecting it is still a fact about that
+  to move the score, but the check rejecting it is still a fact about that
   line, and a bare integer cannot say which ones, or surface an operator
   that is consistently misfiring against one file.
 
@@ -792,7 +807,7 @@ real CLI binary, not just the internal report types:
   reported FAIL 33% at 90s once all three scored. A percentage computed from
   one surviving mutant is not a percentage — and catching that is a policy
   layer's job, not this one's: it is the caller who knows what threshold it
-  is gating on and can therefore tell that a thin denominator has not
+  is failing a build on and can therefore tell that a thin denominator has not
   measured anything. Raising the budget is not a substitute for the list: it
   identifies the mutant only when the timeout disappears, and tells you
   nothing at all about one that genuinely does not terminate.
@@ -805,7 +820,7 @@ real CLI binary, not just the internal report types:
   only behaviour that lets a caller use its own paths as lookup keys without
   this package deciding what a path should look like.
 - **An aborted run says which kind of abort it was, in `abortKind`** —
-  `baseline-timeout`, `baseline-failed`, `gate-rejects-unmodified`,
+  `baseline-timeout`, `baseline-failed`, `compile-check-rejects-unmodified`,
   `over-budget`, `switched-run-unavailable` (the mutants can't run as
   switched files; found before the baseline, nothing run),
   `switched-run-failed` (a test file didn't compile or pass unmutated in the
@@ -894,10 +909,12 @@ real CLI binary, not just the internal report types:
   a literal space is not supported yet.
 - **Equivalent mutants are not detected.** `statement_deletion` can delete a
   statement that provably changes nothing — a trailing bare `return;` in a
-  void function is the common one. Recognising those needs flow analysis this
-  package does not do, so they surface as survivors for a person to dismiss
-  rather than being filtered out on a guess. A caller gating on a percentage
-  should expect a small floor of these.
+  void function is the common one. (A deleted `super` call the analyzer
+  requires is the exception: it's scored `invalid`, as described above.)
+  Recognising those needs flow analysis this package does not do, so they
+  surface as survivors for a person to dismiss rather than being filtered
+  out on a guess. A caller failing a build on a percentage should expect a
+  small floor of these.
 - **A green baseline is not proof that tests assert anything.** The
   pre-flight check confirms the test command exits 0 against unmodified
   code, and `dart test` and `flutter test` both exit 79 when no test ran at

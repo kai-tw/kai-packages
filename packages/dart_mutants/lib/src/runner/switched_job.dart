@@ -1,6 +1,6 @@
 import '../mutant.dart';
 
-/// One mutant the gate accepted, with the test files it runs against — what
+/// One mutant the check accepted, with the test files it runs against — what
 /// a `SwitchedRunner` runs.
 class SwitchedJob {
   const SwitchedJob(this.id, this.mutant, this.source, this.tests);

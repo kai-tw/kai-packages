@@ -7,8 +7,9 @@ import 'package:dart_mutants/src/operators.dart';
 import 'package:test/test.dart';
 
 /// Every candidate mutant the full default operator set proposes for
-/// [source], keyed by the operator that proposed it. Pre-gate — this is
-/// about what the pool can *see*, which is the property that was missing.
+/// [source], keyed by the operator that proposed it, before any compile
+/// check: this is about what the pool can *see*, which is the property that
+/// was missing.
 Map<String, int> _mutantsByOperator(String source) {
   final ParseStringResult result = parseString(
     content: source,

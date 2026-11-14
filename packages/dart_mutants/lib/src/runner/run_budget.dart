@@ -2,7 +2,7 @@
 /// what is left of it.
 ///
 /// A run's cost cannot be known before it starts and is not worth guessing
-/// at: how many candidates the compile-safety gate rejects for free, how
+/// at: how many candidates the compile check rejects for free, how
 /// many test files each mutant reaches and how fast they run, how much
 /// parallel workers really win — all of it only exists once mutants have
 /// run. So this holds both readings: the limit, and how much of the run has

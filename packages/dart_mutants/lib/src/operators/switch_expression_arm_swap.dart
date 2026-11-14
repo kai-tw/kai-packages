@@ -27,7 +27,7 @@ import '../mutation_visitor.dart';
 /// mutant count exploding on a long switch. A borrowed result is not
 /// guaranteed to compile (the two arms' result types can differ enough that
 /// the swap breaks the switch expression's own inferred type); as with every
-/// operator in this package, that is the compile-safety gate's job to catch,
+/// operator in this package, that is the compile check's job to catch,
 /// not this operator's.
 class SwitchExpressionArmSwap extends MutationOperator {
   @override

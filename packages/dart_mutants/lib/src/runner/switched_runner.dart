@@ -4,7 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../mutant.dart';
-import 'compile_safety_gate.dart';
+import 'compile_check.dart';
 import 'mutant_result.dart';
 import 'mutant_verdict.dart';
 import 'run_control.dart';
@@ -54,7 +54,7 @@ class SwitchedRunner {
   SwitchedRunner({
     required this.toolchain,
     required this.root,
-    required this.gateFor,
+    required this.checkFor,
     required this.temps,
     required this.testFileTimeout,
     required this.budgetFrom,
@@ -85,8 +85,8 @@ class SwitchedRunner {
   /// The package's directory.
   final String root;
 
-  /// The gate that judges a target file, by its path.
-  final SourceCompileSafetyGate Function(String file) gateFor;
+  /// The check that judges a target file, by its path.
+  final SourceCompileCheck Function(String file) checkFor;
   final TempSpace temps;
   final int workers;
 
@@ -721,7 +721,7 @@ class SwitchedRunner {
       for (final SwitchedJob job in jobs) job.id: job.mutant,
     });
     if (all.switched.isEmpty ||
-        await gateFor(file).compilesSource(file, all.source)) {
+        await checkFor(file).compilesSource(file, all.source)) {
       return all;
     }
     final Map<int, Mutant> kept = <int, Mutant>{};
@@ -730,7 +730,7 @@ class SwitchedRunner {
       (SwitchedJob j) => all.switched.contains(j.id),
     )) {
       final Map<int, Mutant> tried = <int, Mutant>{...kept, job.id: job.mutant};
-      if (await gateFor(file).compilesSource(
+      if (await checkFor(file).compilesSource(
         file,
         switchMutants(source, tried).source,
       )) {

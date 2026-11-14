@@ -66,8 +66,8 @@ void main() {
   });
 
   test(
-    '[boundary] string concatenation is proposed and left to the gate — the '
-    'AST cannot tell it from numeric +',
+    '[boundary] string concatenation is proposed and left to the compile '
+    'check — the AST cannot tell it from numeric +',
     () {
       const String source = "String f() => 'a' + 'b';";
       expect(

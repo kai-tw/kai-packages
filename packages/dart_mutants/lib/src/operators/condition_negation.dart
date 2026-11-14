@@ -22,7 +22,7 @@ import '../mutation_visitor.dart';
 /// The reason to skip is the score, not the runtime. Two mutants that behave
 /// identically live or die together, so a surviving one would be counted
 /// twice in the same file's denominator — one weakness reported as two, in a
-/// number a caller gates merges on. The wasted analyze-and-test cycle is the
+/// number a caller checks merges on. The wasted analyze-and-test cycle is the
 /// lesser cost.
 ///
 /// The equivalence is exact for integral operands and breaks on `double`:
@@ -44,7 +44,7 @@ import '../mutation_visitor.dart';
 ///
 /// An if-case (`if (x case int n)`) is skipped entirely. Its `expression` is
 /// the value being matched, not a boolean, so `!(x)` there is a type error
-/// the compile-safety gate would reject on every occurrence — a guaranteed-
+/// the compile check would reject on every occurrence — a guaranteed-
 /// invalid mutant is pure cost, and unlike the speculative ones this package
 /// does propose, it has no case in which it survives.
 ///

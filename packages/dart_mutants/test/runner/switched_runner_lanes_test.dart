@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:dart_mutants/src/mutant.dart';
-import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
+import 'package:dart_mutants/src/runner/compile_check.dart';
 import 'package:dart_mutants/src/runner/mutant_result.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
 import 'package:dart_mutants/src/runner/run_control.dart';
@@ -16,9 +16,9 @@ import 'package:test/test.dart';
 
 import '../support/fixture_pubspec.dart';
 
-/// A gate that accepts everything: what is under test is how the lanes
+/// A check that accepts everything: what is under test is how the lanes
 /// share the work, not whether a mutant compiles.
-class _AcceptingGate implements SourceCompileSafetyGate {
+class _AcceptingCheck implements SourceCompileCheck {
   @override
   Future<bool> compiles(String filePath) async => true;
 
@@ -164,7 +164,7 @@ void main() {
     return SwitchedRunner(
       toolchain: toolchain,
       root: realPath(dir.path),
-      gateFor: (String file) => _AcceptingGate(),
+      checkFor: (String file) => _AcceptingCheck(),
       temps: temps,
       testFileTimeout: const Duration(seconds: 60),
       budgetFrom: (Duration unmutated) => const Duration(seconds: 60),

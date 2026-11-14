@@ -2,7 +2,7 @@
 /// in [filePath] with [replacement].
 ///
 /// A `Mutant` is a proposal, not a verdict. Before it counts toward a score
-/// it must survive the compile-safety gate (an AST-legal edit is not
+/// it must survive the compile check (an AST-legal edit is not
 /// guaranteed to be a type-legal one — swapping two ternary branches of
 /// different static types is syntactically fine and a compile error), and
 /// only then does the real test command decide whether it was caught.

@@ -53,7 +53,7 @@ class FileMutationReport {
   /// down why each is acceptable (an equivalent mutant, say) or fix the gap.
   final List<MutantResult> undetectedMutants;
 
-  /// The mutants the compile-safety gate rejected, not just how many.
+  /// The mutants the compile check rejected, not just how many.
   ///
   /// An invalid mutant is not legal code, so — unlike [timedOutMutants] —
   /// none of these went unmeasured in the sense of missing a real question

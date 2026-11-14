@@ -1,49 +1,49 @@
 import 'dart:io';
 
-import 'package:dart_mutants/src/runner/compile_safety_gate.dart';
+import 'package:dart_mutants/src/runner/compile_check.dart';
 import 'package:dart_mutants/src/runner/process_command.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
-/// Both gates run against real analyzers, not mocks — the subprocess one
+/// Both checks run against real analyzers, not mocks — the subprocess one
 /// against a real `dart analyze`, whose exit codes (0 clean, 2 warnings-only,
 /// 3 has an error) are empirically confirmed rather than assumed from
 /// documentation, and the in-process one against a real
 /// `AnalysisContextCollection`. Getting this classification wrong is the
 /// single most dangerous failure mode this whole package has (see the
-/// interface doc on [CompileSafetyGate]).
+/// interface doc on [CompileCheck]).
 void main() {
   late Directory tempDir;
 
   setUp(() {
-    tempDir = Directory.systemTemp.createTempSync('compile_safety_gate_test_');
+    tempDir = Directory.systemTemp.createTempSync('compile_check_test_');
   });
 
   tearDown(() => tempDir.deleteSync(recursive: true));
 
   /// The contract both implementations share, run once per implementation so
   /// the two cannot drift apart on the cases that decide a score.
-  final Map<String, CompileSafetyGate Function()> gates =
-      <String, CompileSafetyGate Function()>{
-        'AnalyzerProcessGate': () => const AnalyzerProcessGate(
+  final Map<String, CompileCheck Function()> checks =
+      <String, CompileCheck Function()>{
+        'AnalyzerProcessCheck': () => const AnalyzerProcessCheck(
           ProcessCommand('dart', <String>['analyze']),
         ),
-        'InProcessAnalyzerGate': () =>
-            InProcessAnalyzerGate(<String>[tempDir.path]),
+        'InProcessAnalyzerCheck': () =>
+            InProcessAnalyzerCheck(<String>[tempDir.path]),
       };
 
-  for (final MapEntry<String, CompileSafetyGate Function()> entry
-      in gates.entries) {
+  for (final MapEntry<String, CompileCheck Function()> entry
+      in checks.entries) {
     group(entry.key, () {
-      late CompileSafetyGate gate;
+      late CompileCheck check;
 
-      setUp(() => gate = entry.value());
-      tearDown(() => gate.close());
+      setUp(() => check = entry.value());
+      tearDown(() => check.close());
 
       test('[partition] a clean file compiles', () async {
         final File file = File(p.join(tempDir.path, 'clean.dart'))
           ..writeAsStringSync('int f() => 1;\n');
-        expect(await gate.compiles(file.path), isTrue);
+        expect(await check.compiles(file.path), isTrue);
       });
 
       test(
@@ -52,7 +52,7 @@ void main() {
           // An unused import is a warning, not an error — the file still runs.
           final File file = File(p.join(tempDir.path, 'warn.dart'))
             ..writeAsStringSync("import 'dart:math';\n\nint f() => 1;\n");
-          expect(await gate.compiles(file.path), isTrue);
+          expect(await check.compiles(file.path), isTrue);
         },
       );
 
@@ -60,13 +60,13 @@ void main() {
         '[error] a file that does not exist does not compile — fail closed',
         () async {
           // Not reachable through the runner today: it reads every target's
-          // source before putting it to a gate, so a missing target throws
-          // there first. Pinned anyway, for any direct use of a gate and for
+          // source before checking it, so a missing target throws there
+          // first. Pinned anyway, for any direct use of a check and for
           // the day that read moves — the analyzer resolves a missing file as
-          // an EMPTY one, which has no errors, and the in-process gate read
+          // an EMPTY one, which has no errors, and the in-process check read
           // it as compiling until this was checked.
           expect(
-            await gate.compiles(p.join(tempDir.path, 'missing.dart')),
+            await check.compiles(p.join(tempDir.path, 'missing.dart')),
             isFalse,
           );
         },
@@ -75,7 +75,7 @@ void main() {
       test('[partition] a genuine type error does not compile', () async {
         final File file = File(p.join(tempDir.path, 'broken.dart'))
           ..writeAsStringSync('int f() => "not an int";\n');
-        expect(await gate.compiles(file.path), isFalse);
+        expect(await check.compiles(file.path), isFalse);
       });
 
       test(
@@ -86,17 +86,17 @@ void main() {
             ..writeAsStringSync(
               "import 'dart:math';\n\nint f() => \"not an int\";\n",
             );
-          expect(await gate.compiles(file.path), isFalse);
+          expect(await check.compiles(file.path), isFalse);
         },
       );
     });
   }
 
-  group('InProcessAnalyzerGate', () {
-    late InProcessAnalyzerGate gate;
+  group('InProcessAnalyzerCheck', () {
+    late InProcessAnalyzerCheck check;
 
-    setUp(() => gate = InProcessAnalyzerGate(<String>[tempDir.path]));
-    tearDown(() => gate.close());
+    setUp(() => check = InProcessAnalyzerCheck(<String>[tempDir.path]));
+    tearDown(() => check.close());
 
     test(
       '[state] the same file rewritten over and over is judged on what is on '
@@ -115,13 +115,13 @@ void main() {
         for (int round = 0; round < 3; round++) {
           file.writeAsStringSync(valid);
           expect(
-            await gate.compiles(file.path),
+            await check.compiles(file.path),
             isTrue,
             reason: 'round $round, valid',
           );
           file.writeAsStringSync(invalid);
           expect(
-            await gate.compiles(file.path),
+            await check.compiles(file.path),
             isFalse,
             reason: 'round $round, invalid',
           );
@@ -148,11 +148,15 @@ void main() {
             'final limit = maybe() ?? 10;\n';
 
         a.writeAsStringSync('int? maybe() => null;\nfinal limit = maybe();\n');
-        expect(await gate.compiles(a.path), isTrue, reason: 'a alone compiles');
+        expect(
+          await check.compiles(a.path),
+          isTrue,
+          reason: 'a alone compiles',
+        );
         a.writeAsStringSync(original);
 
         expect(
-          await gate.compiles(b.path),
+          await check.compiles(b.path),
           isTrue,
           reason: 'b.dart against the restored a.dart compiles',
         );
@@ -163,9 +167,9 @@ void main() {
       '[decision] a lint the project promotes to an error does NOT make the '
       'file invalid — it still compiles, so it is still measurable',
       () async {
-        // One of two differences from AnalyzerProcessGate, pinned here
-        // in both directions so it cannot drift silently: the subprocess gate
-        // honours the promotion and rejects the file, the in-process gate
+        // One of two differences from AnalyzerProcessCheck, pinned here
+        // in both directions so it cannot drift silently: the subprocess check
+        // honours the promotion and rejects the file, the in-process check
         // judges each diagnostic on its own severity and does not.
         File(
           p.join(tempDir.path, 'analysis_options.yaml'),
@@ -173,29 +177,29 @@ void main() {
         final File file = File(p.join(tempDir.path, 'promoted.dart'))
           ..writeAsStringSync("import 'dart:math';\n\nint f() => 1;\n");
 
-        expect(await gate.compiles(file.path), isTrue);
+        expect(await check.compiles(file.path), isTrue);
         expect(
-          await const AnalyzerProcessGate(
+          await const AnalyzerProcessCheck(
             ProcessCommand('dart', <String>['analyze']),
           ).compiles(file.path),
           isFalse,
           reason:
               'if `dart analyze` stopped honouring the promotion, this test '
-              'is no longer describing a real difference between the gates',
+              'is no longer describing a real difference between the checks',
         );
       },
     );
 
     test(
       '[decision] a real compile error the project DOWNGRADES still makes the '
-      'file invalid here — the subprocess gate is the one that gets this '
+      'file invalid here — the subprocess check is the one that gets this '
       'wrong',
       () async {
-        // The second difference between the gates, and the opposite way
+        // The second difference between the checks, and the opposite way
         // round from the promoted lint above. Downgrading an error in
         // `analysis_options.yaml` changes what the analyzer reports, not what
         // the compiler accepts: this file does not compile. `dart analyze`
-        // then exits with warnings only, which the subprocess gate accepts as
+        // then exits with warnings only, which the subprocess check accepts as
         // compiling — so it hands a broken mutant to the test command, whose
         // non-zero exit reads as `detected`.
         File(
@@ -206,15 +210,15 @@ void main() {
         final File file = File(p.join(tempDir.path, 'downgraded.dart'))
           ..writeAsStringSync("int f() => 'not an int';\n");
 
-        expect(await gate.compiles(file.path), isFalse);
+        expect(await check.compiles(file.path), isFalse);
         expect(
-          await const AnalyzerProcessGate(
+          await const AnalyzerProcessCheck(
             ProcessCommand('dart', <String>['analyze']),
           ).compiles(file.path),
           isTrue,
           reason:
               'if `dart analyze` stopped honouring the downgrade, this test is '
-              'no longer describing a real difference between the gates',
+              'no longer describing a real difference between the checks',
         );
       },
     );
@@ -231,13 +235,13 @@ void main() {
         addTearDown(() => Directory.current = original);
         Directory.current = tempDir.path;
 
-        final InProcessAnalyzerGate relativeGate = InProcessAnalyzerGate(
+        final InProcessAnalyzerCheck relativeCheck = InProcessAnalyzerCheck(
           <String>['relative.dart'],
         );
-        addTearDown(relativeGate.close);
+        addTearDown(relativeCheck.close);
 
         expect(
-          await relativeGate.compiles(p.join('.', 'relative.dart')),
+          await relativeCheck.compiles(p.join('.', 'relative.dart')),
           isFalse,
         );
       },
@@ -251,47 +255,47 @@ void main() {
         // of the file would score `invalid`, the file would read n/a, and a
         // wiring mistake would pass for a file with nothing to measure.
         final Directory elsewhere = Directory.systemTemp.createTempSync(
-          'compile_safety_gate_outside_',
+          'compile_check_outside_',
         );
         addTearDown(() => elsewhere.deleteSync(recursive: true));
         final File outside = File(p.join(elsewhere.path, 'outside.dart'))
           ..writeAsStringSync('int f() => 1;\n');
 
-        await expectLater(gate.compiles(outside.path), throwsStateError);
+        await expectLater(check.compiles(outside.path), throwsStateError);
       },
     );
 
     test(
       '[boundary] close is safe before any file was analysed, and twice',
       () async {
-        await gate.close();
-        await gate.close();
+        await check.close();
+        await check.close();
       },
     );
   });
 
-  group('InProcessAnalyzerGate, judging content in memory', () {
-    late InProcessAnalyzerGate gate;
+  group('InProcessAnalyzerCheck, judging content in memory', () {
+    late InProcessAnalyzerCheck check;
     late File callee;
     late File caller;
 
     setUp(() {
-      gate = InProcessAnalyzerGate(<String>[tempDir.path]);
+      check = InProcessAnalyzerCheck(<String>[tempDir.path]);
       callee = File(p.join(tempDir.path, 'callee.dart'))
         ..writeAsStringSync('int limit() => 10;\n');
       caller = File(p.join(tempDir.path, 'caller.dart'))
         ..writeAsStringSync("import 'callee.dart';\n\nint f() => limit();\n");
     });
-    tearDown(() => gate.close());
+    tearDown(() => check.close());
 
     test('[partition] content that compiles, and content that does not, '
         'judged without the file changing', () async {
       expect(
-        await gate.compilesSource(callee.path, 'int limit() => 3;\n'),
+        await check.compilesSource(callee.path, 'int limit() => 3;\n'),
         isTrue,
       );
       expect(
-        await gate.compilesSource(callee.path, "int limit() => 'ten';\n"),
+        await check.compilesSource(callee.path, "int limit() => 'ten';\n"),
         isFalse,
       );
       expect(callee.readAsStringSync(), 'int limit() => 10;\n');
@@ -300,22 +304,22 @@ void main() {
     test('[state] once answered, the content is gone: the file, and one that '
         'imports it, are judged from disk again', () async {
       expect(
-        await gate.compilesSource(callee.path, 'String other() => "";\n'),
+        await check.compilesSource(callee.path, 'String other() => "";\n'),
         isTrue,
       );
       // With the content above still laid over the file, `limit` would not
       // exist and the caller would not compile.
-      expect(await gate.compiles(caller.path), isTrue);
-      expect(await gate.compiles(callee.path), isTrue);
+      expect(await check.compiles(caller.path), isTrue);
+      expect(await check.compiles(callee.path), isTrue);
     });
 
     test('[state] questions asked at once are answered one at a time, each '
         'against its own content only', () async {
       final List<bool> answers = await Future.wait(<Future<bool>>[
-        gate.compilesSource(callee.path, 'String other() => "";\n'),
-        gate.compiles(caller.path),
-        gate.compilesSource(caller.path, 'int f() => missing();\n'),
-        gate.compiles(caller.path),
+        check.compilesSource(callee.path, 'String other() => "";\n'),
+        check.compiles(caller.path),
+        check.compilesSource(caller.path, 'int f() => missing();\n'),
+        check.compiles(caller.path),
       ]);
 
       expect(answers, <bool>[true, true, false, true]);
