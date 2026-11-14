@@ -15,17 +15,22 @@ jobs:
       - uses: actions/checkout@v4
 
       # Flutter SDK, not bare Dart: ui_kit depends on `flutter: sdk:
-      # flutter`, which plain dart-lang/setup-dart can't resolve. No
-      # flutter-version pin — subosito/flutter-action has no literal
-      # "latest" value; omitting the field and keeping channel: stable is
-      # its documented way to always resolve the newest stable release.
-      # Every package's SDK constraint here is a caret lower bound
-      # (`^3.8.0`, `^3.12.0`), so a newer bundled Dart always satisfies it —
-      # the tradeoff is losing exact reproducibility between CI runs in
-      # exchange for never going stale. Every job below sets up the same way.
+      # flutter`, which plain dart-lang/setup-dart can't resolve.
+      #
+      # Pinned to 3.47.2. This used to track the newest stable release,
+      # until 3.50.0 broke every job at `flutter pub get`: its flutter_test
+      # needs test_api 0.7.14, the test_core that matches it needs analyzer
+      # 13 or later, and dart_lints, dart_mutants and design_mockups still
+      # cap analyzer below 11. 3.50 also deprecates
+      # `package:flutter/material.dart` in favour of the separate
+      # material_ui package, which ui_kit and design_mockups import. Moving
+      # to 3.50 means doing both at once, together with the apps that use
+      # these packages. Every job below sets up the same way, so change the
+      # version in all of them together.
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.47.2'
           cache: true
 
       # One resolution for the whole workspace, from the root.
@@ -57,6 +62,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.47.2'
           cache: true
       - run: flutter pub get
 
@@ -70,6 +76,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.47.2'
           cache: true
       - run: flutter pub get
 
@@ -126,6 +133,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.47.2'
           cache: true
       - run: flutter pub get
 
@@ -151,6 +159,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
+          flutter-version: '3.47.2'
           cache: true
 
       - run: flutter pub get
