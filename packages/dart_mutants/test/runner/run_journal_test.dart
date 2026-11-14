@@ -159,6 +159,26 @@ void main() {
   );
 
   test(
+    '[S12] a journal written as format 4, before a diagnostic mutant had a '
+    'verdict of its own, is started over',
+    () {
+      RunJournal.open(path, <String, Object?>{'format': 4, ...header}).record(
+        MutantResult(mutant: _mutant(3), verdict: MutantVerdict.undetected),
+      );
+
+      final RunJournal opened = RunJournal.open(path, <String, Object?>{
+        'format': RunJournal.format,
+        ...header,
+      });
+
+      expect(RunJournal.format, 5);
+      expect(opened.discarded, 'it was recorded with a different format');
+      expect(opened.recall(_mutant(3)), isNull);
+    },
+    skip: 'not implemented yet',
+  );
+
+  test(
     '[decision] a journal 0.5.0 wrote is read as format 1 — its header named '
     'the engine version where format now stands — and so started over by a '
     'release whose format is later',
