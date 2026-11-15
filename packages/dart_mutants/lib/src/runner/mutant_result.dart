@@ -21,7 +21,8 @@ class MutantResult {
   final bool uncovered;
 
   /// How long this mutant's last test run was allowed, or `null` when no
-  /// test ran — an `invalid` or `uncovered` mutant. Per mutant, because a
+  /// test ran — an `invalid`, `diagnostic` or `uncovered` mutant. Per
+  /// mutant, because a
   /// mutant that runs only the tests reaching it gets a budget measured
   /// against those tests, not against the whole suite: see
   /// `MutationTestRunner.selectByCoverage`.

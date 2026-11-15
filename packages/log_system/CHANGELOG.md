@@ -1,3 +1,20 @@
+## 0.5.0
+
+No change to what any level does at run time.
+
+`LogSystem.debug`, `info`, `warning` and `event` now carry
+`@pragma('dart_mutants:diagnostic')`. With `dart_mutants` 0.13.0 or later, a
+mutant that only touches one of these calls is listed as `diagnostic` and is
+neither run nor scored, so a consumer need not write a test that asserts a log
+string to keep its score. `error` and `fatal` are deliberately unmarked: they
+report an error record to the crash reporter, so deleting one is scored as
+usual. A failure that is already handled and needs no one's attention belongs
+on a lower level.
+
+The mark is on the declaration; a consumer sets nothing. Under
+`--analyze-command` it has no effect and those mutants run as before. The
+pragma lives in `dart:core`, so no dependency is added.
+
 ## 0.4.2
 
 No behaviour change to anything a host app calls.

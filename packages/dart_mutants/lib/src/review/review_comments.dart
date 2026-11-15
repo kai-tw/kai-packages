@@ -11,8 +11,8 @@ import '../runner/worker_sandbox.dart';
 ///
 /// A survivor on a line no test executes is left out. That is line
 /// coverage's finding, and a comment asking for an assertion on code no test
-/// runs asks for the wrong thing. Timed-out and invalid mutants are left out
-/// too: neither says anything about what the tests assert.
+/// runs asks for the wrong thing. Timed-out, invalid and diagnostic mutants
+/// are left out too: none says anything about what the tests assert.
 List<Map<String, Object>> reviewComments(
   MutationRunReport report, {
   required String repoRoot,

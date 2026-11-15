@@ -938,9 +938,10 @@ class MutationTestRunner {
   ];
 
   /// Finishes the [pending] jobs that need no test run, `invalid` where the
-  /// check rejects the mutant and uncovered where no test reaches it, and
-  /// returns the rest by the id a [SwitchedJob] carries. It stops early when
-  /// the run is over budget.
+  /// check rejects the mutant, `diagnostic` where it only changes a
+  /// diagnostic call and uncovered where no test reaches it, and returns the
+  /// rest by the id a [SwitchedJob] carries. It stops early when the run is
+  /// over budget.
   Future<Map<int, _Job>> _sortPending(List<_Job> pending) async {
     final Map<int, _Job> runnable = <int, _Job>{};
     for (final _Job job in pending) {
@@ -952,11 +953,17 @@ class MutationTestRunner {
       final bool valid =
           await job.check.compilesSource(job.mutant.filePath, mutated) &&
           !await _dropsRequiredSuperCall(job, mutated);
+      final bool diagnostic = valid && await _onlyChangesDiagnosticCall(job);
       job.timing.compileCheck = clock.elapsed;
       if (!valid) {
         _finish(
           job,
           MutantResult(mutant: job.mutant, verdict: MutantVerdict.invalid),
+        );
+      } else if (diagnostic) {
+        _finish(
+          job,
+          MutantResult(mutant: job.mutant, verdict: MutantVerdict.diagnostic),
         );
       } else if (job.tests.isEmpty) {
         _finish(
@@ -987,6 +994,19 @@ class MutationTestRunner {
 
   static final RegExp _superCall = RegExp(r'\bsuper\s*\.');
 
+  /// Whether [job]'s mutant changes nothing but a diagnostic call — see
+  /// [DiagnosticCallCheck]. A check that cannot tell, such as a caller's
+  /// analyze command, leaves every mutant to run.
+  static Future<bool> _onlyChangesDiagnosticCall(_Job job) async {
+    final SourceCompileCheck check = job.check;
+    return check is DiagnosticCallCheck &&
+        await check.onlyChangesDiagnosticCall(
+          job.mutant.filePath,
+          job.mutant.offset,
+          job.mutant.length,
+        );
+  }
+
   /// The check of the file [file], which every runnable job's file has.
   static SourceCompileCheck _checkOf(
     Map<String, SourceCompileCheck> checks,
@@ -1000,7 +1020,8 @@ class MutationTestRunner {
   }
 
   /// Gives each of [pending] its result: `invalid` where the check rejects
-  /// it, undetected and uncovered where no test reaches it, and the rest
+  /// it, `diagnostic` where it only changes a diagnostic call, undetected and
+  /// uncovered where no test reaches it, and the rest
   /// from a [SwitchedRunner]. Why the switched run stopped, or `null`.
   Future<String?> _runPending(
     List<_Job> pending,
@@ -1190,6 +1211,7 @@ class MutationTestRunner {
     final List<MutantResult> undetectedResults = <MutantResult>[];
     final List<MutantResult> invalidResults = <MutantResult>[];
     final List<MutantResult> timedOutResults = <MutantResult>[];
+    final List<MutantResult> diagnosticResults = <MutantResult>[];
 
     for (final MutantResult result in results) {
       switch (result.verdict) {
@@ -1209,6 +1231,8 @@ class MutationTestRunner {
           // was therefore never scored at all — permanently invisible behind a
           // count nobody reads per-mutant.
           timedOutResults.add(result);
+        case MutantVerdict.diagnostic:
+          diagnosticResults.add(result);
         case MutantVerdict.detected:
           detected++;
         case MutantVerdict.undetected:
@@ -1226,6 +1250,7 @@ class MutationTestRunner {
       undetectedMutants: undetectedResults,
       invalidMutants: invalidResults,
       timedOutMutants: timedOutResults,
+      diagnosticMutants: diagnosticResults,
     );
   }
 

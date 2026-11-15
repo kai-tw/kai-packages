@@ -18,6 +18,13 @@ enum MutantVerdict {
   /// there is no basis to call it a survivor.
   timeout,
 
+  /// It compiles, and it changes nothing but a call to a declaration marked
+  /// `@pragma('dart_mutants:diagnostic')` — see `DiagnosticCallCheck`. Never
+  /// run, and excluded from the score like [invalid]: the only test that
+  /// kills it asserts the diagnostic output itself. Not folded into
+  /// [invalid], which means it was never legal code; this one is.
+  diagnostic,
+
   /// The test command exited non-zero against a mutant that compiled: some
   /// test noticed. Counts toward the denominator and is good news.
   detected,

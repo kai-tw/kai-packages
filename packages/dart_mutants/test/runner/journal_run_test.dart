@@ -96,6 +96,45 @@ Future<_Start> _start(
   return start;
 }
 
+/// A real package whose only statement is a call to a marked method, so the
+/// mutants of `work.dart` that touch it are diagnostic ones.
+Future<Directory> _diagnosticFixture() async {
+  final Directory dir = Directory.systemTemp.createTempSync(
+    'journal_run_test_',
+  );
+  File(
+    p.join(dir.path, 'pubspec.yaml'),
+  ).writeAsStringSync(dartFixturePubspec('fixture'));
+  Directory(p.join(dir.path, 'lib')).createSync();
+  Directory(p.join(dir.path, 'test')).createSync();
+  File(p.join(dir.path, 'lib', 'work.dart')).writeAsStringSync('''
+class Sink {
+  @pragma('dart_mutants:diagnostic')
+  static void info(String message) {}
+}
+
+void work() {
+  Sink.info('x');
+}
+''');
+  File(p.join(dir.path, 'test', 'work_test.dart')).writeAsStringSync('''
+import 'package:fixture/work.dart';
+import 'package:test/test.dart';
+
+void main() {
+  test('work', work);
+}
+''');
+  final ProcessResult pubGet = await Process.run('dart', <String>[
+    'pub',
+    'get',
+  ], workingDirectory: dir.path);
+  if (pubGet.exitCode != 0) {
+    throw StateError('dart pub get failed:\n${pubGet.stderr}');
+  }
+  return dir;
+}
+
 void main() {
   late Directory dir;
   late String journal;
@@ -199,6 +238,56 @@ void main() {
       expect(second.discarded, contains('fingerprint'));
       expect(second.ran, hasLength(2));
       expect(second.report.reusedMutants, 0);
+    },
+    timeout: const Timeout(Duration(seconds: 180)),
+  );
+
+  test(
+    '[journal] a diagnostic result is recorded, and a second start takes it '
+    'back as it was: not asked again, no test run',
+    () async {
+      final Directory fixture = await _diagnosticFixture();
+      addTearDown(() => fixture.deleteSync(recursive: true));
+      final String diagnosticJournal = p.join(
+        fixture.path,
+        '.journal',
+        'run.jsonl',
+      );
+
+      Future<_Start> start(CompileCheck check) async {
+        addTearDown(check.close);
+        final _Start s = _Start();
+        s.report = await MutationTestRunner(
+          testCommand: ProcessCommand('dart', <String>[
+            'test',
+          ], workingDirectory: fixture.path),
+          compileCheck: check,
+          mutantTimeout: const Duration(seconds: 20),
+          baselineFactor: 0,
+          journalPath: diagnosticJournal,
+          onPlan: (RunPlan plan) => s.plan = plan,
+          onProgress: s.ran.add,
+        ).run(<String>[p.join(fixture.path, 'lib', 'work.dart')]);
+        return s;
+      }
+
+      final _Start first = await start(
+        InProcessAnalyzerCheck(<String>[fixture.path]),
+      );
+      final _Start second = await start(
+        InProcessAnalyzerCheck(<String>[fixture.path]),
+      );
+
+      final FileMutationReport before = first.file('work.dart');
+      final FileMutationReport after = second.file('work.dart');
+      expect(before.diagnostic, greaterThan(0));
+      expect(first.ran, isNotEmpty);
+      expect(second.ran, isEmpty);
+      expect(second.plan?.mutantCount, 0);
+      expect(second.plan?.reused, first.ran.length);
+      expect(after.diagnostic, before.diagnostic);
+      expect(after.undetected, before.undetected);
+      expect(after.detected, before.detected);
     },
     timeout: const Timeout(Duration(seconds: 180)),
   );

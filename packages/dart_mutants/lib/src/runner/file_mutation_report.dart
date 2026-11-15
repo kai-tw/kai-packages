@@ -40,6 +40,7 @@ class FileMutationReport {
     required this.undetectedMutants,
     required this.invalidMutants,
     required this.timedOutMutants,
+    required this.diagnosticMutants,
   });
 
   final String filePath;
@@ -84,6 +85,15 @@ class FileMutationReport {
   /// true, and this list is the other half.
   final List<MutantResult> timedOutMutants;
 
+  /// The mutants that only changed a diagnostic call, and were not run — see
+  /// `DiagnosticCallCheck`. The score leaves them out on the API owner's
+  /// word, so a caller has to be able to see which lines that was.
+  final List<MutantResult> diagnosticMutants;
+
+  /// How many [diagnosticMutants] there are. Not in [total], for the reason
+  /// [invalid] is not.
+  int get diagnostic => diagnosticMutants.length;
+
   int get total => detected + undetected;
 
   /// How many of [undetectedMutants] no test executed at all — see
@@ -103,6 +113,7 @@ class FileMutationReport {
     'uncovered': uncovered,
     'invalid': invalid,
     'timedOut': timedOut,
+    'diagnostic': diagnostic,
     'undetectedMutants': undetectedMutants
         .map((MutantResult r) => r.toJson())
         .toList(),
@@ -110,6 +121,9 @@ class FileMutationReport {
         .map((MutantResult r) => r.toJson())
         .toList(),
     'timedOutMutants': timedOutMutants
+        .map((MutantResult r) => r.toJson())
+        .toList(),
+    'diagnosticMutants': diagnosticMutants
         .map((MutantResult r) => r.toJson())
         .toList(),
   };

@@ -30,6 +30,7 @@ void main() {
         undetectedMutants: <MutantResult>[],
         invalidMutants: <MutantResult>[],
         timedOutMutants: <MutantResult>[],
+        diagnosticMutants: <MutantResult>[],
       );
 
       expect(report.total, 5);
@@ -47,6 +48,7 @@ void main() {
         undetectedMutants: <MutantResult>[],
         invalidMutants: <MutantResult>[],
         timedOutMutants: <MutantResult>[],
+        diagnosticMutants: <MutantResult>[],
       );
 
       expect(report.detectionRate, isNull);
@@ -62,6 +64,7 @@ void main() {
         undetectedMutants: <MutantResult>[],
         invalidMutants: <MutantResult>[],
         timedOutMutants: <MutantResult>[],
+        diagnosticMutants: <MutantResult>[],
       );
 
       expect(report.detectionRate, 0.75);
@@ -93,6 +96,7 @@ void main() {
         undetectedMutants: <MutantResult>[undetected],
         invalidMutants: <MutantResult>[invalid],
         timedOutMutants: <MutantResult>[timedOut],
+        diagnosticMutants: <MutantResult>[],
       );
 
       expect(report.toJson(), <String, Object?>{
@@ -103,9 +107,11 @@ void main() {
         'uncovered': 0,
         'invalid': 2,
         'timedOut': 1,
+        'diagnostic': 0,
         'undetectedMutants': <Object?>[undetected.toJson()],
         'invalidMutants': <Object?>[invalid.toJson()],
         'timedOutMutants': <Object?>[timedOut.toJson()],
+        'diagnosticMutants': <Object?>[],
       });
     },
   );
@@ -135,6 +141,7 @@ void main() {
         ],
         invalidMutants: <MutantResult>[],
         timedOutMutants: <MutantResult>[],
+        diagnosticMutants: <MutantResult>[],
       );
 
       expect(report.uncovered, 2);

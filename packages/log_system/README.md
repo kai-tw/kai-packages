@@ -34,6 +34,13 @@ collaborator in the graph, and what it receives has **already** crossed the
 redaction boundary. Observing the egress and being able to widen it are
 different powers, and only the second was ever what got withheld.
 
+**Mutation testing.** `debug`, `info`, `warning` and `event` are marked
+`@pragma('dart_mutants:diagnostic')`, so with `dart_mutants` 0.13.0 or later a
+mutant that only touches one of those calls is listed and not scored: no test
+that asserts a log string is needed. `error` and `fatal` are not marked, because
+they report an error record to the crash reporter. A failure that is already
+handled and needs no one's attention should be logged below `error`.
+
 **Logging before `init` is a silent no-op.** Unit tests that construct
 production types directly never stand up the app's wiring, and a log line must
 not be why one of them throws. Do not "fix" this by asserting initialisation.
