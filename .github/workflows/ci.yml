@@ -69,6 +69,36 @@ jobs:
       - run: dart test --total-shards 6 --shard-index ${{ matrix.shard }}
         working-directory: packages/dart_mutants
 
+  # The workspace has one lockfile, so every other job resolves analyzer to
+  # the same version (10.x today) and the `>=9.0.0` floor that dart_lints,
+  # dart_mutants and design_mockups declare is never exercised. It went
+  # untested long enough for dart_mutants to call a member that only exists
+  # from analyzer 10 on. This job overrides analyzer to the floor and runs what
+  # touches it. The override is appended here rather than committed, so the
+  # lockfile and every other job stay on the current version.
+  analyzer_floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.47.2'
+          cache: true
+      - run: |
+          printf '\ndependency_overrides:\n  analyzer: 9.0.0\n' >> pubspec.yaml
+          flutter pub get
+
+      - run: dart run dart_lints
+
+      - run: dart test
+        working-directory: packages/dart_lints
+
+      # Not the whole suite (that is the dart_mutants job's six shards): the
+      # in-process analyzer check is the part that reads analyzer's API.
+      - run: dart test test/runner/compile_check_test.dart
+        working-directory: packages/dart_mutants
+
   packages:
     runs-on: ubuntu-latest
     steps:

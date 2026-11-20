@@ -295,7 +295,7 @@ class InProcessAnalyzerCheck
     return (diagnostics ?? const <Diagnostic>[])
         .where(
           (Diagnostic d) =>
-              d.diagnosticCode.lowerCaseName == 'must_call_super' &&
+              d.diagnosticCode.name.toLowerCase() == 'must_call_super' &&
               !_turnedOff(options, d),
         )
         .length;
