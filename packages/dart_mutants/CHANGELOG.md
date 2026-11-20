@@ -1,3 +1,17 @@
+## 0.13.1
+
+**Compiles against analyzer 9 again.** The range has said `>=9.0.0 <11.0.0`
+since the start, but the 0.12.0 check for a deleted `super` call that the
+analyzer requires read `DiagnosticCode.lowerCaseName`, which only exists from
+analyzer 10 on. Under analyzer 9 the package did not compile: `pub get`
+resolved, and the first run failed on `lowerCaseName isn't defined`. It now
+reads `name.toLowerCase()`, which is the same string on both lines (analyzer 9
+spells the name in upper case, analyzer 10 in lower case). 0.12.0 and 0.13.0
+only work on analyzer 10.
+
+CI now resolves analyzer at 9.0.0 in a job of its own, so the lower bound is
+tested instead of declared.
+
 ## 0.13.0
 
 **A mutant that only changes a diagnostic call is `diagnostic`: not run,

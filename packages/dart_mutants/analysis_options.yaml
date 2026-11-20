@@ -12,3 +12,14 @@ analyzer:
     # and a release of either dependency that moves them fails the compile
     # of the entry before the first mutant runs.
     implementation_imports: ignore
+
+    # `DiagnosticCode.lowerCaseName` exists from analyzer 10 on and `name` is
+    # deprecated there, but analyzer 9 has only `name` (upper case), and this
+    # package's range still starts at 9.0.0. `compile_check.dart` therefore
+    # reads `name.toLowerCase()`, which means the same on both lines. There is
+    # no ignore comment to put on that one line: `avoid_lint_suppression`
+    # forbids them in this workspace.
+    #
+    # Remove this, and read `lowerCaseName`, the day the lower bound moves to
+    # analyzer 10.
+    deprecated_member_use: ignore
