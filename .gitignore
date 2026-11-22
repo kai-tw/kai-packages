@@ -19,3 +19,7 @@ lcov.info
 
 # plan-cycle per-repo ledger + plan store. Session state, not source.
 .claude/.plan-cycle/
+
+# tool/disclosure_check.sh's list of private-app terms. This repo is public,
+# so committing the list would publish exactly what it guards.
+.claude/private-terms.txt

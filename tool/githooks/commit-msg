@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# commit-msg — blocks a commit whose message names private-app details.
+#
+# A commit message on a public repo is the hardest text here to take back:
+# even after a rewrite, the old commit stays reachable by SHA. See
+# tool/disclosure_check.sh for what's checked and where the term list lives.
+#
+# Wiring: git config core.hooksPath tool/githooks (same as pre-commit).
+# Bypass (rare, deliberate): git commit --no-verify
+
+set -uo pipefail
+
+root=$(git rev-parse --show-toplevel) || exit 0
+
+# The message file still holds the `#` help lines git strips afterwards.
+git stripspace --strip-comments <"$1" | "$root/tool/disclosure_check.sh" text -

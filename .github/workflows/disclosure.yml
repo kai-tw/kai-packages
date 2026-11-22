@@ -1,0 +1,58 @@
+name: disclosure
+
+# Checks a PR's title, body, commit messages and added lines for private-app
+# details: terms from the PRIVATE_TERMS secret, and links to repositories a
+# public reader can't open. See tool/disclosure_check.sh.
+#
+# This is the backstop, not the guard. By the time it runs, the PR text is
+# already public, and GitHub keeps its edit history. The commit-msg and
+# pre-push hooks, and the Claude Code hook on `gh pr create`, are what stop
+# the text from leaving the machine; this catches what got past them (a
+# missing term list, a web-UI edit, --no-verify).
+#
+# A separate workflow from ci.yml so that editing a PR's text re-runs this
+# check and nothing else.
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  disclosure:
+    runs-on: ubuntu-latest
+    env:
+      # Through env, never interpolated into the script: PR text is
+      # attacker-controlled on a public repo.
+      PR_TITLE: ${{ github.event.pull_request.title }}
+      PR_BODY: ${{ github.event.pull_request.body }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Load the private term list
+        run: |
+          if [ -z "$PRIVATE_TERMS" ]; then
+            # A PR from a fork gets no secrets; links are still checked.
+            echo "::notice::PRIVATE_TERMS is not set; only links are checked."
+          else
+            # Stored gzipped and base64-encoded by
+            # `tool/disclosure_check.sh sync-secret`: a secret holds 48 KB.
+            printf '%s' "$PRIVATE_TERMS" | base64 -d | gunzip > "$RUNNER_TEMP/private-terms.txt"
+          fi
+          echo "KAI_PRIVATE_TERMS_FILE=$RUNNER_TEMP/private-terms.txt" >> "$GITHUB_ENV"
+
+      - name: PR title and body
+        if: always()
+        run: printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" | tool/disclosure_check.sh text -
+
+      - name: Commit messages and added lines
+        if: always()
+        run: tool/disclosure_check.sh range "$BASE_SHA..$HEAD_SHA"
