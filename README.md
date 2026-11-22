@@ -9,6 +9,7 @@ never disagree about a dependency version.
 | [`hybrid_logical_clock`](packages/hybrid_logical_clock) | Timestamps two devices order the same way without agreeing on a wall clock. |
 | [`design_mockups`](packages/design_mockups) | Photographs an app's real widgets across breakpoint × state × theme × locale, headless. |
 | [`design_mockups_annotations`](packages/design_mockups_annotations) | The `@MockupPreview` annotation, so a widget in `lib/` can declare its own renders. |
+| [`keychain`](packages/keychain) | A local key store: 256-bit keys kept by iOS Keychain and Android Keystore, never backed up. |
 | [`ui_kit`](packages/ui_kit) | A UI kit that shares Flutter components through my projects. |
 | [`versioned_json`](packages/versioned_json) | Persisted JSON with a schema version, step-by-step migrations, and field-by-field take/changed. |
 

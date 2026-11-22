@@ -1,0 +1,34 @@
+name: keychain
+description: >-
+  A local key store for Flutter apps: creates, locates and deletes 256-bit keys
+  protected by the platform (iOS Keychain, Android Keystore), offline.
+version: 0.1.0
+repository: https://github.com/kai-tw/kai-packages/tree/main/packages/keychain
+publish_to: none
+
+environment:
+  sdk: ^3.8.0
+  flutter: '>=3.3.0'
+
+resolution: workspace
+
+dependencies:
+  equatable: ^2.0.5
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  fake_async: ^1.3.0
+  flutter_test:
+    sdk: flutter
+
+# Key material has to be generated and stored by the platform's own key store,
+# so this is a plugin with native code of its own on both platforms.
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: net.kaiwu.keychain
+        pluginClass: KeychainPlugin
+      ios:
+        pluginClass: KeychainPlugin
