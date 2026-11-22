@@ -1,0 +1,24 @@
+name: keychain_example
+description: "Demonstrates how to use the keychain plugin."
+publish_to: none
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  keychain:
+    path: ../
+
+dev_dependencies:
+  # Resolves `package:lints` for the repo-wide analysis_options.yaml this
+  # app includes; the example sits outside the workspace.
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

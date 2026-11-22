@@ -16,6 +16,7 @@ workspace:
   - packages/design_mockups_annotations
   - packages/hybrid_logical_clock
   - packages/image_codec
+  - packages/keychain
   - packages/log_system
   - packages/preference_store
   - packages/ui_kit

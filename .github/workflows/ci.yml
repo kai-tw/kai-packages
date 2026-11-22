@@ -140,6 +140,9 @@ jobs:
         working-directory: packages/connectivity_status
 
       - run: flutter test
+        working-directory: packages/keychain
+
+      - run: flutter test
         working-directory: packages/preference_store
 
       - run: flutter test
@@ -197,11 +200,49 @@ jobs:
       - run: flutter pub get
         working-directory: packages/connectivity_status/example
 
-      # The one native-code package in this repo, and the one reason this
-      # workflow needs a macOS runner at all: the metered-probe plugin's iOS
-      # side (Swift, a podspec, a Swift Package Manager manifest) can only be
+      # A native-code package's iOS side (here the metered-probe plugin's
+      # Swift, podspec and Swift Package Manager manifest) can only be
       # compiled with a real Xcode toolchain, which ubuntu-latest does not
-      # have. --no-codesign because CI has no signing identity and does not
-      # need one to prove the native code builds and links.
+      # have: the reason this job and keychain_ios run on macOS.
+      # --no-codesign because CI has no signing identity and does not need one
+      # to prove the native code builds and links.
       - run: flutter build ios --no-codesign --debug
         working-directory: packages/connectivity_status/example
+
+  # The same proof for keychain's native halves: its Dart tests mock the
+  # channel, so only a build compiles the Kotlin and the Swift.
+  keychain_android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.47.2'
+          cache: true
+      - run: flutter pub get
+
+      - run: flutter pub get
+        working-directory: packages/keychain/example
+
+      - run: flutter build apk --debug
+        working-directory: packages/keychain/example
+
+  keychain_ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          flutter-version: '3.47.2'
+          cache: true
+
+      - run: flutter pub get
+
+      - run: flutter pub get
+        working-directory: packages/keychain/example
+
+      - run: flutter build ios --no-codesign --debug
+        working-directory: packages/keychain/example
