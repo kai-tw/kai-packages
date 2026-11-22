@@ -3,5 +3,18 @@
     "flutter-toolkit@kai-tw": true,
     "reclaim-space@kai-tw": true,
     "mother-tongue@kai-tw": true
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/tool/disclosure_check.sh hook"
+          }
+        ]
+      }
+    ]
   }
 }

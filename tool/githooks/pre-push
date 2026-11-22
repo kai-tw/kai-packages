@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# pre-push — blocks a push whose commits add private-app details.
+#
+# commit-msg checks each message as it's written; this also checks every line
+# the pushed commits add (CHANGELOG, README, doc comments, code), and catches
+# commits made while the term list was missing or out of date. See
+# tool/disclosure_check.sh for what's checked.
+#
+# Wiring: git config core.hooksPath tool/githooks (same as pre-commit).
+# Bypass (rare, deliberate): git push --no-verify
+
+set -uo pipefail
+
+root=$(git rev-parse --show-toplevel) || exit 0
+zero=0000000000000000000000000000000000000000
+status=0
+
+# stdin: <local ref> <local sha> <remote ref> <remote sha>, one line per ref.
+while read -r _ local_sha _ remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue # deleting a remote ref adds nothing
+  if [ "$remote_sha" = "$zero" ]; then
+    # A new branch: check what it adds on top of main.
+    base=$(git merge-base "$local_sha" refs/remotes/origin/main 2>/dev/null) || {
+      echo "pre-push: no merge base with origin/main for $local_sha; run git fetch and retry." >&2
+      status=1
+      continue
+    }
+  else
+    base=$remote_sha
+  fi
+  "$root/tool/disclosure_check.sh" range "$base..$local_sha" || status=1
+done
+
+exit "$status"

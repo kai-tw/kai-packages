@@ -15,6 +15,8 @@ Flutter plugin with native iOS/Android code, not just Dart.
 
 - The check before a commit: `dart format --output=none --set-exit-if-changed . && dart run dart_lints`.
 - Ask before pushing a tag or publishing to pub.dev.
+- Git hooks live in `tool/githooks`; wire them once per clone with
+  `git config core.hooksPath tool/githooks`.
 
 ## This repo is PUBLIC; the apps that consume it are not
 
@@ -40,6 +42,28 @@ for examples.
 **The trap is extraction.** When a package is pulled OUT of an app, the honest
 motivation *is* that app — which is precisely when a commit message reaches for
 its name, its widgets and its copy. Pause at that sentence and generalise it.
+
+**`tool/disclosure_check.sh` automates the check.** It reports terms from a
+private list and links to repositories a stranger can't open. It runs in four
+places:
+
+- the `commit-msg` hook, on each message;
+- the `pre-push` hook, on the pushed commits' messages and added lines;
+- a Claude Code `PreToolUse` hook (`.claude/settings.json`), on `gh pr` /
+  `gh issue` / `gh api` / `gh release` commands, before PR text is published;
+- the `disclosure` workflow, on every PR's title, body and commits. It's a
+  backstop: by then the text is already public.
+
+The term list can't be committed here, since the list would be the leak. It
+lives in `.claude/private-terms.txt`, which `.gitignore` excludes, and in the
+`PRIVATE_TERMS` repository secret: one term per line, `#` for comments, matched
+case-sensitively as whole words. After editing the file, run
+`tool/disclosure_check.sh sync-secret` to update the secret. A worktree reads
+the main checkout's copy. If the file ever
+becomes tracked, every check fails until it's untracked again.
+`tool/disclosure_check.sh seed <app-dir>` prints the type names an app declares
+that this repo never mentions, as candidates to review. Without a list, only
+links are checked, and the tool says so.
 
 **Retracting is worse than it looks**, which is why the pause is worth more than
 the cleanup. A `--force-with-lease` rewrite leaves the old commit object
