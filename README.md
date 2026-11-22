@@ -12,6 +12,7 @@ never disagree about a dependency version.
 | [`keychain`](packages/keychain) | A local key store: 256-bit keys kept by iOS Keychain and Android Keystore, never backed up. |
 | [`ui_kit`](packages/ui_kit) | A UI kit that shares Flutter components through my projects. |
 | [`versioned_json`](packages/versioned_json) | Persisted JSON with a schema version, step-by-step migrations, and field-by-field take/changed. |
+| [`test_queue`](packages/test_queue) | Runs test suites through one queue a whole machine shares, so they never need more memory than it has. |
 
 ## Working on it
 
