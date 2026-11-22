@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:dart_mutants/src/runner/test_slot.dart';
@@ -24,6 +25,7 @@ Future<Process> _start(
   required Directory slotDir,
   required int slots,
   String workers = '1',
+  List<String> options = const <String>[],
 }) async {
   final Process process = await Process.start(
     'dart',
@@ -34,6 +36,7 @@ Future<Process> _start(
       'dart test',
       '--workers',
       workers,
+      ...options,
       'lib/a.dart',
     ],
     workingDirectory: dir.path,
@@ -248,5 +251,41 @@ void main() {
       expect(startedIds(marker), contains('waiting'));
     },
     timeout: const Timeout(Duration(minutes: 5)),
+  );
+
+  test(
+    '[S4] a run that waits longer than --slot-wait for a slot stops, '
+    'scores nothing, and names who held it',
+    () async {
+      final Directory dir = await fixture('slot_wait_timeout');
+      final File report = File(p.join(scratch.path, 'report.json'));
+      // This process holds the only slot, and never gives it back.
+      final TestSlot? held = await TestSlots(slotDir, 1).acquire();
+      expect(held, isNotNull);
+      addTearDown(() => held?.release());
+
+      final Process run = await _start(
+        dir,
+        marker: marker,
+        id: 'starved',
+        slotDir: slotDir,
+        slots: 1,
+        options: <String>['--slot-wait', '2', '--output', report.path],
+      );
+      final Future<String> stderrText = run.stderr
+          .transform(utf8.decoder)
+          .join();
+      final int exit = await run.exitCode.timeout(const Duration(minutes: 2));
+
+      expect(exit, isNot(0));
+      final Map<String, Object?> json =
+          jsonDecode(report.readAsStringSync()) as Map<String, Object?>;
+      expect(json['abortKind'], 'slot-wait-timeout');
+      expect(json['abortReason'], contains('no test slot came free in'));
+      expect(json['abortReason'], contains('dart_mutants (one test process)'));
+      expect(marker.readAsStringSync(), isNot(contains('starved')));
+      await stderrText;
+    },
+    timeout: const Timeout(Duration(minutes: 4)),
   );
 }

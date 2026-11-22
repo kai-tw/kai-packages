@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:test_queue/test_queue.dart';
 
+import 'slot_wait_exception.dart';
 import 'test_slot.dart';
 
 /// The machine's test slots, which a run takes one of for each test process
@@ -21,15 +22,18 @@ import 'test_slot.dart';
 /// of waiting on slots its own parent holds.
 class TestSlots {
   /// [count] slots in [directory], locked the way test_queue locks them.
-  TestSlots(this.directory, this.count)
+  TestSlots(this.directory, this.count, {this.maxWait = defaultMaxWait})
     : _pool = SlotPool(directory, count),
       _lendable = const <int>[];
 
   /// The slots [numbers], which a parent `test_queue run` already holds.
-  TestSlots.inherited(this.directory, List<int> numbers)
-    : count = numbers.length,
-      _pool = null,
-      _lendable = numbers {
+  TestSlots.inherited(
+    this.directory,
+    List<int> numbers, {
+    this.maxWait = defaultMaxWait,
+  }) : count = numbers.length,
+       _pool = null,
+       _lendable = numbers {
     if (numbers.isEmpty) {
       throw ArgumentError.value(numbers, 'numbers', 'must name a slot');
     }
@@ -40,7 +44,9 @@ class TestSlots {
   ///
   /// Throws a [FormatException] when a `TEST_QUEUE_*` variable is set to
   /// something it can't use.
-  static Future<TestSlots> fromEnvironment() async {
+  static Future<TestSlots> fromEnvironment({
+    Duration maxWait = defaultMaxWait,
+  }) async {
     final Map<String, String> env = Platform.environment;
     final QueueSettings settings = QueueSettings.fromEnvironment(
       env,
@@ -48,9 +54,17 @@ class TestSlots {
     );
     final String held = (env[QueueSettings.heldVariable] ?? '').trim();
     if (held.isEmpty) {
-      return TestSlots(settings.directory, settings.slotCount);
+      return TestSlots(
+        settings.directory,
+        settings.slotCount,
+        maxWait: maxWait,
+      );
     }
-    return TestSlots.inherited(settings.directory, slotNumbers(held));
+    return TestSlots.inherited(
+      settings.directory,
+      slotNumbers(held),
+      maxWait: maxWait,
+    );
   }
 
   /// The slot numbers in `$TEST_QUEUE_HELD`, such as `0,1`.
@@ -73,6 +87,15 @@ class TestSlots {
 
   final Directory directory;
   final int count;
+
+  /// How long one lane waits for a slot before [acquire] gives up with a
+  /// [SlotWaitException]. There is no waiting forever: a slot held for good
+  /// would hang the run where nobody sees it.
+  final Duration maxWait;
+
+  /// Long enough for another run's baseline to finish, which holds a slot
+  /// for the whole suite.
+  static const Duration defaultMaxWait = Duration(minutes: 30);
 
   /// The slots, or `null` when a parent holds them.
   final SlotPool? _pool;
@@ -106,10 +129,11 @@ class TestSlots {
   }
 
   /// A slot, once one is free: at once when one is, or else when another
-  /// lane or another run gives one back. Never fails for want of one.
+  /// lane or another run gives one back.
   ///
   /// `null` when [until] completes first: the caller no longer wants a
-  /// slot, and nothing is left waiting for one.
+  /// slot, and nothing is left waiting for one. Throws a
+  /// [SlotWaitException] once [maxWait] runs out with no slot free.
   Future<TestSlot?> acquire({Future<void>? until}) async {
     directory.createSync(recursive: true);
     if (_tryAcquire() case final TestSlot slot) {
@@ -137,6 +161,8 @@ class TestSlots {
       _lostReleaseInterval,
       (_) => wake.add(null),
     );
+    final Stopwatch waited = Stopwatch()..start();
+    final Timer limit = Timer(maxWait, () => wake.add(null));
     final StreamIterator<void> next = StreamIterator<void>(wake.stream);
     try {
       // Tried again once the sources listen, so a slot given back between
@@ -146,12 +172,16 @@ class TestSlots {
         if (givenUp) {
           return null;
         }
+        if (waited.elapsed >= maxWait) {
+          throw SlotWaitException(waited.elapsed, _holders());
+        }
         await next.moveNext();
         slot = _tryAcquire();
       }
       return slot;
     } finally {
       lostRelease.cancel();
+      limit.cancel();
       for (final StreamSubscription<void> source in sources) {
         await source.cancel();
       }
@@ -185,6 +215,16 @@ class TestSlots {
       }
     }
     return null;
+  }
+
+  /// Who holds each slot now, for a [SlotWaitException].
+  List<String> _holders() {
+    final DateTime now = DateTime.now();
+    return <String>[
+      for (final SlotStatus status in _pool?.survey() ?? const <SlotStatus>[])
+        if (status.holder case final SlotHolder holder)
+          'slot-${status.number}  ${holder.describe(now)}',
+    ];
   }
 
   /// What `test_queue status` shows for a slot a lane holds.

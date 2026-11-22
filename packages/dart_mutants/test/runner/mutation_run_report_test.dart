@@ -71,6 +71,7 @@ void main() {
             'switchedRunUnavailable': 'switched-run-unavailable',
             'switchedRunFailed': 'switched-run-failed',
             'stopped': 'stopped',
+            'slotWaitTimeout': 'slot-wait-timeout',
           },
         );
       },
