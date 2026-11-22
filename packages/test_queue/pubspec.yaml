@@ -1,0 +1,25 @@
+name: test_queue
+description: >-
+  Runs `flutter test` and `dart test` through one queue shared by every caller
+  on a machine (editor sessions, CI runners, mutation testers), so the suites
+  running at once never need more memory than the machine has, and no test
+  process outlives the run that started it.
+version: 0.1.0
+repository: https://github.com/kai-tw/kai-packages/tree/main/packages/test_queue
+issue_tracker: https://github.com/kai-tw/kai-packages/issues
+
+environment:
+  sdk: ^3.8.0
+
+resolution: workspace
+
+executables:
+  test_queue:
+
+dependencies:
+  args: ^2.5.0
+  path: ^1.9.0
+
+dev_dependencies:
+  lints: ^6.1.0
+  test: ^1.25.0

@@ -11,6 +11,7 @@ never disagree about a dependency version.
 | [`design_mockups_annotations`](packages/design_mockups_annotations) | The `@MockupPreview` annotation, so a widget in `lib/` can declare its own renders. |
 | [`ui_kit`](packages/ui_kit) | A UI kit that shares Flutter components through my projects. |
 | [`versioned_json`](packages/versioned_json) | Persisted JSON with a schema version, step-by-step migrations, and field-by-field take/changed. |
+| [`test_queue`](packages/test_queue) | Runs test suites through one queue a whole machine shares, so they never need more memory than it has. |
 
 ## Working on it
 

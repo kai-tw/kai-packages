@@ -131,6 +131,11 @@ jobs:
       - run: dart test
         working-directory: packages/versioned_json
 
+      # Drives real processes (ps, sh, sleep, a compiled CLI) rather than
+      # fakes, because what it promises is that none of them outlives a run.
+      - run: dart test
+        working-directory: packages/test_queue
+
       # `flutter test`, not `dart test`: ui_kit's tests import `flutter_test`,
       # which the bare Dart test runner cannot load.
       - run: flutter test
