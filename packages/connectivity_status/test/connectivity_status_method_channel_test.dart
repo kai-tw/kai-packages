@@ -25,7 +25,7 @@ void main() {
   });
 
   test('isActiveNetworkMetered forwards to the platform channel', () async {
-    expect(await platform.isActiveNetworkMetered(), isTrue);
+    expect(await platform.isActiveNetworkMetered, isTrue);
   });
 
   test('channel name is package-owned and neutral', () {

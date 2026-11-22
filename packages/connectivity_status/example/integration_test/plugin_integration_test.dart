@@ -22,8 +22,8 @@ void main() {
       // native handler this package ships; MissingPluginException would mean
       // GeneratedPluginRegistrant never wired ConnectivityStatusPlugin in
       // for this build.
-      final bool? metered = await ConnectivityStatusPlatform.instance
-          .isActiveNetworkMetered();
+      final bool? metered =
+          await ConnectivityStatusPlatform.instance.isActiveNetworkMetered;
 
       expect(metered, anyOf(isTrue, isFalse, isNull));
     },

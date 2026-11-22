@@ -91,12 +91,12 @@ void main() {
     });
 
     test('only an authenticated source may lower the watermark', () {
-      expect(TimeSourceTrust.unauthenticated.mayLowerWatermark, isFalse);
+      expect(TimeSourceTrust.unauthenticated.canLowerWatermark, isFalse);
       expect(
-        TimeSourceTrust.transportAuthenticated.mayLowerWatermark,
+        TimeSourceTrust.transportAuthenticated.canLowerWatermark,
         isTrue,
       );
-      expect(TimeSourceTrust.serverAttested.mayLowerWatermark, isTrue);
+      expect(TimeSourceTrust.serverAttested.canLowerWatermark, isTrue);
     });
   });
 
@@ -172,14 +172,14 @@ void main() {
   });
 
   group('StampRepairDecision', () {
-    test('needsRepair is true only for the repair action', () {
-      expect(const StampRepairDecision.keep().needsRepair, isFalse);
-      expect(const StampRepairDecision.defer().needsRepair, isFalse);
+    test('isRepairNeeded is true only for the repair action', () {
+      expect(const StampRepairDecision.keep().isRepairNeeded, isFalse);
+      expect(const StampRepairDecision.defer().isRepairNeeded, isFalse);
       expect(
         StampRepairDecision.repair(
           repairedTo: instant,
           excess: const Duration(days: 3),
-        ).needsRepair,
+        ).isRepairNeeded,
         isTrue,
       );
     });

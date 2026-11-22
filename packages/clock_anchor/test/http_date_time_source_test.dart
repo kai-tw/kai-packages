@@ -142,7 +142,7 @@ void main() {
 
     test('a TLS-carried source is allowed to lower the watermark', () {
       expect(
-        TimeSourceTrust.transportAuthenticated.mayLowerWatermark,
+        TimeSourceTrust.transportAuthenticated.canLowerWatermark,
         isTrue,
       );
     });

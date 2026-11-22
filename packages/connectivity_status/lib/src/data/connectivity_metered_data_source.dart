@@ -19,5 +19,5 @@
 /// `ConnectivityRepository`, which is the seam this package actually
 /// commits to.
 abstract class ConnectivityMeteredDataSource {
-  Future<bool?> isActiveNetworkMetered();
+  Future<bool?> get isActiveNetworkMetered;
 }

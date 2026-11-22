@@ -332,7 +332,7 @@ void main() {
     });
 
     test('[partition] does not abort — the baseline suite was green', () {
-      expect(report.aborted, isFalse);
+      expect(report.isAborted, isFalse);
     });
 
     test(
@@ -608,7 +608,7 @@ void main() {
           p.join(dir.path, 'lib', 'constant.dart'),
         ]);
 
-        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(report.isAborted, isFalse, reason: report.abortReason);
         expect(report.stats!.switched!.alone, greaterThan(0));
         expect(
           report.stats!.switched!.aloneReasons.keys,
@@ -659,7 +659,7 @@ void main() {
           p.join(dir.path, 'lib', 'inferred.dart'),
         ]);
 
-        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(report.isAborted, isFalse, reason: report.abortReason);
         expect(
           report.stats!.switched!.aloneReasons.keys,
           contains('breaks a test file switched'),
@@ -697,7 +697,7 @@ void main() {
           dir,
         ).run(files);
 
-        expect(viaSubprocess.aborted, isFalse);
+        expect(viaSubprocess.isAborted, isFalse);
         for (final String file in files) {
           final String name = p.basename(file);
           final FileMutationReport a = _reportFor(viaSubprocess, name);
@@ -757,7 +757,7 @@ void main() {
           mutantTimeout: const Duration(seconds: 10),
         ).run(<String>[kept, rejected]);
 
-        expect(report.aborted, isFalse);
+        expect(report.isAborted, isFalse);
         // Scored exactly as the full-run fixture above scores them. A single
         // check for the whole run would have sent `kept` through the fallback
         // too, or scored `rejected`'s mutants with a primary that rejects it.
@@ -814,7 +814,7 @@ void main() {
           mutantTimeout: const Duration(seconds: 10),
         ).run(<String>[first, second]);
 
-        expect(report.aborted, isTrue);
+        expect(report.isAborted, isTrue);
         expect(report.abortKind, AbortKind.compileCheckRejectsUnmodified);
         expect(report.abortReason, contains(second));
         // The baseline passed and the budget was set before the compile check.
@@ -859,7 +859,7 @@ void main() {
           mutantTimeout: const Duration(seconds: 10),
         ).run(<String>[target]);
 
-        expect(report.aborted, isTrue);
+        expect(report.isAborted, isTrue);
         expect(report.abortKind, AbortKind.compileCheckRejectsUnmodified);
       },
     );
@@ -885,7 +885,7 @@ void main() {
           mutantTimeout: const Duration(seconds: 10),
         ).run(<String>[empty]);
 
-        expect(report.aborted, isFalse);
+        expect(report.isAborted, isFalse);
         expect(_reportFor(report, 'no_mutants.dart').total, 0);
         expect(primary.asked, isEmpty);
       },
@@ -909,7 +909,7 @@ void main() {
           mutantTimeout: const Duration(seconds: 10),
         ).run(<String>[target]);
 
-        expect(report.aborted, isFalse);
+        expect(report.isAborted, isFalse);
         expect(fallback.asked, isEmpty);
       },
     );
@@ -933,7 +933,7 @@ void main() {
           p.join(dir.path, 'lib', 'detected.dart'),
         ]);
 
-        expect(report.aborted, isTrue);
+        expect(report.isAborted, isTrue);
         expect(report.abortKind, AbortKind.baselineFailed);
         expect(report.abortReason, contains('red'));
         expect(report.files, isEmpty);
@@ -1355,7 +1355,7 @@ void main() {
     });
 
     test('[partition] runs to completion, selected', () {
-      expect(report.aborted, isFalse, reason: report.abortReason);
+      expect(report.isAborted, isFalse, reason: report.abortReason);
       expect(report.selectedByCoverage, isTrue);
     });
 
@@ -1497,7 +1497,7 @@ void main() {
       () async {
         final MutationRunReport report = await run(<String>['wait']);
 
-        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(report.isAborted, isFalse, reason: report.abortReason);
         final FileMutationReport f = _reportFor(report, 'wait.dart');
         expect(<int>[f.detected, f.timedOut], <int>[1, 0]);
         expect(
@@ -1671,7 +1671,7 @@ void main() {
     });
 
     test('[partition] runs to completion, selected', () {
-      expect(report.aborted, isFalse, reason: report.abortReason);
+      expect(report.isAborted, isFalse, reason: report.abortReason);
       expect(report.selectedByCoverage, isTrue);
     });
 
@@ -1901,7 +1901,7 @@ void main() {
         'mutant, as one',
         () {
           final MutationRunReport parallel = reports['parallel$mode']!;
-          expect(parallel.aborted, isFalse, reason: parallel.abortReason);
+          expect(parallel.isAborted, isFalse, reason: parallel.abortReason);
           expect(parallel.stats!.workers, 2);
           expect(
             verdicts(parallel),
@@ -2148,7 +2148,7 @@ void main() {
           baselineFactor: 0,
         ).run(<String>[p.join(dir.path, 'lib', 'detected.dart')]);
 
-        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(report.isAborted, isFalse, reason: report.abortReason);
         expect(_reportFor(report, 'detected.dart').detected, 1);
       },
       timeout: const Timeout(Duration(minutes: 2)),
@@ -2241,7 +2241,7 @@ void main() {
         operators: <MutationOperator>[StatementDeletion()],
         mutantTimeout: const Duration(seconds: 10),
       ).run(<String>[p.join(dir.path, 'lib', 'lifecycle.dart')]);
-      expect(report.aborted, isFalse, reason: report.abortReason);
+      expect(report.isAborted, isFalse, reason: report.abortReason);
       return _reportFor(report, 'lifecycle.dart');
     }
 
@@ -2399,7 +2399,7 @@ void main() {
           p.join(dir.path, 'lib', 'target.dart'),
         ]);
 
-        expect(report.aborted, isTrue);
+        expect(report.isAborted, isTrue);
         expect(report.abortKind, AbortKind.baselineTimeout);
         // Kept alongside the kind: a caller may still tell this abort apart by
         // matching these words, until it reads abortKind instead.
@@ -2452,7 +2452,7 @@ void main() {
       () async {
         final MutationRunReport report = await runWith(20);
 
-        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(report.isAborted, isFalse, reason: report.abortReason);
         final FileMutationReport f = _reportFor(report, 'slow.dart');
         expect(<int>[f.detected, f.timedOut], <int>[1, 0]);
         expect(
@@ -2470,7 +2470,7 @@ void main() {
       () async {
         final MutationRunReport report = await runWith(0);
 
-        expect(report.aborted, isFalse, reason: report.abortReason);
+        expect(report.isAborted, isFalse, reason: report.abortReason);
         expect(report.mutantTimeout, const Duration(seconds: 1));
         final Duration budget = report.stats!.mutants.single.result.timeout!;
         expect(budget, greaterThan(const Duration(seconds: 8)));

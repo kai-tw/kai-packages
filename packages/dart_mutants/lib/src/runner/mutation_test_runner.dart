@@ -660,10 +660,10 @@ class MutationTestRunner {
     if (invocation.hasOptionTerminator) {
       return 'the test command uses `--`';
     }
-    if (invocation.setsCoverage) {
+    if (invocation.hasCoverageOption) {
       return 'the test command already collects coverage';
     }
-    if (invocation.runsOffTheVm) {
+    if (invocation.hasNonVmPlatform) {
       return 'the test command runs on a platform other than the VM';
     }
     if (invocation.unrecognised.isNotEmpty) {

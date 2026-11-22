@@ -2,7 +2,7 @@ name: connectivity_status
 description: >-
   The device's network state as one value — offline, metered, or unmetered —
   shared across my Flutter projects.
-version: 0.2.0
+version: 0.3.0
 repository: https://github.com/kai-tw/kai-packages/tree/main/packages/connectivity_status
 publish_to: none
 

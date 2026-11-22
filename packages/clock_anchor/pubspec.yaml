@@ -4,7 +4,7 @@ description: >-
   trusted — anchored to a remote source through a monotonic base, with
   rollback detection and a repair policy for stamps written while the clock
   was wrong.
-version: 0.1.0
+version: 0.2.0
 repository: https://github.com/kai-tw/kai-packages/tree/main/packages/clock_anchor
 issue_tracker: https://github.com/kai-tw/kai-packages/issues
 

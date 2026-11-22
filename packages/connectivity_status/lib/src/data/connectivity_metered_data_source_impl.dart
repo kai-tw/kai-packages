@@ -12,10 +12,9 @@ class ConnectivityMeteredDataSourceImpl
   static const Duration _timeout = Duration(seconds: 5);
 
   @override
-  Future<bool?> isActiveNetworkMetered() async {
+  Future<bool?> get isActiveNetworkMetered async {
     try {
-      return await ConnectivityStatusPlatform.instance
-          .isActiveNetworkMetered()
+      return await ConnectivityStatusPlatform.instance.isActiveNetworkMetered
           .timeout(_timeout);
     } on MissingPluginException {
       // Platform-absence gate: desktop / web register no native handler, so a

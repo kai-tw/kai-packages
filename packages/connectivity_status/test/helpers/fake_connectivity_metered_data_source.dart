@@ -14,7 +14,7 @@ class FakeConnectivityMeteredDataSource
   int callCount = 0;
 
   @override
-  Future<bool?> isActiveNetworkMetered() async {
+  Future<bool?> get isActiveNetworkMetered async {
     callCount++;
     final Object? err = throwWith;
     if (err != null) {

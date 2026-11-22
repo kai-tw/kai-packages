@@ -1,3 +1,12 @@
+## 0.3.0
+
+**BREAKING**: `ConnectivityStatusPlatform.isActiveNetworkMetered` is now a
+getter. It takes no arguments and answers a yes-or-no question, so it reads
+as a property. A platform implementation overrides
+`Future<bool?> get isActiveNetworkMetered` instead of the method, and a caller
+drops the parentheses. The platform channel method keeps its name, so the
+native side is unchanged.
+
 ## 0.2.0
 
 **BREAKING** — `ConnectivityRepository.instance` and `.resetInstance()` are

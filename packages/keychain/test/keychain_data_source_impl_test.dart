@@ -59,7 +59,7 @@ void main() {
           expect(await dataSource.read('demo.token'), Uint8List(32));
           expect(await dataSource.exists('demo.token'), isTrue);
           await dataSource.delete('demo.token');
-          expect(await dataSource.isAvailable(), isTrue);
+          expect(await dataSource.isAvailable, isTrue);
 
           expect(calls.map((MethodCall c) => c.method), <String>[
             'create',
@@ -130,7 +130,7 @@ void main() {
           throwsA(isA<KeychainUnsupportedException>()),
         );
         await expectLater(
-          dataSource.isAvailable(),
+          dataSource.isAvailable,
           throwsA(isA<KeychainUnsupportedException>()),
         );
         expect(calls, 0);
@@ -270,13 +270,13 @@ void main() {
   group('isAvailable', () {
     test('passes the native answer through', () async {
       handle((MethodCall call) async => false);
-      expect(await KeychainDataSourceImpl().isAvailable(), isFalse);
+      expect(await KeychainDataSourceImpl().isAvailable, isFalse);
     });
 
     test('null is contract drift, not "unavailable"', () async {
       handle((MethodCall call) async => null);
       await expectLater(
-        KeychainDataSourceImpl().isAvailable(),
+        KeychainDataSourceImpl().isAvailable,
         throwsA(isA<KeychainPlatformFailureException>()),
       );
     });

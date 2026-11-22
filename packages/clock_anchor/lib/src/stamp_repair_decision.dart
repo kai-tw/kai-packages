@@ -36,7 +36,7 @@ class StampRepairDecision {
   final Duration excess;
 
   /// Convenience for the common branch.
-  bool get needsRepair => action == StampRepairAction.repair;
+  bool get isRepairNeeded => action == StampRepairAction.repair;
 
   @override
   String toString() => 'StampRepairDecision(${action.name}, excess=$excess)';

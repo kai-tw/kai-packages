@@ -84,13 +84,13 @@ void main() {
     '[partition] a command that collects coverage itself, or ends its '
     'options with --, is flagged so the caller can refuse it',
     () {
-      expect(parse('dart', <String>['test'])!.setsCoverage, isFalse);
+      expect(parse('dart', <String>['test'])!.hasCoverageOption, isFalse);
       expect(
-        parse('dart', <String>['test', '--coverage=out'])!.setsCoverage,
+        parse('dart', <String>['test', '--coverage=out'])!.hasCoverageOption,
         isTrue,
       );
       expect(
-        parse('flutter', <String>['test', '--coverage'])!.setsCoverage,
+        parse('flutter', <String>['test', '--coverage'])!.hasCoverageOption,
         isTrue,
       );
       expect(

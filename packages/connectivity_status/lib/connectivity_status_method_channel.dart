@@ -17,6 +17,6 @@ class MethodChannelConnectivityStatus extends ConnectivityStatusPlatform {
   final MethodChannel methodChannel = const MethodChannel(channelName);
 
   @override
-  Future<bool?> isActiveNetworkMetered() =>
+  Future<bool?> get isActiveNetworkMetered =>
       methodChannel.invokeMethod<bool>('isActiveNetworkMetered');
 }

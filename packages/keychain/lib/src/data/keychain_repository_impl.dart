@@ -48,7 +48,7 @@ class KeychainRepositoryImpl implements KeychainRepository {
   }
 
   @override
-  Future<bool> isAvailable() => _dataSource.isAvailable();
+  Future<bool> get isAvailable => _dataSource.isAvailable;
 
   @override
   Stream<bool> get availabilityChanges => _dataSource.availabilityChanges;

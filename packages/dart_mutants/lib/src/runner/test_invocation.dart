@@ -80,7 +80,7 @@ class TestInvocation {
     '--local-engine-src-path',
     '--local-engine-host',
     // A value option for `dart test`, a flag for `flutter test` — either
-    // way [setsCoverage] refuses the command, so the difference never
+    // way [hasCoverageOption] refuses the command, so the difference never
     // matters here.
     '--coverage',
     '--coverage-package',
@@ -96,7 +96,7 @@ class TestInvocation {
 
   /// Whether the command collects coverage itself — which a switched run,
   /// starting each compiled test file directly, does not do.
-  bool get setsCoverage => _command.arguments.any(
+  bool get hasCoverageOption => _command.arguments.any(
     (String arg) => _coverageOptions.contains(arg.split('=').first),
   );
 
@@ -106,7 +106,7 @@ class TestInvocation {
 
   /// Whether the command runs on any platform but the VM, which is the only
   /// one a switched run runs on.
-  bool get runsOffTheVm {
+  bool get hasNonVmPlatform {
     final List<String> args = _command.arguments;
     for (int i = 0; i < args.length; i++) {
       final String arg = args[i];

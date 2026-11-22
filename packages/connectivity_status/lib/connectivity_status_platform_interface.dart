@@ -35,9 +35,9 @@ abstract class ConnectivityStatusPlatform extends PlatformInterface {
   /// Returns `true` when the active link is metered, `false` when it is
   /// unmetered, and `null` when the running platform exposes no metered
   /// signal at all.
-  Future<bool?> isActiveNetworkMetered() {
+  Future<bool?> get isActiveNetworkMetered {
     throw UnimplementedError(
-      'isActiveNetworkMetered() has not been implemented.',
+      'isActiveNetworkMetered has not been implemented.',
     );
   }
 }

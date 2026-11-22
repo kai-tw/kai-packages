@@ -20,7 +20,7 @@ void main() {
     // deleted.
     await keychain.delete(keyId);
 
-    expect(await keychain.isAvailable(), isTrue);
+    expect(await keychain.isAvailable, isTrue);
 
     await keychain.create(keyId);
     expect(await keychain.exists(keyId), isTrue);

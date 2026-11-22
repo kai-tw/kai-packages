@@ -239,7 +239,7 @@ Future<int> _runAndReport(
   // "zero undetected" depends on reading the JSON even when this process's
   // own exit code disagrees with their verdict.
   final bool written = emit(report);
-  if (!written || report.aborted) {
+  if (!written || report.isAborted) {
     return 1;
   }
   return _verdict(report, args, quiet: jsonOnStdout);
@@ -842,7 +842,7 @@ ProcessCommand _parseCommand(String command) {
 }
 
 void _printText(MutationRunReport report) {
-  if (report.aborted) {
+  if (report.isAborted) {
     stdout.writeln('aborted: ${report.abortReason}');
     return;
   }

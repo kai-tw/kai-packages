@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+**BREAKING**: two boolean getters are renamed so each reads as a yes-or-no
+question.
+
+- `StampRepairDecision.needsRepair` → `isRepairNeeded`
+- `TimeSourceTrust.mayLowerWatermark` → `canLowerWatermark`
+
+Behaviour is unchanged; rename at the call site.
+
 ## 0.1.0
 
 First release.
