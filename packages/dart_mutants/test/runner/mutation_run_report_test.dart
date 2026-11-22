@@ -16,7 +16,7 @@ FileMutationReport _report(String filePath) => FileMutationReport(
 );
 
 void main() {
-  group('.aborted', () {
+  group('.isAborted', () {
     test(
       '[partition] carries the kind and the reason, and files is empty — an '
       'aborted run never scored anything',
@@ -26,7 +26,7 @@ void main() {
           'the test command failed against unmodified code',
         );
 
-        expect(report.aborted, isTrue);
+        expect(report.isAborted, isTrue);
         expect(report.abortKind, AbortKind.baselineFailed);
         expect(
           report.abortReason,
@@ -86,7 +86,7 @@ void main() {
           <FileMutationReport>[_report('lib/src/foo.dart')],
         );
 
-        expect(report.aborted, isFalse);
+        expect(report.isAborted, isFalse);
         expect(report.abortKind, isNull);
         expect(report.abortReason, isNull);
         expect(report.files, hasLength(1));

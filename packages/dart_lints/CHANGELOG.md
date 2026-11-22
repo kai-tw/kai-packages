@@ -1,3 +1,28 @@
+## 0.8.0
+
+New rule: `bool_getter_naming` (core bundle, on by default).
+
+It ties a yes-or-no question to its name, in both directions. A getter that
+returns `bool` or `Future<bool>` (nullable or not) starts with `is`, `can` or
+`has`, and a getter named that way returns one of those types. A method named
+that way that takes no parameters is reported too, since it has nothing to
+compute from but `this` and should be a getter: `bool isReady()` becomes
+`bool get isReady`. The `prefixes` option replaces the list.
+
+It leaves these alone:
+
+- A method with parameters (`isAtLeast(other)`) or type parameters, which
+  can't be a getter.
+- Fields. A `bool` field is a getter from the outside, but widget parameters
+  follow Flutter's own `enabled` and `dense`.
+- An `@override`, whose name was chosen where it's declared.
+- A declaration without a return type, which a syntax-only rule can't classify.
+
+Run against this workspace, it found 18 sites. They're renamed in the same
+change (`aborted` → `isAborted`, `needsRepair` → `isRepairNeeded`,
+`Future<bool> isAvailable()` → `Future<bool> get isAvailable`, and so on), and
+behaviour is unchanged.
+
 ## 0.7.0
 
 New rule: `prefer_positive_condition` (core bundle, on by default).

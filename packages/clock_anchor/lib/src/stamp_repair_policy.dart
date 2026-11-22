@@ -74,7 +74,7 @@ class StampRepairPolicy {
     }
     final List<T> planned = <T>[];
     for (final T record in records) {
-      if (inspect(stamp: stampOf(record), now: now).needsRepair) {
+      if (inspect(stamp: stampOf(record), now: now).isRepairNeeded) {
         planned.add(record);
       }
     }

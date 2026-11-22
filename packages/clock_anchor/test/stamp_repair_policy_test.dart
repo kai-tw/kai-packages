@@ -19,7 +19,7 @@ void main() {
     );
 
     expect(decision.action, StampRepairAction.keep);
-    expect(decision.needsRepair, isFalse);
+    expect(decision.isRepairNeeded, isFalse);
   });
 
   test('a stamp beyond the tolerance is re-issued at the trusted instant', () {
@@ -47,7 +47,7 @@ void main() {
       // "Ask again later" is not "this stamp is fine". A device that is
       // merely behind would otherwise rewrite every correct stamp it owns.
       expect(decision.action, StampRepairAction.defer, reason: '$confidence');
-      expect(decision.needsRepair, isFalse);
+      expect(decision.isRepairNeeded, isFalse);
     }
   });
 

@@ -41,6 +41,6 @@ extension TimeSourceTrustRank on TimeSourceTrust {
 
   /// Whether a sample at this level is allowed to lower the rollback
   /// watermark. Only transport-authenticated sources and above.
-  bool get mayLowerWatermark =>
+  bool get canLowerWatermark =>
       isAtLeast(TimeSourceTrust.transportAuthenticated);
 }

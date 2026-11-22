@@ -39,7 +39,7 @@ sl.registerLazySingleton<KeychainRepository>(KeychainRepository.new); // get_it
 | `read(id)` | The key stored under the id, as a `KeychainKeyEntity` (`keyId` + 32 bytes of `material`). Creates and changes nothing. |
 | `exists(id)` | `true` / `false` only when the platform answered conclusively; otherwise it throws. Says nothing about usability — `read` answers that. |
 | `delete(id)` | Removes the key. A key that is already absent counts as removed. |
-| `isAvailable()` | Whether keys can be reached right now. |
+| `isAvailable` | Whether keys can be reached right now. |
 | `availabilityChanges` | The current availability when listened to; on iOS, every change after it. Android: see below. |
 
 Every id is `<feature>.<key-id>`: a lowercase snake_case namespace, one dot, and
@@ -74,7 +74,7 @@ caller has to be able to fetch or derive again whatever it protected with them.
 
 ## Unavailable is not absent
 
-`isAvailable()` is `false` while the device is locked (iOS), or before the
+`isAvailable` is `false` while the device is locked (iOS), or before the
 first unlock after boot. The keys are still there. A caller must never delete
 or re-create a key because the keychain is unavailable — it retries once keys
 are available again. Likewise a `read` that throws
@@ -82,9 +82,9 @@ are available again. Likewise a `read` that throws
 
 On iOS, `availabilityChanges` emits `true` when keys are available again. On
 Android, a `directBootAware` app is the only kind that can run before the first
-unlock; for any other app `isAvailable()` is `true` whenever it runs, and
+unlock; for any other app `isAvailable` is `true` whenever it runs, and
 `availabilityChanges` emits that one value. This version sends no later change
-on Android, so a `directBootAware` app that read `false` asks `isAvailable()`
+on Android, so a `directBootAware` app that read `false` asks `isAvailable`
 again after the first unlock.
 
 ## Errors

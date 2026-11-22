@@ -117,7 +117,7 @@ class MutationRunReport {
   /// collected it.
   final RunStats? stats;
 
-  bool get aborted => abortKind != null;
+  bool get isAborted => abortKind != null;
 
   Map<String, Object?> toJson() => <String, Object?>{
     if (abortKind != null) 'abortKind': abortKind!.wireName,

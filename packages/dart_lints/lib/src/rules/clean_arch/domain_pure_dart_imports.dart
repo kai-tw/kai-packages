@@ -92,11 +92,11 @@ class _Visitor extends LintVisitor {
     'webview_flutter_',
   ];
 
-  bool get _inDomain => layout.isIn(filePath, 'domain');
+  bool get _isInDomain => layout.isIn(filePath, 'domain');
 
   @override
   void visitImportDirective(ImportDirective node) {
-    if (!_inDomain) {
+    if (!_isInDomain) {
       return;
     }
     final String? uri = node.uri.stringValue;

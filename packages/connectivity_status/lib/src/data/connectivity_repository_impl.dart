@@ -115,7 +115,7 @@ class ConnectivityRepositoryImpl implements ConnectivityRepository {
 
   Future<bool?> _readMetered() async {
     try {
-      return await _meteredSource.isActiveNetworkMetered();
+      return await _meteredSource.isActiveNetworkMetered;
     } on PlatformException catch (e, stackTrace) {
       // Mobile metered probe faulted (e.g. a missing ACCESS_NETWORK_STATE
       // surfacing as a SecurityException) → degrade to the type-list heuristic

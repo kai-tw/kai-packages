@@ -55,7 +55,7 @@ class _FakeKeychainDataSource implements KeychainDataSource {
   }
 
   @override
-  Future<bool> isAvailable() async {
+  Future<bool> get isAvailable async {
     final KeychainException? pending = failure;
     if (pending != null) {
       throw pending;
@@ -246,9 +246,9 @@ void main() {
 
     test('isAvailable answers what the platform says', () async {
       dataSource.available = false;
-      expect(await repository.isAvailable(), isFalse);
+      expect(await repository.isAvailable, isFalse);
       dataSource.available = true;
-      expect(await repository.isAvailable(), isTrue);
+      expect(await repository.isAvailable, isTrue);
     });
 
     test('a locked device leaves every key in place', () async {

@@ -17,7 +17,7 @@ abstract class KeychainDataSource {
 
   Future<void> delete(String keyId);
 
-  Future<bool> isAvailable();
+  Future<bool> get isAvailable;
 
   Stream<bool> get availabilityChanges;
 }

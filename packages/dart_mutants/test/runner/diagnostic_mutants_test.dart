@@ -140,7 +140,7 @@ Future<MutationRunReport> _run(
     mutantTimeout: const Duration(seconds: 20),
     baselineFactor: 0,
   ).run(<String>[for (final String f in files) p.join(dir.path, 'lib', f)]);
-  expect(report.aborted, isFalse, reason: report.abortReason);
+  expect(report.isAborted, isFalse, reason: report.abortReason);
   return report;
 }
 

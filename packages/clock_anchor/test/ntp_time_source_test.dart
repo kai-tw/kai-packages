@@ -103,7 +103,7 @@ void main() {
       buildSource(replyTo).trust,
       TimeSourceTrust.unauthenticated,
     );
-    expect(TimeSourceTrust.unauthenticated.mayLowerWatermark, isFalse);
+    expect(TimeSourceTrust.unauthenticated.canLowerWatermark, isFalse);
   });
 
   group('a usable reply', () {

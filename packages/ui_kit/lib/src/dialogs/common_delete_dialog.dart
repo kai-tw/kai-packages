@@ -102,7 +102,7 @@ class _CommonDeleteDialogState extends State<CommonDeleteDialog> {
     setState(() {});
   }
 
-  bool get _confirmSatisfied =>
+  bool get _isConfirmSatisfied =>
       widget.confirmPhrase == null ||
       _confirmController.text == widget.confirmPhrase;
 
@@ -138,7 +138,7 @@ class _CommonDeleteDialogState extends State<CommonDeleteDialog> {
             label: Text(widget.cancelLabel),
           ),
           FilledButton.icon(
-            onPressed: _isLoading || !_confirmSatisfied ? null : _onDelete,
+            onPressed: _isLoading || !_isConfirmSatisfied ? null : _onDelete,
             icon: _isLoading
                 ? const SizedBox(
                     width: 16.0,

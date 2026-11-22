@@ -186,10 +186,11 @@ class SwitchedRunner {
   /// The wait for a slot that ran out, when one did.
   SlotWaitException? _slotWait;
 
-  bool get _stopped => _failure != null || (shouldStop?.call() ?? false);
+  bool get _isStopped => _failure != null || (shouldStop?.call() ?? false);
 
   /// Whether a test file or a mutant compiled alone is still unclaimed.
-  bool get _workLeft => _nextFile < _files.length || _nextAlone < _alone.length;
+  bool get _hasWorkLeft =>
+      _nextFile < _files.length || _nextAlone < _alone.length;
 
   /// Each lane's wait for a slot, completed to end the wait once its
   /// condition holds — see [_readyToRun].
@@ -254,7 +255,7 @@ class SwitchedRunner {
     final int open = jobs
         .where((SwitchedJob j) => !_settled.contains(j.id))
         .length;
-    if (open > 0 && !_stopped) {
+    if (open > 0 && !_isStopped) {
       return '$open mutants were left without a result';
     }
     return null;
@@ -352,14 +353,14 @@ class SwitchedRunner {
   /// back a run whose results are all in.
   Future<void> _drain(_Lane lane) async {
     try {
-      while (!_stopped && _workLeft) {
+      while (!_isStopped && _hasWorkLeft) {
         final bool ready = await _readyToRun(
           lane,
-          giveUpWhen: () => _stopped || !_workLeft,
+          giveUpWhen: () => _isStopped || !_hasWorkLeft,
         );
         // Stopped, or the work all claimed, while it waited: the loop's
         // test ends it, and [run] reports why.
-        if (!ready || _stopped) {
+        if (!ready || _isStopped) {
           continue;
         }
         if (_nextFile < _files.length) {
@@ -404,7 +405,8 @@ class SwitchedRunner {
         continue;
       }
       // Stopped: [run] reports why.
-      if (!await _readyToRun(lane, giveUpWhen: () => _stopped) || _stopped) {
+      if (!await _readyToRun(lane, giveUpWhen: () => _isStopped) ||
+          _isStopped) {
         return;
       }
       final int? exitCode = await _timed(
@@ -567,8 +569,8 @@ class SwitchedRunner {
         }
         final Duration? unmutated = await unmutatedRun.future;
         if (unmutated == null ||
-            !await _readyToRun(lane, giveUpWhen: () => _stopped) ||
-            _stopped ||
+            !await _readyToRun(lane, giveUpWhen: () => _isStopped) ||
+            _isStopped ||
             _settled.contains(job.id)) {
           return;
         }

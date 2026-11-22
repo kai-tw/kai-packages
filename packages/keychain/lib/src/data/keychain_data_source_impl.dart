@@ -76,7 +76,7 @@ class KeychainDataSourceImpl implements KeychainDataSource {
   }
 
   @override
-  Future<bool> isAvailable() async {
+  Future<bool> get isAvailable async {
     final bool? available = await _invoke<bool>('isAvailable');
     if (available == null) {
       throw const KeychainPlatformFailureException();
@@ -117,7 +117,7 @@ class KeychainDataSourceImpl implements KeychainDataSource {
     StreamController<bool> controller,
     bool Function() hasChanged,
   ) async {
-    final Result<bool> answer = await Result.capture(isAvailable());
+    final Result<bool> answer = await Result.capture(isAvailable);
     if (!hasChanged()) {
       answer.addTo(controller);
     }

@@ -132,7 +132,7 @@ class ClockIntegrity {
     Duration ticksNow,
     DateTime deviceNow,
   ) async {
-    if (!anchor.trust.mayLowerWatermark) {
+    if (!anchor.trust.canLowerWatermark) {
       return false;
     }
     final DateTime truth = anchor.timeAt(ticksNow);

@@ -66,7 +66,7 @@ abstract class KeychainRepository {
   /// Unavailable never means absent: a caller must not delete or re-create a
   /// key because of it, only retry once keys are available again (see
   /// [availabilityChanges]).
-  Future<bool> isAvailable();
+  Future<bool> get isAvailable;
 
   /// The current availability when listened to. On iOS every change follows.
   /// On Android only an app that is `directBootAware` could see a change, and

@@ -48,13 +48,13 @@ class _Visitor extends ResolvedLintVisitor {
   final FeatureLayout layout;
   final List<String> baseClasses;
 
-  bool get _inDomainExceptions =>
+  bool get _isInDomainExceptions =>
       baseClasses.isNotEmpty &&
       layout.isIn(filePath, 'domain', subdirectory: 'exceptions');
 
   @override
   void visitClassDeclaration(ClassDeclaration node) {
-    if (!_inDomainExceptions) {
+    if (!_isInDomainExceptions) {
       return;
     }
 

@@ -132,7 +132,7 @@ List<String> _verdicts(MutationRunReport report) => <String>[
     ].join(' '),
 ]..sort();
 
-bool _hasFlutter() {
+bool get _hasFlutter {
   try {
     return Process.runSync('flutter', <String>['--version']).exitCode == 0;
   } on ProcessException {
@@ -155,7 +155,7 @@ void main() {
       ).readAsStringSync();
 
       final MutationRunReport one = await _run(dir);
-      expect(one.aborted, isFalse, reason: one.abortReason);
+      expect(one.isAborted, isFalse, reason: one.abortReason);
       // Under the selection: no baseline, only the run that builds assets.
       expect(one.baselineDuration, isNull);
       expect(one.stats!.assetBuild, isNotNull);
@@ -174,7 +174,7 @@ void main() {
       );
 
       final MutationRunReport two = await _run(dir, workers: 2);
-      expect(two.aborted, isFalse, reason: two.abortReason);
+      expect(two.isAborted, isFalse, reason: two.abortReason);
       expect(_verdicts(two), _verdicts(one));
 
       expect(
@@ -188,7 +188,7 @@ void main() {
         isNot(contains('dart_mutants_test_entry.dart')),
       );
     },
-    skip: _hasFlutter() ? false : 'needs flutter on PATH',
+    skip: _hasFlutter ? false : 'needs flutter on PATH',
     timeout: const Timeout(Duration(minutes: 15)),
   );
 
@@ -215,7 +215,7 @@ void main() {
       expect(report.stats!.assetBuild, isNotNull);
       expect(report.stats!.mutants, isEmpty);
     },
-    skip: _hasFlutter() ? false : 'needs flutter on PATH',
+    skip: _hasFlutter ? false : 'needs flutter on PATH',
     timeout: const Timeout(Duration(minutes: 5)),
   );
 
@@ -247,7 +247,7 @@ void main() {
       expect(report.abortKind, AbortKind.baselineTimeout);
       expect(report.abortReason, contains('test/aaa_hung_test.dart'));
     },
-    skip: _hasFlutter() ? false : 'needs flutter on PATH',
+    skip: _hasFlutter ? false : 'needs flutter on PATH',
     timeout: const Timeout(Duration(minutes: 5)),
   );
 
@@ -263,7 +263,7 @@ void main() {
       expect(report.abortReason, contains('--dart-define=MODE=x'));
       expect(report.baselineDuration, isNull);
     },
-    skip: _hasFlutter() ? false : 'needs flutter on PATH',
+    skip: _hasFlutter ? false : 'needs flutter on PATH',
     timeout: const Timeout(Duration(minutes: 2)),
   );
 }

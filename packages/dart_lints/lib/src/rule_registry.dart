@@ -34,6 +34,7 @@ import 'rules/core/avoid_unnecessary_rethrow.dart';
 import 'rules/core/avoid_vague_type_words.dart';
 import 'rules/core/avoid_void_async.dart';
 import 'rules/core/avoid_while_true.dart';
+import 'rules/core/bool_getter_naming.dart';
 import 'rules/core/failure_type_naming.dart';
 import 'rules/core/interface_implementation_naming.dart';
 import 'rules/core/prefer_positive_condition.dart';
@@ -232,6 +233,13 @@ class RuleRegistry {
       name: 'avoid_while_true',
       bundle: 'core',
       create: (Map<String, Object?> o) => AvoidWhileTrue(),
+    ),
+    RuleDescriptor(
+      name: 'bool_getter_naming',
+      bundle: 'core',
+      options: <String, OptionKind>{'prefixes': OptionKind.stringList},
+      create: (Map<String, Object?> o) =>
+          BoolGetterNaming(prefixes: o['prefixes'] as List<String>?),
     ),
     RuleDescriptor(
       name: 'failure_type_naming',

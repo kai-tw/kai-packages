@@ -1,3 +1,20 @@
+## 0.2.0
+
+**BREAKING**: `KeychainRepository.isAvailable` is now a getter. It takes no
+arguments and answers a yes-or-no question, so it reads as a property.
+Migrate by dropping the parentheses:
+
+```dart
+// before
+if (await keychain.isAvailable()) { … }
+
+// after
+if (await keychain.isAvailable) { … }
+```
+
+The platform channel method is still called `isAvailable`, so the native side
+is unchanged.
+
 ## 0.1.0
 
 First release.

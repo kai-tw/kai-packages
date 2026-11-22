@@ -73,11 +73,11 @@ class _Visitor extends LintVisitor {
     'unfreezed',
   };
 
-  bool get _inDomain => layout.isIn(filePath, 'domain');
+  bool get _isInDomain => layout.isIn(filePath, 'domain');
 
   @override
   void visitAnnotation(Annotation node) {
-    if (_inDomain && _forbidden.contains(node.name.name)) {
+    if (_isInDomain && _forbidden.contains(node.name.name)) {
       report(
         ruleName: 'avoid_freezed_in_domain',
         message:
