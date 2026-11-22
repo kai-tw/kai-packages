@@ -2,109 +2,86 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
+import 'package:test_queue/test_queue.dart';
 
-import '../cache_directory.dart';
 import 'test_slot.dart';
 
-/// How many test processes every dart_mutants run on this machine may have
-/// running at once, shared through one directory: [count] slots, each a
-/// file `slot-<n>` there, held by whichever process holds an exclusive lock
-/// on it.
+/// The machine's test slots, which a run takes one of for each test process
+/// it starts. They are test_queue's, so every caller on the machine counts
+/// against one budget: another dart_mutants run, a `test_queue run`, a CI
+/// job.
 ///
-/// A lock is the operating system's, so it is atomic between processes
-/// racing for the same slot, and it goes with the process holding it: a
-/// run that is killed outright leaves no slot taken. Nothing is ever
-/// written into a slot file, and none is ever deleted — a process opening
-/// the name after a delete would lock a different file than the one still
-/// held.
+/// [SlotPool] does the locking. A slot is a file the operating system locks
+/// for the process that holds it, so a run killed outright gives its slots
+/// back. This class adds the wait: a lane that finds every slot taken waits
+/// until one comes free, or until the caller gives up on it.
 ///
-/// These locks belong to a process, not to an open file: the same process
-/// locking a file it already holds succeeds, and closing any handle on the
-/// file drops every lock it holds there. So this process never opens a slot
-/// it holds a second time; [_held] is how it knows which those are.
+/// Inside a `test_queue run`, the run's slots are already held by that
+/// command, and `$TEST_QUEUE_HELD` names them. This hands those out instead
+/// of waiting on slots its own parent holds.
 class TestSlots {
-  TestSlots(this.directory, this.count) {
-    if (count < 1) {
-      throw ArgumentError.value(count, 'count', 'must be 1 or more');
+  /// [count] slots in [directory], locked the way test_queue locks them.
+  TestSlots(this.directory, this.count)
+    : _pool = SlotPool(directory, count),
+      _lendable = const <int>[];
+
+  /// The slots [numbers], which a parent `test_queue run` already holds.
+  TestSlots.inherited(this.directory, List<int> numbers)
+    : count = numbers.length,
+      _pool = null,
+      _lendable = numbers {
+    if (numbers.isEmpty) {
+      throw ArgumentError.value(numbers, 'numbers', 'must name a slot');
     }
   }
 
-  /// The slots `$DART_MUTANTS_SLOT_DIR` and `$DART_MUTANTS_SLOTS` name: by
-  /// default `<cache>/slots` (see [cacheDirectory]) and a slot for every
-  /// 4 GB of memory beyond the first 8 — see [countFor].
+  /// test_queue's slots, as its settings name them: by default a slot for
+  /// every 4 GB of memory beyond the first 8, in `<cache>/test_queue/slots`.
   ///
-  /// Throws a [FormatException] when `$DART_MUTANTS_SLOTS` is set to
-  /// anything but a whole number, 1 or more.
+  /// Throws a [FormatException] when a `TEST_QUEUE_*` variable is set to
+  /// something it can't use.
   static Future<TestSlots> fromEnvironment() async {
     final Map<String, String> env = Platform.environment;
-    final String? given = env[countVariable];
-    final int count;
-    if (given == null) {
-      count = countFor(await _memoryBytes());
-    } else {
-      final int? parsed = int.tryParse(given.trim());
-      if (parsed == null || parsed < 1) {
+    final QueueSettings settings = QueueSettings.fromEnvironment(
+      env,
+      memoryBytes: await MemoryProbe().totalBytes(),
+    );
+    final String held = (env[QueueSettings.heldVariable] ?? '').trim();
+    if (held.isEmpty) {
+      return TestSlots(settings.directory, settings.slotCount);
+    }
+    return TestSlots.inherited(settings.directory, slotNumbers(held));
+  }
+
+  /// The slot numbers in `$TEST_QUEUE_HELD`, such as `0,1`.
+  ///
+  /// Throws a [FormatException] for anything else.
+  static List<int> slotNumbers(String held) {
+    final List<int> numbers = <int>[];
+    for (final String part in held.split(',')) {
+      final int? number = int.tryParse(part.trim());
+      if (number == null || number < 0) {
         throw FormatException(
-          '\$$countVariable must be a whole number, 1 or more',
-          given,
+          '\$${QueueSettings.heldVariable} must list slot numbers',
+          held,
         );
       }
-      count = parsed;
+      numbers.add(number);
     }
-    return TestSlots(
-      Directory(env[directoryVariable] ?? p.join(cacheDirectory(), 'slots')),
-      count,
-    );
-  }
-
-  static const String directoryVariable = 'DART_MUTANTS_SLOT_DIR';
-  static const String countVariable = 'DART_MUTANTS_SLOTS';
-
-  /// One slot for every 4 GB of [memoryBytes] beyond the first 8, which the
-  /// system and the editor keep; at least one. A Flutter compiler and
-  /// `flutter_tester` together take up to about 4 GB. Memory that cannot be
-  /// read — `null` — gets the one slot that is always safe.
-  static int countFor(int? memoryBytes) {
-    if (memoryBytes == null) {
-      return 1;
-    }
-    final int gigabytes = memoryBytes ~/ (1024 * 1024 * 1024);
-    final int count = (gigabytes - 8) ~/ 4;
-    return count < 1 ? 1 : count;
-  }
-
-  /// This machine's memory in bytes, or `null` where it cannot be read.
-  static Future<int?> _memoryBytes() async {
-    try {
-      if (Platform.isMacOS) {
-        final ProcessResult result = await Process.run('sysctl', <String>[
-          '-n',
-          'hw.memsize',
-        ]);
-        return result.exitCode == 0
-            ? int.tryParse((result.stdout as String).trim())
-            : null;
-      }
-      if (Platform.isLinux) {
-        final Match? total = RegExp(
-          r'^MemTotal:\s+(\d+) kB',
-          multiLine: true,
-        ).firstMatch(await File('/proc/meminfo').readAsString());
-        return total == null ? null : int.parse(total[1]!) * 1024;
-      }
-      return null;
-    } on FileSystemException {
-      return null;
-    } on ProcessException {
-      return null;
-    }
+    return numbers;
   }
 
   final Directory directory;
   final int count;
 
-  /// The slots this process holds, by number.
-  final Set<int> _held = <int>{};
+  /// The slots, or `null` when a parent holds them.
+  final SlotPool? _pool;
+
+  /// The slots a parent holds, by number.
+  final List<int> _lendable;
+
+  /// Which of [_lendable] a lane has now.
+  final Set<int> _lent = <int>{};
 
   /// A slot this process gives back, for its own lanes waiting on one.
   final StreamController<void> _released = StreamController<void>.broadcast(
@@ -120,24 +97,12 @@ class TestSlots {
   /// of it through the directory.
   File get _releaseMark => File(p.join(directory.path, 'released'));
 
-  File _slotFile(int number) => File(p.join(directory.path, 'slot-$number'));
-
-  /// How many slots no process holds right now.
+  /// How many slots nobody holds right now.
   int free() {
-    directory.createSync(recursive: true);
-    int free = 0;
-    for (int number = 0; number < count; number++) {
-      // Held here, so taken — and opening it again would drop the lock.
-      if (_held.contains(number)) {
-        continue;
-      }
-      final RandomAccessFile? probe = _lock(number);
-      if (probe != null) {
-        probe.closeSync();
-        free++;
-      }
+    if (_pool case final SlotPool pool) {
+      return pool.survey().where((SlotStatus s) => s.holder == null).length;
     }
-    return free;
+    return count - _lent.length;
   }
 
   /// A slot, once one is free: at once when one is, or else when another
@@ -205,41 +170,37 @@ class TestSlots {
     }
   }
 
-  /// The first free slot, now held — or `null` when every one is taken.
+  /// The first free slot, now held, or `null` when every one is taken.
   TestSlot? _tryAcquire() {
-    for (int number = 0; number < count; number++) {
-      // Held here already: opening it again would drop this process's lock.
-      if (_held.contains(number)) {
-        continue;
+    if (_pool case final SlotPool pool) {
+      final HeldSlots? held = pool.tryAcquire(1, _holder());
+      if (held == null) {
+        return null;
       }
-      if (_lock(number) case final RandomAccessFile file) {
-        _held.add(number);
-        return TestSlot(number, () => _release(number, file));
+      return TestSlot(held.numbers.single, () => _release(held.release));
+    }
+    for (final int number in _lendable) {
+      if (_lent.add(number)) {
+        return TestSlot(number, () => _release(() => _lent.remove(number)));
       }
     }
     return null;
   }
 
-  /// Slot [number]'s file, open and locked — or `null`, closed again, when
-  /// another process holds it. Locking is the only test: whether a slot is
-  /// free can change between any check and the lock.
-  RandomAccessFile? _lock(int number) {
-    final RandomAccessFile file = _slotFile(
-      number,
-    ).openSync(mode: FileMode.append);
-    try {
-      file.lockSync(FileLock.exclusive);
-      return file;
-    } on FileSystemException {
-      file.closeSync();
-      return null;
-    }
-  }
+  /// What `test_queue status` shows for a slot a lane holds.
+  SlotHolder _holder() => SlotHolder(
+    pid: pid,
+    label: p.basename(Directory.current.path),
+    workingDirectory: Directory.current.path,
+    command: 'dart_mutants (one test process)',
+    startedAt: DateTime.now(),
+  );
 
-  void _release(int number, RandomAccessFile file) {
-    file.closeSync();
-    _held.remove(number);
-    _releaseMark.writeAsStringSync('$number\n');
+  void _release(void Function() giveBack) {
+    giveBack();
+    if (_pool != null) {
+      _releaseMark.writeAsStringSync('released\n');
+    }
     _released.add(null);
   }
 }

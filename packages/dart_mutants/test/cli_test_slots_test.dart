@@ -39,8 +39,8 @@ Future<Process> _start(
     workingDirectory: dir.path,
     environment: <String, String>{
       ...cliEnvironment,
-      'DART_MUTANTS_SLOT_DIR': slotDir.path,
-      'DART_MUTANTS_SLOTS': '$slots',
+      'TEST_QUEUE_DIR': slotDir.path,
+      'TEST_QUEUE_SLOTS': '$slots',
       'DM_MARKER': marker.path,
       'DM_ID': id,
     },

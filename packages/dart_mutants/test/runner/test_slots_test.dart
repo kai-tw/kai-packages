@@ -6,6 +6,7 @@ import 'package:dart_mutants/src/runner/test_slot.dart';
 import 'package:dart_mutants/src/runner/test_slots.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+import 'package:test_queue/test_queue.dart';
 
 /// A program that locks `slot-0` in the directory it is given and prints
 /// `locked` when it holds it, or `busy` when someone else does. A holder
@@ -125,4 +126,54 @@ void main() {
       holder.kill(ProcessSignal.sigkill);
     },
   );
+
+  test(
+    '[S5] a lane\'s slot names its holder, for `test_queue status`',
+    () async {
+      final TestSlots slots = TestSlots(slotDir, 1);
+      final TestSlot slot = (await slots.acquire())!;
+      final File holder = File(p.join(slotDir.path, 'slot-0.holder'));
+
+      expect(
+        SlotHolder.decode(holder.readAsStringSync()).command,
+        'dart_mutants (one test process)',
+      );
+
+      slot.release();
+      expect(holder.existsSync(), isFalse);
+    },
+  );
+
+  group('[S5] inside a test_queue run', () {
+    test('hands out only the slots the parent holds', () async {
+      final TestSlots slots = TestSlots.inherited(slotDir, <int>[3, 5]);
+
+      final TestSlot first = (await slots.acquire())!;
+      final TestSlot second = (await slots.acquire())!;
+
+      expect(<int>[first.number, second.number], <int>[3, 5]);
+      expect(slots.free(), 0);
+      expect(slotDir.listSync(), isEmpty, reason: 'no slot file is locked');
+    });
+
+    test('a lane waits for a slot another lane gives back', () async {
+      final TestSlots slots = TestSlots.inherited(slotDir, <int>[0]);
+      final TestSlot first = (await slots.acquire())!;
+
+      final Future<TestSlot?> waiting = slots.acquire();
+      first.release();
+
+      expect(
+        (await waiting.timeout(const Duration(seconds: 1)))?.number,
+        0,
+      );
+    });
+
+    test('reads the slot numbers the parent names', () {
+      expect(TestSlots.slotNumbers('0,1'), <int>[0, 1]);
+      expect(TestSlots.slotNumbers(' 2 '), <int>[2]);
+      expect(() => TestSlots.slotNumbers('0,x'), throwsFormatException);
+      expect(() => TestSlots.slotNumbers('-1'), throwsFormatException);
+    });
+  });
 }
