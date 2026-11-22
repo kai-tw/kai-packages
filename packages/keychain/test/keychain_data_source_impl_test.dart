@@ -443,35 +443,51 @@ void main() {
     });
 
     test('a state answer that lands after the cancel is dropped', () async {
-      final Completer<Object?> answer = Completer<Object?>();
-      handle((MethodCall call) => answer.future);
       final List<bool> seen = <bool>[];
-      final StreamSubscription<bool> subscription = KeychainDataSourceImpl()
-          .availabilityChanges
-          .listen(seen.add);
-      await settle();
-      await subscription.cancel();
-      answer.complete(true);
-      await settle();
+      final List<Object> errors = <Object>[];
+      final List<Object> unhandled = <Object>[];
+      // In this zone a late answer that is not dropped quietly lands in
+      // [unhandled].
+      await runZonedGuarded(() async {
+        final Completer<Object?> answer = Completer<Object?>();
+        handle((MethodCall call) => answer.future);
+        final StreamSubscription<bool> subscription = KeychainDataSourceImpl()
+            .availabilityChanges
+            .listen(seen.add, onError: errors.add);
+        await settle();
+        await subscription.cancel();
+        answer.complete(true);
+        await settle();
+      }, (Object error, StackTrace stack) => unhandled.add(error));
 
       expect(seen, isEmpty);
+      expect(errors, isEmpty);
+      expect(unhandled, isEmpty);
     });
 
     test(
       'a failed state query that lands after the cancel is dropped',
       () async {
-        final Completer<Object?> answer = Completer<Object?>();
-        handle((MethodCall call) => answer.future);
+        final List<bool> seen = <bool>[];
         final List<Object> errors = <Object>[];
-        final StreamSubscription<bool> subscription = KeychainDataSourceImpl()
-            .availabilityChanges
-            .listen((_) {}, onError: errors.add);
-        await settle();
-        await subscription.cancel();
-        answer.completeError(PlatformException(code: 'failed'));
-        await settle();
+        final List<Object> unhandled = <Object>[];
+        // In this zone a late failure that is not dropped quietly lands in
+        // [unhandled].
+        await runZonedGuarded(() async {
+          final Completer<Object?> answer = Completer<Object?>();
+          handle((MethodCall call) => answer.future);
+          final StreamSubscription<bool> subscription = KeychainDataSourceImpl()
+              .availabilityChanges
+              .listen(seen.add, onError: errors.add);
+          await settle();
+          await subscription.cancel();
+          answer.completeError(PlatformException(code: 'failed'));
+          await settle();
+        }, (Object error, StackTrace stack) => unhandled.add(error));
 
+        expect(seen, isEmpty);
         expect(errors, isEmpty);
+        expect(unhandled, isEmpty);
       },
     );
 

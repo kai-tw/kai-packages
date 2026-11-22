@@ -80,9 +80,9 @@ or re-create a key because the keychain is unavailable — it retries once keys
 are available again. Likewise a `read` that throws
 `KeychainTemporarilyUnavailableException` changed nothing.
 
-On iOS, `availabilityChanges` tells when that is. On Android, a
-`directBootAware` app is the only kind that can run before the first unlock;
-for any other app `isAvailable()` is `true` whenever it runs, and
+On iOS, `availabilityChanges` emits `true` when keys are available again. On
+Android, a `directBootAware` app is the only kind that can run before the first
+unlock; for any other app `isAvailable()` is `true` whenever it runs, and
 `availabilityChanges` emits that one value. This version sends no later change
 on Android, so a `directBootAware` app that read `false` asks `isAvailable()`
 again after the first unlock.

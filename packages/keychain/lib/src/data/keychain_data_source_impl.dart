@@ -100,8 +100,8 @@ class KeychainDataSourceImpl implements KeychainDataSource {
           changed = true;
           controller.add(available);
         }, onError: controller.addError);
-        // Nothing waits for it: the answer, value or error, reaches the
-        // listener through the controller.
+        // The answer, value or error, reaches the listener through the
+        // controller.
         unawaited(_addCurrentAvailability(controller, () => changed));
       },
       // A cancelled single-subscription controller drops whatever is added
