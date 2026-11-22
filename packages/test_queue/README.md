@@ -14,14 +14,12 @@ test_queue status
 
 ## Why
 
-One `flutter test` was measured at about 2.7 GB at its peak: 1.4 GB for the
-compiler, 1.1 GB for five `flutter_tester` processes, and 0.2 GB for the
-`flutter` tool. When several tools run suites on the same machine, two things
-fill its memory:
+One `flutter test` can take a few gigabytes at its peak: the compiler, a
+`flutter_tester` for each test file running at once, and the `flutter` tool.
+When several tools run suites on the same machine, two things fill its memory:
 
-- **Every caller keeps a count of its own.** A script that allows two suites
-  at once and a mutation tester that allows two more will together start
-  four, and anything that counts nothing adds to that.
+- **Every caller keeps a count of its own.** Tools that each limit how many
+  suites they run still add up, because none of them sees the others.
 - **Killed runs leave testers running.** Killing the `flutter` tool doesn't
   stop the `flutter_tester` processes under it. The system adopts them, and
   nothing ever stops them, so a stuck test can keep running for hours.

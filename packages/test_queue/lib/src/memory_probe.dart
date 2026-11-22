@@ -45,8 +45,8 @@ class MemoryProbe {
   /// or swap anything.
   ///
   /// `kern.memorystatus_level` was the other candidate and was rejected: it
-  /// counts memory the compressor could still make room in as free, and read
-  /// 77% free on a machine whose free and reclaimable pages added up to 38%.
+  /// counts memory the compressor could still make room in as free, so it
+  /// reads far higher than what a new process can have without compression.
   static int? parseVmStat(String text) {
     final RegExpMatch? size = RegExp(
       r'page size of (\d+) bytes',

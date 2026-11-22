@@ -8,13 +8,13 @@ void main() {
     test('reads pid, ppid, uid and the whole command line', () {
       final ProcessTable table = ProcessTable.parse(
         '    1     0     0 /sbin/launchd\n'
-        '  412     1   501 /usr/bin/some tool --with "spaces"\n',
+        '  412     1  1000 /usr/bin/some tool --with "spaces"\n',
       );
 
       expect(table.rows, hasLength(2));
       final ProcessRow? row = table.find(412);
       expect(row?.ppid, 1);
-      expect(row?.uid, 501);
+      expect(row?.uid, 1000);
       expect(row?.command, '/usr/bin/some tool --with "spaces"');
     });
 

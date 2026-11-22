@@ -46,9 +46,8 @@ class QueueSettings {
 
   static const int _gigabyte = 1024 * 1024 * 1024;
 
-  /// What one `flutter test` was measured using at its peak: 1.4 GB for the
-  /// compiler, 1.1 GB for five `flutter_tester` processes, and 0.2 GB for
-  /// the `flutter` tool. Rounded up to 3 GB.
+  /// Enough for one `flutter test` at its peak: the compiler, a few
+  /// `flutter_tester` processes running at once, and the `flutter` tool.
   static const int defaultMemoryPerSlot = 3 * _gigabyte;
 
   /// One slot for every 4 GB beyond the first 8, which the system, the

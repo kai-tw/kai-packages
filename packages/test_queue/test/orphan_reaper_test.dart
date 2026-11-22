@@ -77,14 +77,14 @@ void main() {
     /// with this process in both so the reaper can learn this user's uid.
     OrphanReaper reaper(String first, String later) => OrphanReaper(
       readTable: () => ProcessTable.parse(
-        ' $pid 1 501 dart\n${reads++ == 0 ? first : later}',
+        ' $pid 1 1000 dart\n${reads++ == 0 ? first : later}',
       ),
       kill: killed.add,
       confirmDelay: Duration.zero,
     );
 
     test("kills this user's orphaned testers that stay orphaned", () async {
-      const String rows = ' 40 1 501 $_tester\n';
+      const String rows = ' 40 1 1000 $_tester\n';
 
       final List<ProcessRow> reaped = await reaper(rows, rows).reap();
 
@@ -93,25 +93,25 @@ void main() {
     });
 
     test('leaves a tester alone that still has its parent', () async {
-      const String rows = ' 40 39 501 $_tester\n';
+      const String rows = ' 40 39 1000 $_tester\n';
 
       expect(await reaper(rows, rows).reap(), isEmpty);
       expect(killed, isEmpty);
     });
 
     test("leaves another user's tester alone", () async {
-      const String rows = ' 40 1 502 $_tester\n';
+      const String rows = ' 40 1 1001 $_tester\n';
 
       expect(await reaper(rows, rows).reap(), isEmpty);
     });
 
     test('leaves a tester alone that is gone by the second look', () async {
-      expect(await reaper(' 40 1 501 $_tester\n', '').reap(), isEmpty);
+      expect(await reaper(' 40 1 1000 $_tester\n', '').reap(), isEmpty);
       expect(killed, isEmpty);
     });
 
     test('dryRun lists without killing', () async {
-      const String rows = ' 40 1 501 $_tester\n';
+      const String rows = ' 40 1 1000 $_tester\n';
 
       final List<ProcessRow> reaped = await reaper(
         rows,
