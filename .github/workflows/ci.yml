@@ -200,12 +200,12 @@ jobs:
       - run: flutter pub get
         working-directory: packages/connectivity_status/example
 
-      # A native-code package, and the reason this workflow needs a macOS
-      # runner at all: the metered-probe plugin's iOS
-      # side (Swift, a podspec, a Swift Package Manager manifest) can only be
+      # A native-code package's iOS side (here the metered-probe plugin's
+      # Swift, podspec and Swift Package Manager manifest) can only be
       # compiled with a real Xcode toolchain, which ubuntu-latest does not
-      # have. --no-codesign because CI has no signing identity and does not
-      # need one to prove the native code builds and links.
+      # have: the reason this job and keychain_ios run on macOS.
+      # --no-codesign because CI has no signing identity and does not need one
+      # to prove the native code builds and links.
       - run: flutter build ios --no-codesign --debug
         working-directory: packages/connectivity_status/example
 

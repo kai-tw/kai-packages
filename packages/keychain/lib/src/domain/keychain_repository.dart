@@ -64,10 +64,13 @@ abstract class KeychainRepository {
   /// locked, or has not been unlocked since boot. The keys are still there.
   ///
   /// Unavailable never means absent: a caller must not delete or re-create a
-  /// key because of it, only wait for [availabilityChanges] and retry.
+  /// key because of it, only retry once keys are available again (see
+  /// [availabilityChanges]).
   Future<bool> isAvailable();
 
-  /// The current availability when listened to, then every change. A
-  /// platform without a keychain emits nothing.
+  /// The current availability when listened to. On iOS every change follows.
+  /// On Android only an app that is `directBootAware` could see a change, and
+  /// this version sends none: such an app asks [isAvailable] again after the
+  /// first unlock. A platform without a keychain emits nothing.
   Stream<bool> get availabilityChanges;
 }

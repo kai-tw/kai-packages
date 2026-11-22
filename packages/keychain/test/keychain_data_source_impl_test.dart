@@ -427,6 +427,54 @@ void main() {
       expect(errors, isEmpty);
     });
 
+    test('subscribes to the changes before it asks for the state', () async {
+      int? listensWhenAsked;
+      handle((MethodCall call) async {
+        listensWhenAsked = listens;
+        return true;
+      });
+      final StreamSubscription<bool> subscription = KeychainDataSourceImpl()
+          .availabilityChanges
+          .listen((_) {});
+      await settle();
+      await subscription.cancel();
+
+      expect(listensWhenAsked, 1);
+    });
+
+    test('a state answer that lands after the cancel is dropped', () async {
+      final Completer<Object?> answer = Completer<Object?>();
+      handle((MethodCall call) => answer.future);
+      final List<bool> seen = <bool>[];
+      final StreamSubscription<bool> subscription = KeychainDataSourceImpl()
+          .availabilityChanges
+          .listen(seen.add);
+      await settle();
+      await subscription.cancel();
+      answer.complete(true);
+      await settle();
+
+      expect(seen, isEmpty);
+    });
+
+    test(
+      'a failed state query that lands after the cancel is dropped',
+      () async {
+        final Completer<Object?> answer = Completer<Object?>();
+        handle((MethodCall call) => answer.future);
+        final List<Object> errors = <Object>[];
+        final StreamSubscription<bool> subscription = KeychainDataSourceImpl()
+            .availabilityChanges
+            .listen((_) {}, onError: errors.add);
+        await settle();
+        await subscription.cancel();
+        answer.completeError(PlatformException(code: 'failed'));
+        await settle();
+
+        expect(errors, isEmpty);
+      },
+    );
+
     test('a failed state query reaches the listener as an error', () async {
       handle(
         (MethodCall call) async => throw PlatformException(code: 'unsupported'),

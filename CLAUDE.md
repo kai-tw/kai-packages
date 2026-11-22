@@ -64,4 +64,5 @@ because it is what an extraction's source app happened to use.
 This has no Dart-side equivalent to enforce automatically (Dart package
 names and pub.dev don't have an org-identifier concept), so it is a
 convention to apply by hand whenever a package in this repo grows Android or
-iOS native code — `connectivity_status` is the only one that has, so far.
+iOS native code — `connectivity_status` and `keychain` are the ones that have,
+so far.

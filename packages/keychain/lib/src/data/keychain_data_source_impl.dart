@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:async/async.dart' show Result;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -22,10 +23,10 @@ class KeychainDataSourceImpl implements KeychainDataSource {
 
   final MethodChannel _channel = const MethodChannel(_channelName);
 
-  /// The native side sends one event per availability change, and nothing on
-  /// listen. One channel stream is shared by every listener: a second
-  /// `receiveBroadcastStream` on the same channel would take over the native
-  /// sink from the first.
+  /// The native side sends nothing on listen; after that, iOS sends one event
+  /// per availability change and Android none. One channel stream is shared
+  /// by every listener: a second `receiveBroadcastStream` on the same channel
+  /// would take over the native sink from the first.
   late final Stream<bool> _changes =
       const EventChannel('$_channelName/availability')
           .receiveBroadcastStream()
@@ -84,9 +85,7 @@ class KeychainDataSourceImpl implements KeychainDataSource {
   }
 
   /// Subscribes to the native changes first, then asks for the current state,
-  /// so no change can fall between the two. The answer to that question is
-  /// dropped — value or error — if a change already arrived: it may predate
-  /// the change.
+  /// so no change can fall between the two.
   @override
   Stream<bool> get availabilityChanges {
     if (!_isSupportedPlatform) {
@@ -101,26 +100,27 @@ class KeychainDataSourceImpl implements KeychainDataSource {
           changed = true;
           controller.add(available);
         }, onError: controller.addError);
-        unawaited(
-          isAvailable().then(
-            (bool available) {
-              if (!changed) {
-                controller.add(available);
-              }
-            },
-            onError: (Object e, StackTrace s) {
-              if (!changed) {
-                controller.addError(e, s);
-              }
-            },
-          ),
-        );
+        // Nothing waits for it: the answer, value or error, reaches the
+        // listener through the controller.
+        unawaited(_addCurrentAvailability(controller, () => changed));
       },
       // A cancelled single-subscription controller drops whatever is added
       // later, so a late state answer needs no guard and no close.
       onCancel: () => subscription?.cancel(),
     );
     return controller.stream.distinct();
+  }
+
+  /// The answer, value or error, is dropped if [hasChanged] by the time it
+  /// lands: it may predate that change.
+  Future<void> _addCurrentAvailability(
+    StreamController<bool> controller,
+    bool Function() hasChanged,
+  ) async {
+    final Result<bool> answer = await Result.capture(isAvailable());
+    if (!hasChanged()) {
+      answer.addTo(controller);
+    }
   }
 
   bool _asAvailability(Object? event) {
