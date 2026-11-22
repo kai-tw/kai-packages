@@ -5,8 +5,9 @@ description: >-
   comparisons) and whether a line's effect is asserted at all (statement
   deletion, condition negation), by walking the same analyzer AST dart_lints
   already does rather than pattern-matching source text.
-version: 0.13.1
+version: 0.14.0
 repository: https://github.com/kai-tw/kai-packages/tree/main/packages/dart_mutants
+publish_to: none
 
 environment:
   sdk: ^3.8.0
@@ -21,6 +22,16 @@ dependencies:
   # own libraries, which are not a public interface; hence the narrow range.
   test_api: ">=0.7.0 <0.8.0"
   test_core: ">=0.6.17 <0.7.0"
+  # Every caller on a machine shares test_queue's slots, so a mutation run
+  # and a `test_queue run` started elsewhere count against one budget.
+  # A git tag rather than a path: consuming apps resolve dart_mutants from
+  # git, and a path would point outside the package they fetched. Inside
+  # this workspace, pub resolves it to the working tree regardless.
+  test_queue:
+    git:
+      url: https://github.com/kai-tw/kai-packages
+      path: packages/test_queue
+      ref: test_queue-v0.1.0
 
 dev_dependencies:
   lints: ^6.1.0

@@ -1,3 +1,18 @@
+## 0.14.0
+
+**Test slots are now test_queue's.** A mutation run and a `test_queue run`
+started anywhere else on the machine count against one set of slots, where
+before each kept its own and together could run more suites than memory
+holds. Each lane's slot names its holder, so `test_queue status` shows it.
+
+- `TEST_QUEUE_SLOTS` and `TEST_QUEUE_DIR` set the slots.
+  **`DART_MUTANTS_SLOTS` and `DART_MUTANTS_SLOT_DIR` are gone**; a run that
+  sets them now uses test_queue's defaults.
+- Run inside `test_queue run --slots <n>`, a run uses the *n* slots that
+  command holds (`$TEST_QUEUE_HELD`) instead of waiting on them.
+- The package is marked `publish_to: none`. It's taken from a git tag, and
+  now has a git dependency of its own.
+
 ## 0.13.1
 
 **Compiles against analyzer 9 again.** The range has said `>=9.0.0 <11.0.0`

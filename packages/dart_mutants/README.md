@@ -741,9 +741,10 @@ runs once, in the package, before the lanes start.
 
 ### Test slots: every run on the machine shares them
 
-Several runs at once — one per package, or one per branch — would each open
-their own lanes and together run out of memory. So every dart_mutants run on
-the machine shares one set of test slots:
+Several runs at once (one per package, one per branch, or a mutation run next
+to an ordinary test run) would each open their own lanes and together run out
+of memory. So dart_mutants takes its slots from
+[`test_queue`](../test_queue), the same ones `test_queue run` takes:
 
 - each lane holds a slot only while it compiles or runs a test file, and
   waits for a free one before it does; it never fails for want of one;
@@ -760,17 +761,12 @@ nor against the pace `--max-minutes` is judged by.
 least one. A number keeps meaning that many lanes, each still waiting for a
 slot of its own — `--workers 4` with two slots runs two at a time.
 
-Two environment variables set them:
+test_queue's own variables set them (`TEST_QUEUE_SLOTS` for how many,
+`TEST_QUEUE_DIR` for where); see its README. Run inside `test_queue run
+--slots <n>`, a run uses the *n* slots that command already holds instead of
+waiting on them. `test_queue status` shows each lane's slot, and its holder.
 
-| Variable | Default | What it sets |
-| --- | --- | --- |
-| `DART_MUTANTS_SLOTS` | one per 4 GB of memory beyond the first 8, at least 1 | how many slots there are |
-| `DART_MUTANTS_SLOT_DIR` | `$XDG_CACHE_HOME/dart_mutants/slots` (`~/.cache` without `XDG_CACHE_HOME`) | the directory the slots are in |
-
-Runs share slots only when they agree on both: two runs given different
-directories don't limit each other, and a run counts only the slots its own
-`DART_MUTANTS_SLOTS` names. A test process anything other than dart_mutants
-starts takes no slot.
+A test process started outside both tools takes no slot.
 
 ## Run statistics
 

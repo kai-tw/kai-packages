@@ -37,6 +37,9 @@ $dartMutantsDevDependency''';
 /// the network. Set by [useHermeticVersionCheck].
 Map<String, String> get cliEnvironment => <String, String>{
   'XDG_CACHE_HOME': _cache!.path,
+  // A run under test is not inside the `test_queue run` that may be running
+  // this suite, and must take slots of its own.
+  'TEST_QUEUE_HELD': '',
 };
 
 Directory? _cache;
