@@ -1,3 +1,16 @@
+## 0.15.0
+
+**A worker no longer waits forever for a test slot.** After `--slot-wait`
+seconds (default 1800) with no slot free, the run stops without scoring
+anything, as the new abort kind `slot-wait-timeout`. Its reason lists who
+held each slot. Before, a slot held for good left the run hanging where
+nobody saw it.
+
+- `--slot-wait <seconds>` sets the limit. 0 gives up at once when no slot
+  is free. There's no value for "forever".
+- `slot-wait-timeout` is a new `abortKind`. Adding a kind isn't a breaking
+  change to the JSON contract; renaming one would be.
+
 ## 0.14.0
 
 **Test slots are now test_queue's.** A mutation run and a `test_queue run`

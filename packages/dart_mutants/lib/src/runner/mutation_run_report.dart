@@ -45,7 +45,11 @@ enum AbortKind {
   /// Ctrl-C — before it finished. The mutants that did finish are in the
   /// journal, when there is one, and a run started again with it runs only
   /// the rest.
-  stopped('stopped');
+  stopped('stopped'),
+
+  /// A lane waited longer than `--slot-wait` for a test slot, which
+  /// another run held. Nothing is scored; the reason says who held them.
+  slotWaitTimeout('slot-wait-timeout');
 
   const AbortKind(this.wireName);
 

@@ -747,7 +747,11 @@ of memory. So dart_mutants takes its slots from
 [`test_queue`](../test_queue), the same ones `test_queue run` takes:
 
 - each lane holds a slot only while it compiles or runs a test file, and
-  waits for a free one before it does; it never fails for want of one;
+  waits for a free one before it does, for at most `--slot-wait` seconds
+  (30 minutes by default). A wait that runs out stops the run as
+  `slot-wait-timeout`, scoring nothing, and the reason lists who held the
+  slots. There is no waiting forever: a slot held for good would otherwise
+  hang the run where nobody sees it;
 - the baseline, or the asset build, holds one slot for as long as it runs;
 - a paused run gives its slots back, and takes them again on resume;
 - a run gives its slots back when it ends, aborts or is stopped, and a run
@@ -898,8 +902,10 @@ real CLI binary, not just the internal report types:
   switched files; found before the baseline, nothing run),
   `switched-run-failed` (a test file didn't compile or pass unmutated in the
   switched run — without `--select-by-coverage`, though the test command
-  passed with it)
-  or `stopped` (`dart_mutants stop`, `SIGTERM` or Ctrl-C ended it).
+  passed with it),
+  `stopped` (`dart_mutants stop`, `SIGTERM` or Ctrl-C ended it)
+  or `slot-wait-timeout` (a worker waited longer than `--slot-wait` for a
+  test slot).
   Branch on that, never on `abortReason`, whose wording is for people and is
   free to change. The kinds call for opposite responses — a red suite needs
   fixing, a slow one needs a bigger `--baseline-timeout`, a rejected file

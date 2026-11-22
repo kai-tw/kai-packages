@@ -8,6 +8,7 @@ import 'compile_check.dart';
 import 'mutant_result.dart';
 import 'mutant_verdict.dart';
 import 'run_control.dart';
+import 'slot_wait_exception.dart';
 import 'switched_file.dart';
 import 'switched_job.dart';
 import 'switched_stats.dart';
@@ -182,6 +183,9 @@ class SwitchedRunner {
   /// Why the run cannot be trusted, once a lane finds out — see [_fail].
   String? _failure;
 
+  /// The wait for a slot that ran out, when one did.
+  SlotWaitException? _slotWait;
+
   bool get _stopped => _failure != null || (shouldStop?.call() ?? false);
 
   /// Whether a test file or a mutant compiled alone is still unclaimed.
@@ -193,7 +197,8 @@ class SwitchedRunner {
       <Completer<void>, bool Function()>{};
 
   /// Runs [jobs]: `null` when each got a result or [shouldStop] ended the
-  /// run, otherwise why the run stopped.
+  /// run, otherwise why the run stopped. Throws a [SlotWaitException] when a
+  /// lane waited too long for a slot.
   Future<String?> run(List<SwitchedJob> jobs) async {
     if (jobs.isEmpty) {
       return null;
@@ -219,6 +224,9 @@ class SwitchedRunner {
       await Future.wait(<Future<void>>[for (final _Lane l in lanes) _drain(l)]);
     } finally {
       await _closeLanes(lanes);
+    }
+    if (_slotWait case final SlotWaitException timedOut) {
+      throw timedOut;
     }
     return _outcome(jobs);
   }
@@ -599,7 +607,7 @@ class SwitchedRunner {
       _slotWaits[giveUp] = giveUpWhen;
       _waitingForSlot += 1;
       _reportSlotWait();
-      final TestSlot? slot = await shared.acquire(until: giveUp.future);
+      final TestSlot? slot = await _acquire(shared, giveUp.future);
       _slotWaits.remove(giveUp);
       _waitingForSlot -= 1;
       if (slot == null) {
@@ -613,6 +621,19 @@ class SwitchedRunner {
       await _waitOutPause(lane);
     }
     return true;
+  }
+
+  /// A slot from [shared], or `null` when [giveUp] came first or the wait
+  /// ran out. A wait that ran out fails the run, and [run] throws it once
+  /// every lane is closed.
+  Future<TestSlot?> _acquire(TestSlots shared, Future<void> giveUp) async {
+    try {
+      return await shared.acquire(until: giveUp);
+    } on SlotWaitException catch (e) {
+      _slotWait ??= e;
+      _fail(e.message);
+      return null;
+    }
   }
 
   /// Ends each wait for a slot whose condition now holds. Called wherever

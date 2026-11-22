@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:dart_mutants/src/runner/slot_wait_exception.dart';
 import 'package:dart_mutants/src/runner/test_slot.dart';
 import 'package:dart_mutants/src/runner/test_slots.dart';
 import 'package:path/path.dart' as p;
@@ -144,6 +145,45 @@ void main() {
     },
   );
 
+  test(
+    '[S5] a wait that runs out stops with who held the slots',
+    () async {
+      final (Process holder, String first) = await startHolder();
+      expect(first, 'locked');
+      final TestSlots slots = TestSlots(
+        slotDir,
+        1,
+        maxWait: const Duration(milliseconds: 300),
+      );
+
+      SlotWaitException? failure;
+      try {
+        await slots.acquire().timeout(const Duration(seconds: 3));
+      } on SlotWaitException catch (e) {
+        failure = e;
+      }
+
+      // The holder above writes no holder file, so it can't be named.
+      expect(failure?.holders, <String>['slot-0  (holder not readable)']);
+      holder.kill(ProcessSignal.sigkill);
+    },
+  );
+
+  test('[S5] the message lists each holder, or says none was seen', () {
+    const SlotWaitException named = SlotWaitException(
+      Duration(seconds: 3),
+      <String>['slot-0  other-run  pid 4242  0m03s  flutter test'],
+    );
+    const SlotWaitException unnamed = SlotWaitException(
+      Duration(seconds: 1),
+      <String>[],
+    );
+
+    expect(named.message, startsWith('no test slot came free in 3s'));
+    expect(named.message, contains('\n  slot-0  other-run  pid 4242'));
+    expect(unnamed.message, contains('nothing this run could see held them'));
+  });
+
   group('[S5] inside a test_queue run', () {
     test('hands out only the slots the parent holds', () async {
       final TestSlots slots = TestSlots.inherited(slotDir, <int>[3, 5]);
@@ -166,6 +206,21 @@ void main() {
       expect(
         (await waiting.timeout(const Duration(seconds: 1)))?.number,
         0,
+      );
+    });
+
+    test('a lane gives up once --slot-wait runs out', () async {
+      final TestSlots slots = TestSlots.inherited(
+        slotDir,
+        <int>[0],
+        maxWait: const Duration(milliseconds: 200),
+      );
+      final TestSlot held = (await slots.acquire())!;
+      addTearDown(held.release);
+
+      await expectLater(
+        slots.acquire().timeout(const Duration(seconds: 2)),
+        throwsA(isA<SlotWaitException>()),
       );
     });
 

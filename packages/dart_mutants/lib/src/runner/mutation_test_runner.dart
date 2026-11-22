@@ -29,6 +29,7 @@ import 'run_journal.dart';
 import 'run_plan.dart';
 import 'run_signal_handler.dart';
 import 'run_stats.dart';
+import 'slot_wait_exception.dart';
 import 'switched_job.dart';
 import 'switched_runner.dart';
 import 'switched_stats.dart';
@@ -336,7 +337,23 @@ class MutationTestRunner {
   /// a broken target no test imports passes the baseline and ends up here.
   /// A file with no mutants isn't checked at all: there is nothing of it to
   /// judge, so nothing a wrong answer could cost.
+  ///
+  /// A lane that waits longer than [TestSlots.maxWait] for a slot ends the
+  /// run as [AbortKind.slotWaitTimeout], scoring nothing.
   Future<MutationRunReport> run(List<String> filePaths) async {
+    try {
+      return await _run(filePaths);
+    } on SlotWaitException catch (e) {
+      return MutationRunReport.aborted(
+        stats: await _finished(_stats),
+        AbortKind.slotWaitTimeout,
+        '${e.message}\nNothing was scored. Raise --slot-wait, or wait for '
+        'the holders above to finish.',
+      );
+    }
+  }
+
+  Future<MutationRunReport> _run(List<String> filePaths) async {
     final List<String> targets = filePaths
         .where((String path) => !isGeneratedFile(path))
         .toList();

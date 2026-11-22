@@ -35,7 +35,9 @@ Future<void> main(List<String> arguments) async {
   }
   final TestSlots slots;
   try {
-    slots = await TestSlots.fromEnvironment();
+    slots = await TestSlots.fromEnvironment(
+      maxWait: Duration(seconds: int.parse(args['slot-wait'] as String)),
+    );
   } on FormatException catch (e) {
     stderr.writeln('dart_mutants: ${e.message}, not "${e.source}".');
     exitCode = 64; // EX_USAGE
@@ -434,6 +436,15 @@ ArgParser _buildParser() {
           'not count against it.',
     )
     ..addOption(
+      'slot-wait',
+      valueHelp: 'seconds',
+      defaultsTo: '${TestSlots.defaultMaxWait.inSeconds}',
+      help:
+          'How long one worker waits for a test slot before the run stops '
+          'without scoring anything, naming who held the slots. There is no '
+          'waiting forever.',
+    )
+    ..addOption(
       'output',
       abbr: 'o',
       valueHelp: 'path',
@@ -562,6 +573,7 @@ String? _optionError(ArgResults args) =>
     _reviewOptionError(args) ??
     _timeoutOptionError(args) ??
     _maxMinutesOptionError(args) ??
+    _slotWaitOptionError(args) ??
     _outputOptionError(args) ??
     _workersOptionError(args) ??
     _perLineOptionError(args) ??
@@ -653,6 +665,14 @@ String? _maxMinutesOptionError(ArgResults args) {
   final String? maxMinutes = args['max-minutes'] as String?;
   return maxMinutes != null && !_isPositiveNumber(maxMinutes)
       ? '--max-minutes must be a positive number of minutes'
+      : null;
+}
+
+/// What is wrong with --slot-wait, or `null`.
+String? _slotWaitOptionError(ArgResults args) {
+  final int? seconds = int.tryParse(args['slot-wait'] as String);
+  return seconds == null || seconds < 0
+      ? '--slot-wait must be a whole number of seconds, 0 or more'
       : null;
 }
 
