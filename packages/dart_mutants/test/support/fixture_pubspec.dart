@@ -19,8 +19,17 @@ final String dartMutantsRoot = p.dirname(
 /// A fixture package's `dev_dependencies` entry for dart_mutants: a switched
 /// run compiles test entries that import `package:dart_mutants`, so a
 /// package it runs in has to resolve it, as a real consumer does.
+///
+/// It ends the `pubspec.yaml`, because it also overrides test_toolkit to the
+/// working tree next to this package. dart_mutants names test_toolkit by
+/// git tag, and a fixture should run against the test_toolkit beside it,
+/// not the last one tagged, which doesn't exist yet when both change in one
+/// commit.
 String get dartMutantsDevDependency =>
-    '  dart_mutants:\n    path: $dartMutantsRoot\n';
+    '  dart_mutants:\n    path: $dartMutantsRoot\n'
+    'dependency_overrides:\n'
+    '  test_toolkit:\n'
+    '    path: ${p.join(p.dirname(dartMutantsRoot), 'test_toolkit')}\n';
 
 /// A plain Dart fixture's `pubspec.yaml`, named [name].
 String dartFixturePubspec(String name) =>
@@ -37,8 +46,8 @@ $dartMutantsDevDependency''';
 /// the network. Set by [useHermeticVersionCheck].
 Map<String, String> get cliEnvironment => <String, String>{
   'XDG_CACHE_HOME': _cache!.path,
-  // A run under test is not inside the `test_queue run` that may be running
-  // this suite, and must take slots of its own.
+  // A run under test takes slots of its own, even when this suite runs
+  // under a parent that holds some.
   'TEST_QUEUE_HELD': '',
 };
 

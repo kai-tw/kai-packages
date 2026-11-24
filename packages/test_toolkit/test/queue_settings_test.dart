@@ -1,6 +1,6 @@
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
-import 'package:test_queue/test_queue.dart';
+import 'package:test_toolkit/test_toolkit.dart';
 
 const int _gb = 1024 * 1024 * 1024;
 

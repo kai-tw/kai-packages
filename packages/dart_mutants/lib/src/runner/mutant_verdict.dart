@@ -18,6 +18,19 @@ enum MutantVerdict {
   /// there is no basis to call it a survivor.
   timeout,
 
+  /// A process running the test command went over `--max-memory` and was
+  /// killed. Excluded from the score, for the reason [timeout] is: from
+  /// outside, two causes look the same. A mutant that deletes a
+  /// `controller.close()` leaks until it is killed, and no test noticed,
+  /// which is a gap. A mutant that turns a loop infinite while it allocates
+  /// never reaches an assertion at all. Neither ran to a real verdict.
+  ///
+  /// Listed in the report all the same, so it isn't lost: when the cause is
+  /// a release a test never checked, the fix is a test that checks it (for
+  /// a Flutter object, `leak_tracker` turns a missing `dispose()` into a
+  /// failing test), and then the mutant is [detected] before memory grows.
+  overMemory,
+
   /// It compiles, and it changes nothing but a call to a declaration marked
   /// `@pragma('dart_mutants:diagnostic')` — see `DiagnosticCallCheck`. Never
   /// run, and excluded from the score like [invalid]: the only test that

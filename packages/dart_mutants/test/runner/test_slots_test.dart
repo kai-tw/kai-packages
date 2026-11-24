@@ -7,7 +7,7 @@ import 'package:dart_mutants/src/runner/test_slot.dart';
 import 'package:dart_mutants/src/runner/test_slots.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
-import 'package:test_queue/test_queue.dart';
+import 'package:test_toolkit/test_toolkit.dart';
 
 /// A program that locks `slot-0` in the directory it is given and prints
 /// `locked` when it holds it, or `busy` when someone else does. A holder
@@ -80,6 +80,76 @@ void main() {
   );
 
   test(
+    '[S5] a lane waits behind a process that started waiting first, even '
+    'with a slot free, and takes it once that process is gone',
+    () async {
+      // Takes ticket 0 in the slots' line, the way test_toolkit does, and
+      // holds it until killed.
+      final File waiter = File(p.join(scratch.path, 'waiter.dart'))
+        ..writeAsStringSync('''
+import 'dart:io';
+import 'dart:isolate';
+
+void main(List<String> args) {
+  final Directory queue = Directory(args.single + '/queue')
+    ..createSync(recursive: true);
+  File(queue.path + '/next').writeAsStringSync('1\\n');
+  final RandomAccessFile ticket = File(queue.path + '/ticket-0')
+      .openSync(mode: FileMode.write);
+  ticket.lockSync(FileLock.exclusive);
+  print('waiting');
+  RawReceivePort();
+}
+''');
+      final Process other = await Process.start('dart', <String>[
+        waiter.path,
+        slotDir.path,
+      ]);
+      addTearDown(() => other.kill(ProcessSignal.sigkill));
+      expect(
+        await other.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .first,
+        'waiting',
+      );
+      final TestSlots slots = TestSlots(slotDir, 1);
+      expect(slots.free(), 1);
+
+      final Completer<void> giveUp = Completer<void>();
+      final Future<TestSlot?> jumped = slots.acquire(until: giveUp.future);
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      giveUp.complete();
+      expect(await jumped, isNull);
+
+      other.kill(ProcessSignal.sigkill);
+      await other.exitCode;
+      final TestSlot slot = (await slots.acquire().timeout(
+        const Duration(seconds: 6),
+      ))!;
+      expect(slot.number, 0);
+      slot.release();
+    },
+  );
+
+  test(
+    "[S5] a slot tells the test process it's held for that it holds one, so "
+    "the process's prepareTestProcess() doesn't wait for another",
+    () async {
+      final TestSlots slots = TestSlots(slotDir, 2);
+      final TestSlot first = (await slots.acquire())!;
+      final TestSlot second = (await slots.acquire())!;
+
+      expect(first.childEnvironment, <String, String>{'TEST_QUEUE_HELD': '0'});
+      expect(second.childEnvironment, <String, String>{
+        'TEST_QUEUE_HELD': '1',
+      });
+      first.release();
+      second.release();
+    },
+  );
+
+  test(
     '[S5] a wait for a slot that is given up on ends with no slot, and takes '
     'none when one frees later',
     () async {
@@ -129,7 +199,7 @@ void main() {
   );
 
   test(
-    '[S5] a lane\'s slot names its holder, for `test_queue status`',
+    '[S5] a lane\'s slot names its holder',
     () async {
       final TestSlots slots = TestSlots(slotDir, 1);
       final TestSlot slot = (await slots.acquire())!;
@@ -184,7 +254,7 @@ void main() {
     expect(unnamed.message, contains('nothing this run could see held them'));
   });
 
-  group('[S5] inside a test_queue run', () {
+  group('[S5] under a parent that holds the slots', () {
     test('hands out only the slots the parent holds', () async {
       final TestSlots slots = TestSlots.inherited(slotDir, <int>[3, 5]);
 

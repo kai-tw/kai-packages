@@ -7,6 +7,7 @@ import '../mutant.dart';
 import 'compile_check.dart';
 import 'mutant_result.dart';
 import 'mutant_verdict.dart';
+import 'process_command.dart';
 import 'run_control.dart';
 import 'slot_wait_exception.dart';
 import 'switched_file.dart';
@@ -67,6 +68,7 @@ class SwitchedRunner {
     this.workers = 1,
     this.arguments = const <String>[],
     this.testTimeout,
+    this.maxResidentBytes,
     this.shouldStop,
     this.selectByReach = false,
   });
@@ -98,6 +100,11 @@ class SwitchedRunner {
   /// fails; `null` leaves it to the test's own timeout. See
   /// `runSwitchedSuite`.
   final Duration? testTimeout;
+
+  /// The most memory one process running a test file may use, in bytes,
+  /// before its tree is killed; `null` for no limit. See
+  /// `ProcessCommand.run`.
+  final int? maxResidentBytes;
 
   /// How long one test file's compile, or its unmutated run, may take.
   final Duration testFileTimeout;
@@ -411,7 +418,12 @@ class SwitchedRunner {
       }
       final int? exitCode = await _timed(
         job,
-        () => lane.run(toolchain, job.id, budget),
+        () => lane.run(
+          toolchain,
+          job.id,
+          budget,
+          maxResidentBytes: maxResidentBytes,
+        ),
       );
       _settle(job, file, exitCode, budget, lane.id);
     }
@@ -468,15 +480,18 @@ class SwitchedRunner {
       null,
       testFileTimeout,
       reached: reached?.path,
+      maxResidentBytes: maxResidentBytes,
     );
     final Duration took = clock.elapsed;
     stats.unmutated += took;
     if (exitCode != 0) {
-      _fail(
-        '$file ${exitCode == null ? 'did not finish within '
-                  '${testFileTimeout.inSeconds}s' : 'failed (exit $exitCode)'} '
-        'unmutated in a switched run',
-      );
+      final String what = switch (exitCode) {
+        null => 'did not finish within ${testFileTimeout.inSeconds}s',
+        ProcessCommand.overMemoryLimit =>
+          'went over the --max-memory limit, and was killed,',
+        _ => 'failed (exit $exitCode)',
+      };
+      _fail('$file $what unmutated in a switched run');
       return null;
     }
     if (reached != null) {
@@ -582,7 +597,15 @@ class SwitchedRunner {
         // no longer compiles with the mutant in fails to load under the test
         // command, and a load failure is a failed test.
         final int? exitCode = compiled
-            ? await _timed(job, () => lane.run(toolchain, null, budget))
+            ? await _timed(
+                job,
+                () => lane.run(
+                  toolchain,
+                  null,
+                  budget,
+                  maxResidentBytes: maxResidentBytes,
+                ),
+              )
             : 1;
         _settle(job, test, exitCode, budget, lane.id);
       }
@@ -714,6 +737,7 @@ class SwitchedRunner {
     final Set<String> remaining = _remaining[job.id]!..remove(file);
     final MutantVerdict? verdict = switch (exitCode) {
       null => MutantVerdict.timeout,
+      ProcessCommand.overMemoryLimit => MutantVerdict.overMemory,
       0 => remaining.isEmpty ? MutantVerdict.undetected : null,
       _ => MutantVerdict.detected,
     };
@@ -880,13 +904,15 @@ class _Lane {
   }
 
   /// The last compiled program, run with [mutantId] on — `null` none — for
-  /// at most [timeout]: its exit code, or `null` when it did not finish. It
+  /// at most [timeout] and [maxResidentBytes]: its exit code, `null` when it
+  /// did not finish, or `ProcessCommand.overMemoryLimit`. It
   /// writes the switches it reaches to [reached], when given.
   Future<int?> run(
     SwitchedToolchain toolchain,
     int? mutantId,
     Duration timeout, {
     String? reached,
+    int? maxResidentBytes,
   }) => toolchain
       .command(
         _dill,
@@ -896,5 +922,6 @@ class _Lane {
         mutantId: mutantId,
         reached: reached,
       )
-      .run(timeout: timeout);
+      .withEnvironment(slot?.childEnvironment ?? const <String, String>{})
+      .run(timeout: timeout, maxResidentBytes: maxResidentBytes);
 }

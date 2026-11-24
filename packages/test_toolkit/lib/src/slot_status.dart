@@ -1,6 +1,6 @@
 import 'slot_holder.dart';
 
-/// One slot as `test_queue status` reports it.
+/// One slot, and who holds it.
 class SlotStatus {
   const SlotStatus(this.number, this.holder);
 

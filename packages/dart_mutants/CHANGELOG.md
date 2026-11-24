@@ -1,3 +1,35 @@
+## 0.16.0
+
+**Test slots now come from test_toolkit**, which replaces test_queue. Every
+`flutter test` process whose `flutter_test_config.dart` calls
+`prepareTestProcess()` takes a slot from the same set, so a mutation run and
+ordinary test runs elsewhere count against one budget.
+
+- Each test process a lane starts gets `TEST_QUEUE_HELD` set to the lane's
+  slot, and so do the baseline and the asset build. Its `prepareTestProcess()`
+  then doesn't wait for a second slot. Without it, a run whose lanes held
+  every slot would wait on itself until `--slot-wait` ran out.
+- A lane waiting for a slot now waits its turn: lanes and test processes
+  anywhere on the machine get slots in the order they started waiting.
+  Before, whoever tried first got the slot, so a lane could lose to
+  newcomers until `--slot-wait` ran out.
+- The README no longer mentions `test_queue run` or `test_queue status`,
+  which are gone.
+
+**`--max-memory <GB>`, 4 by default: a mutant can no longer take the
+machine.** Each run of a test file has its process tree read twice a second,
+and is killed once one process is over the limit. A mutant that deletes a
+`controller.close()` leaks for its whole budget, and one that allocates in a
+loop it can't leave grows by gigabytes a second; before, only the time budget
+stopped either.
+
+- A mutant killed this way is the new verdict `overMemory`. Like `timeout`,
+  it is left out of the score, never reused from a journal, and listed per
+  file in `overMemoryMutants`, with its count in `overMemory`. Adding a
+  verdict and fields isn't a breaking change to the JSON contract.
+- The run's `stats.environment` records `maxMemoryGb`.
+- `0` turns the limit off.
+
 ## 0.15.0
 
 **A worker no longer waits forever for a test slot.** After `--slot-wait`

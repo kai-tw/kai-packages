@@ -200,6 +200,42 @@ void main() {
     );
   });
 
+  test(
+    '[partition] withEnvironment sets its variables on top of the '
+    "command's own, and the child sees them",
+    () async {
+      final Directory out = Directory.systemTemp.createTempSync('dm_env_');
+      addTearDown(() => out.deleteSync(recursive: true));
+      final String file = p.join(out.path, 'env');
+      final ProcessCommand command = ProcessCommand(
+        'sh',
+        <String>['-c', r'echo "$A $B" > "$0"', file],
+        environment: <String, String>{'A': 'own', 'B': 'own'},
+      ).withEnvironment(<String, String>{'B': 'added'});
+
+      expect(await command.run(), 0);
+      expect(File(file).readAsStringSync().trim(), 'own added');
+    },
+  );
+
+  test(
+    '[partition] largestInTreeOf reads the largest process under the root, '
+    'grandchildren included, and nothing outside it',
+    () {
+      const String ps = '''
+  100     1   50000
+  101   100  200000
+  102   101  900000
+  200     1 9000000
+  bad line
+''';
+
+      expect(ProcessCommand.largestInTreeOf(100, ps), 900000 * 1024);
+      expect(ProcessCommand.largestInTreeOf(101, ps), 900000 * 1024);
+      expect(ProcessCommand.largestInTreeOf(300, ps), 0);
+    },
+  );
+
   test('[partition] toString renders the executable and its arguments', () {
     const ProcessCommand command = ProcessCommand('dart', <String>[
       'test',

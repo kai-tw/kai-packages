@@ -40,14 +40,16 @@ class QueueSettings {
   static const String slotsVariable = 'TEST_QUEUE_SLOTS';
   static const String memoryVariable = 'TEST_QUEUE_GB_PER_SLOT';
 
-  /// Set for a command a run starts, so a `test_queue run` inside it runs
-  /// straight through instead of waiting for a slot its own parent holds.
+  /// Set by a tool that holds a slot for each test process it starts, such
+  /// as a mutation tester, so `prepareTestProcess()` in that process doesn't
+  /// wait for a second one. It lists the slot numbers held, such as `0`.
   static const String heldVariable = 'TEST_QUEUE_HELD';
 
   static const int _gigabyte = 1024 * 1024 * 1024;
 
-  /// Enough for one `flutter test` at its peak: the compiler, a few
-  /// `flutter_tester` processes running at once, and the `flutter` tool.
+  /// The free memory a test process needs before it starts. More than one
+  /// `flutter_tester` usually takes, to leave room for the `flutter` tool
+  /// and its compiler, which hold no slot.
   static const int defaultMemoryPerSlot = 3 * _gigabyte;
 
   /// One slot for every 4 GB beyond the first 8, which the system, the

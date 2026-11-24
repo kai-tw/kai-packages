@@ -1,5 +1,5 @@
 import 'package:test/test.dart';
-import 'package:test_queue/test_queue.dart';
+import 'package:test_toolkit/test_toolkit.dart';
 
 void main() {
   final SlotHolder holder = SlotHolder(
