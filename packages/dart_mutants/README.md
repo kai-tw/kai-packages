@@ -753,6 +753,8 @@ takes when its `flutter_test_config.dart` calls `prepareTestProcess()`:
   `slot-wait-timeout`, scoring nothing, and the reason lists who held the
   slots. There is no waiting forever: a slot held for good would otherwise
   hang the run where nobody sees it;
+- waiting lanes get slots in the order they started waiting, behind any
+  `flutter test` process or other run on the machine that started first;
 - the baseline, or the asset build, holds one slot for as long as it runs;
 - a test process a lane starts is told the lane's slot is held for it
   (`TEST_QUEUE_HELD`), so its `prepareTestProcess()` doesn't wait for a second

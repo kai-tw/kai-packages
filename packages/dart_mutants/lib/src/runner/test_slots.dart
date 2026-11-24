@@ -24,6 +24,7 @@ class TestSlots {
   /// [count] slots in [directory], locked the way test_toolkit locks them.
   TestSlots(this.directory, this.count, {this.maxWait = defaultMaxWait})
     : _pool = SlotPool(directory, count),
+      _tickets = TicketQueue.forSlotsIn(directory),
       _lendable = const <int>[];
 
   /// The slots [numbers], which a parent process already holds.
@@ -33,6 +34,7 @@ class TestSlots {
     this.maxWait = defaultMaxWait,
   }) : count = numbers.length,
        _pool = null,
+       _tickets = null,
        _lendable = numbers {
     if (numbers.isEmpty) {
       throw ArgumentError.value(numbers, 'numbers', 'must name a slot');
@@ -100,6 +102,11 @@ class TestSlots {
   /// The slots, or `null` when a parent holds them.
   final SlotPool? _pool;
 
+  /// The line for [_pool]'s slots, so a lane that started waiting earlier,
+  /// here or in another run, gets a slot first; `null` when a parent holds
+  /// the slots.
+  final TicketQueue? _tickets;
+
   /// The slots a parent holds, by number.
   final List<int> _lendable;
 
@@ -136,7 +143,17 @@ class TestSlots {
   /// [SlotWaitException] once [maxWait] runs out with no slot free.
   Future<TestSlot?> acquire({Future<void>? until}) async {
     directory.createSync(recursive: true);
-    if (_tryAcquire() case final TestSlot slot) {
+    final Ticket? ticket = _tickets?.take();
+    try {
+      return await _acquire(ticket, until);
+    } finally {
+      ticket?.leave();
+    }
+  }
+
+  /// [acquire], once [ticket] holds this wait's place in the line.
+  Future<TestSlot?> _acquire(Ticket? ticket, Future<void>? until) async {
+    if (_tryAcquire(ticket) case final TestSlot slot) {
       return slot;
     }
     final StreamController<void> wake = StreamController<void>();
@@ -167,7 +184,7 @@ class TestSlots {
     try {
       // Tried again once the sources listen, so a slot given back between
       // the first try and now is not waited past.
-      TestSlot? slot = _tryAcquire();
+      TestSlot? slot = _tryAcquire(ticket);
       while (slot == null) {
         if (givenUp) {
           return null;
@@ -176,7 +193,7 @@ class TestSlots {
           throw SlotWaitException(waited.elapsed, _holders());
         }
         await next.moveNext();
-        slot = _tryAcquire();
+        slot = _tryAcquire(ticket);
       }
       return slot;
     } finally {
@@ -186,7 +203,11 @@ class TestSlots {
         await source.cancel();
       }
       await next.cancel();
-      await wake.close();
+      // Not awaited: when the second try above succeeds, nothing ever
+      // listened to [wake], and the future close() returns completes only
+      // once a listener has had its done event. Awaiting it hung the lane
+      // for good, holding its slot and its place in the line.
+      unawaited(wake.close());
     }
   }
 
@@ -200,9 +221,26 @@ class TestSlots {
     }
   }
 
-  /// The first free slot, now held, or `null` when every one is taken.
-  TestSlot? _tryAcquire() {
+  /// Whether lanes and runs that started waiting before [ticket], and are
+  /// still waiting, need every free slot. Never for a wait with no ticket:
+  /// slots a parent holds have no line.
+  bool _isBehindOthers(Ticket? ticket) {
+    final TicketQueue? tickets = _tickets;
+    if (ticket == null || tickets == null) {
+      return false;
+    }
+    final int ahead = tickets.waitingAhead(ticket);
+    return ahead > 0 && ahead >= free();
+  }
+
+  /// The first free slot, now held, or `null` when every one is taken, or
+  /// when the lanes and runs that started waiting before [ticket] still
+  /// need every free one.
+  TestSlot? _tryAcquire(Ticket? ticket) {
     if (_pool case final SlotPool pool) {
+      if (_isBehindOthers(ticket)) {
+        return null;
+      }
       final HeldSlots? held = pool.tryAcquire(1, _holder());
       if (held == null) {
         return null;

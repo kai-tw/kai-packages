@@ -20,3 +20,5 @@ export 'src/slot_pool.dart';
 export 'src/slot_status.dart';
 export 'src/slot_timeout_exception.dart';
 export 'src/test_queue.dart';
+export 'src/ticket.dart';
+export 'src/ticket_queue.dart';

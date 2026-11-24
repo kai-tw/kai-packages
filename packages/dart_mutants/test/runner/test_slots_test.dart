@@ -80,6 +80,59 @@ void main() {
   );
 
   test(
+    '[S5] a lane waits behind a process that started waiting first, even '
+    'with a slot free, and takes it once that process is gone',
+    () async {
+      // Takes ticket 0 in the slots' line, the way test_toolkit does, and
+      // holds it until killed.
+      final File waiter = File(p.join(scratch.path, 'waiter.dart'))
+        ..writeAsStringSync('''
+import 'dart:io';
+import 'dart:isolate';
+
+void main(List<String> args) {
+  final Directory queue = Directory(args.single + '/queue')
+    ..createSync(recursive: true);
+  File(queue.path + '/next').writeAsStringSync('1\\n');
+  final RandomAccessFile ticket = File(queue.path + '/ticket-0')
+      .openSync(mode: FileMode.write);
+  ticket.lockSync(FileLock.exclusive);
+  print('waiting');
+  RawReceivePort();
+}
+''');
+      final Process other = await Process.start('dart', <String>[
+        waiter.path,
+        slotDir.path,
+      ]);
+      addTearDown(() => other.kill(ProcessSignal.sigkill));
+      expect(
+        await other.stdout
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())
+            .first,
+        'waiting',
+      );
+      final TestSlots slots = TestSlots(slotDir, 1);
+      expect(slots.free(), 1);
+
+      final Completer<void> giveUp = Completer<void>();
+      final Future<TestSlot?> jumped = slots.acquire(until: giveUp.future);
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      giveUp.complete();
+      expect(await jumped, isNull);
+
+      other.kill(ProcessSignal.sigkill);
+      await other.exitCode;
+      final TestSlot slot = (await slots.acquire().timeout(
+        const Duration(seconds: 6),
+      ))!;
+      expect(slot.number, 0);
+      slot.release();
+    },
+  );
+
+  test(
     "[S5] a slot tells the test process it's held for that it holds one, so "
     "the process's prepareTestProcess() doesn't wait for another",
     () async {

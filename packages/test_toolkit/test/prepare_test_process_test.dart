@@ -100,4 +100,28 @@ void main() {
     expect(err, contains('for a test slot and none came free'));
     expect(err, contains('slot-0  parent  pid ${holder.pid}'));
   });
+
+  test(
+    'hands a freed slot to the process that started waiting first',
+    () async {
+      Future<FixtureProcess> start(String holdMilliseconds) =>
+          FixtureProcess.start('prepare_test_process', <String>[
+            holdMilliseconds,
+            '60',
+          ], slots: slots.path);
+
+      final FixtureProcess holder = await start('3000');
+      await holder.line('prepared');
+      final FixtureProcess earlier = await start('3000');
+      await earlier.line('waiting for 1 of 1 slots');
+      final FixtureProcess later = await start('0');
+      await later.line('behind 1 test process that started waiting first');
+
+      await earlier.line('prepared');
+
+      expect(later.stdoutLines, isNot(contains('prepared')));
+      expect(await earlier.process.exitCode, 0);
+      await later.line('prepared');
+    },
+  );
 }

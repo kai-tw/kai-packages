@@ -57,13 +57,22 @@ once. Two things fill the machine's memory:
    tools, their compilers and development services that this user owns and
    whose parent is gone. Killing `flutter test` outright leaves its testers
    running, and nothing else ever stops them.
-3. **Waits for free memory**, 3 GB by default, read from `vm_stat` on macOS
+3. **Takes a number and waits its turn.** Test processes get slots in the
+   order they started waiting, first come, first served. A process may try
+   for a slot only while fewer processes ahead of it are still waiting than
+   there are free slots, so a newcomer never takes a slot from one that has
+   waited longer, and nobody waits forever behind a stream of newcomers. A
+   process that dies while waiting drops out of the line on its own:
+   its number is a file it keeps locked, and the next process to look deletes
+   a number nobody holds.
+4. **Waits for free memory**, 3 GB by default, read from `vm_stat` on macOS
    and `MemAvailable` on Linux. This covers what the slots can't see, like an
    Xcode build or a browser.
-4. **Waits for a slot**, for at most `slotWait` (30 minutes by default).
-   While it waits, it says who holds the slots:
+5. **Waits for a slot**, for at most `slotWait` (30 minutes by default, for
+   steps 3 to 5 together). While it waits, it says why:
 
    ```
+   Shell: test_toolkit: waiting for a slot, behind 3 test processes that started waiting first
    Shell: test_toolkit: waiting for 1 of 6 slots; holding now:
    Shell:   slot-0  app  pid 4121  0m12s  flutter test (one test file)
    ```
@@ -77,7 +86,7 @@ tests, and `flutter test` runs them after it returns, so there's no earlier
 point to give it back. A slot is a file locked with the operating system's own
 lock, which goes away with the process however it ends, `SIGKILL` included.
 
-A process whose parent already holds a slot for it skips steps 2 to 4:
+A process whose parent already holds a slot for it skips steps 2 to 5:
 `$TEST_QUEUE_HELD` lists the slots held. `dart_mutants` sets it for each test
 process it starts, since it takes a slot for each one itself.
 
@@ -100,11 +109,13 @@ every process at its limit, the tests still fit.
 - **`flutter test` only.** `dart test` doesn't read `flutter_test_config.dart`,
   and an `integration_test` on a device runs in the app's process.
 - **The `flutter` tool and its compiler hold no slot.** They take 1 to 2 GB
-  per `flutter test`, which step 3 leaves room for.
+  per `flutter test`, which step 4 leaves room for.
 - **Waiting testers still exist.** `flutter test -j 8` starts eight testers;
   the ones waiting for a slot hold a little memory each, a few hundred MB at
   most, while they wait.
-- **macOS and Linux only.** It reads the process table with `ps`.
+- **macOS and Linux only.** On Windows only the memory limit works: it can't
+  read the free memory or the process table, and with no `$HOME` the slots
+  would land in each project's own directory instead of one for the machine.
 
 ## As a library
 

@@ -9,6 +9,10 @@ ordinary test runs elsewhere count against one budget.
   slot, and so do the baseline and the asset build. Its `prepareTestProcess()`
   then doesn't wait for a second slot. Without it, a run whose lanes held
   every slot would wait on itself until `--slot-wait` ran out.
+- A lane waiting for a slot now waits its turn: lanes and test processes
+  anywhere on the machine get slots in the order they started waiting.
+  Before, whoever tried first got the slot, so a lane could lose to
+  newcomers until `--slot-wait` ran out.
 - The README no longer mentions `test_queue run` or `test_queue status`,
   which are gone.
 
