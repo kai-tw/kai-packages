@@ -1,3 +1,40 @@
+## 0.9.0
+
+New rule: `require_test_memory_limit` (flutter bundle, on by default).
+
+Every `*_test.dart` under a package's `test/` directory that imports
+`package:flutter_test` has to be covered by a `flutter_test_config.dart` whose
+`testExecutable` calls `limitMemory()` from `package:test_memory_limit`. That
+kills a `flutter_tester` that keeps allocating instead of letting it fill the
+machine's memory.
+
+The config that counts is the one `flutter test` itself would use: the
+nearest one at or above the test file, up to the package root. A nearer config
+without the call hides one further up that has it, and the rule reports that.
+
+It leaves alone `integration_test/` (runs on a device), tests that import only
+`package:test` (`dart test` never reads the config), and files that don't end
+in `_test.dart`.
+
+A project on the `flutter` bundle gets the rule when it moves to 0.9.0, and
+every Flutter test file reports until the package has a config. To adopt it:
+
+1. Add `test_memory_limit` as a dev dependency.
+2. Add `test/flutter_test_config.dart`:
+
+   ```dart
+   import 'dart:async';
+
+   import 'package:test_memory_limit/test_memory_limit.dart';
+
+   Future<void> testExecutable(FutureOr<void> Function() testMain) async {
+     await limitMemory();
+     await testMain();
+   }
+   ```
+
+Or list the rule under an area's `disable:` until then.
+
 ## 0.8.0
 
 New rule: `bool_getter_naming` (core bundle, on by default).

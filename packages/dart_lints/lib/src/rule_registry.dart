@@ -48,6 +48,7 @@ import 'rules/flutter/avoid_listenable_mock.dart';
 import 'rules/flutter/avoid_media_query_of.dart';
 import 'rules/flutter/avoid_redundant_pop_callback.dart';
 import 'rules/flutter/avoid_reserved_widget_suffix.dart';
+import 'rules/flutter/require_test_memory_limit.dart';
 import 'rules/getit/avoid_get_it_dependency_cycle.dart';
 import 'rules/getit/restrict_sl_scope.dart';
 import 'rules/log_system/avoid_unsafe_log_interpolation.dart';
@@ -344,6 +345,11 @@ class RuleRegistry {
         reservedSuffixes: o['reservedSuffixes'] as List<Map<String, Object?>>?,
         widgetSupertypes: o['widgetSupertypes'] as List<String>?,
       ),
+    ),
+    RuleDescriptor(
+      name: 'require_test_memory_limit',
+      bundle: 'flutter',
+      create: (Map<String, Object?> o) => RequireTestMemoryLimit(),
     ),
     RuleDescriptor(
       name: 'avoid_freezed_in_domain',
