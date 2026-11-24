@@ -75,16 +75,7 @@ public final class KeychainPlugin: NSObject, FlutterPlugin {
     let operation: () -> Any?
     switch call.method {
     case "create": operation = { self.create(keyId) }
-    case "store":
-      // Dart checks the length; checked again so a drifted caller can never
-      // store a key that `read` would then call unusable.
-      guard let material = args["material"] as? FlutterStandardTypedData,
-            material.data.count == keyByteCount else {
-        result(FlutterError(code: "badArgs", message: "material is required", details: nil))
-        return
-      }
-      let data = material.data
-      operation = { self.store(keyId, data) }
+    case "store": operation = { self.store(keyId, args["material"]) }
     case "read": operation = { self.read(keyId) }
     case "exists": operation = { self.exists(keyId) }
     case "delete": operation = { self.delete(keyId) }
@@ -121,8 +112,14 @@ public final class KeychainPlugin: NSObject, FlutterPlugin {
 
   /// Key material made elsewhere, kept by the same atomic `SecItemAdd` and
   /// the same item class as a key `create` made.
-  private func store(_ keyId: String, _ material: Data) -> Any? {
-    return add(keyId, material)
+  private func store(_ keyId: String, _ material: Any?) -> Any? {
+    // Dart checks the length; checked again so a drifted caller can never
+    // store a key that `read` would then call unusable.
+    guard let material = material as? FlutterStandardTypedData,
+          material.data.count == keyByteCount else {
+      return FlutterError(code: "badArgs", message: "material is required", details: nil)
+    }
+    return add(keyId, material.data)
   }
 
   private func add(_ keyId: String, _ material: Data) -> Any? {

@@ -84,18 +84,7 @@ class KeychainPlugin : FlutterPlugin {
             }
             val operation: () -> Any? = when (call.method) {
                 "create" -> { -> create(keyId) }
-                "store" -> {
-                    // Dart checks the length; checked again so a drifted
-                    // caller can never seal a key that `read` would call
-                    // unusable.
-                    val material = call.argument<ByteArray>("material")
-                    if (material == null || material.size != KEY_BYTE_COUNT) {
-                        result.error("badArgs", "material is required", null)
-                        return@setMethodCallHandler
-                    }
-                    val storeMaterial: () -> Any? = { store(keyId, material) }
-                    storeMaterial
-                }
+                "store" -> { -> store(keyId, call.argument<ByteArray>("material")) }
                 "read" -> { -> read(keyId) }
                 "exists" -> { -> exists(keyId) }
                 "delete" -> { -> delete(keyId) }
@@ -154,7 +143,12 @@ class KeychainPlugin : FlutterPlugin {
 
     /** Key material made elsewhere (a cloud KMS data key, say), sealed and
      *  kept exactly like a secret [create] drew, under the same check. */
-    private fun store(keyId: String, material: ByteArray): Any? {
+    private fun store(keyId: String, material: ByteArray?): Any? {
+        // Dart checks the length; checked again so a drifted caller can never
+        // seal a key that `read` would call unusable.
+        if (material == null || material.size != KEY_BYTE_COUNT) {
+            throw KeychainFailure("badArgs")
+        }
         try {
             seal(keyId, material)
         } finally {
