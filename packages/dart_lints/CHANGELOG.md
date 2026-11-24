@@ -1,3 +1,46 @@
+## 0.9.0
+
+New rule: `require_test_process_setup` (flutter bundle, on by default).
+
+Every `*_test.dart` under a package's `test/` directory that imports
+`package:flutter_test` has to be covered by a `flutter_test_config.dart` whose
+`testExecutable` calls `prepareTestProcess()` from `package:test_toolkit`. That
+kills a `flutter_tester` that goes over its memory limit, and makes each test
+process wait for one of the machine's shared slots, so test runs together
+can't fill the machine's memory.
+
+The config that counts is the one `flutter test` itself would use: the
+nearest one at or above the test file, up to the package root. A nearer config
+without the call hides one further up that has it, and the rule reports that.
+
+It leaves alone `integration_test/` (runs on a device), tests that import only
+`package:test` (`dart test` never reads the config), and files that don't end
+in `_test.dart`.
+
+A project on the `flutter` bundle gets the rule when it moves to 0.9.0, and
+every Flutter test file reports until the package has a config. To adopt it:
+
+1. Add `test_toolkit` as a dev dependency.
+2. Add `test/flutter_test_config.dart`:
+
+   ```dart
+   import 'dart:async';
+
+   import 'package:test_toolkit/test_toolkit.dart';
+
+   Future<void> testExecutable(FutureOr<void> Function() testMain) async {
+     await prepareTestProcess();
+     await testMain();
+   }
+   ```
+
+Or list the rule under an area's `disable:` until then.
+
+`bool_getter_naming` also accepts `was` (`wasSent`, `wasCancelled`), for a
+question about something that already happened. A project that set its own
+`prefixes` keeps its list. A getter named `wasX` that doesn't return a
+boolean is now reported, as `isX` already was.
+
 ## 0.8.0
 
 New rule: `bool_getter_naming` (core bundle, on by default).
