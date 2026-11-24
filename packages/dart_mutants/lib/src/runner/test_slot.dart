@@ -12,7 +12,7 @@ class TestSlot {
   void release() => _release();
 
   /// Set for a test process started while holding this slot. The
-  /// `guardTestProcess()` in its `flutter_test_config.dart` then knows the
+  /// `prepareTestProcess()` in its `flutter_test_config.dart` then knows the
   /// slot is held for it, instead of waiting for a second one: with every
   /// slot held by a lane, that wait would never end.
   Map<String, String> get childEnvironment => <String, String>{

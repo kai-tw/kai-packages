@@ -41,7 +41,7 @@ class QueueSettings {
   static const String memoryVariable = 'TEST_QUEUE_GB_PER_SLOT';
 
   /// Set by a tool that holds a slot for each test process it starts, such
-  /// as a mutation tester, so `guardTestProcess()` in that process doesn't
+  /// as a mutation tester, so `prepareTestProcess()` in that process doesn't
   /// wait for a second one. It lists the slot numbers held, such as `0`.
   static const String heldVariable = 'TEST_QUEUE_HELD';
 

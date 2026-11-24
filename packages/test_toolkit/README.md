@@ -16,7 +16,7 @@ import 'dart:async';
 import 'package:test_toolkit/test_toolkit.dart';
 
 Future<void> testExecutable(FutureOr<void> Function() testMain) async {
-  await guardTestProcess();
+  await prepareTestProcess();
   await testMain();
 }
 ```
@@ -33,7 +33,7 @@ dev_dependencies:
 `flutter test` uses only the `flutter_test_config.dart` nearest to each test
 file: one in the file's own directory, or the closest one above it up to the
 package root. So one in `test/` covers every test file, unless a nearer one
-hides it. `dart_lints`' `require_test_process_guard` rule checks that.
+hides it. `dart_lints`' `require_test_process_setup` rule checks that.
 
 ## Why
 
@@ -46,7 +46,7 @@ once. Two things fill the machine's memory:
   sessions, agents or a mutation tester, each start as many testers as they
   like. None of them sees the others.
 
-## What `guardTestProcess()` does
+## What `prepareTestProcess()` does
 
 1. **Starts a memory limit**, 4 GB by default (`maxGigabytes`). It runs in an
    isolate of its own, so a test stuck in a synchronous loop can't stop it.

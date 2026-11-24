@@ -36,7 +36,7 @@ void main() {
   });
 
   test('rejects a limit below 1', () {
-    expect(() => guardTestProcess(maxGigabytes: 0), throwsArgumentError);
+    expect(() => prepareTestProcess(maxGigabytes: 0), throwsArgumentError);
     expect(() => MemoryLimit(maxBytes: 0), throwsArgumentError);
     expect(
       () => MemoryLimit(maxBytes: 1, interval: Duration.zero),

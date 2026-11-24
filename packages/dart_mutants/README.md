@@ -745,7 +745,7 @@ Several runs at once (one per package, one per branch, or a mutation run next
 to an ordinary test run) would each open their own lanes and together run out
 of memory. So dart_mutants takes its slots from
 [`test_toolkit`](../test_toolkit), the same ones every `flutter test` process
-takes when its `flutter_test_config.dart` calls `guardTestProcess()`:
+takes when its `flutter_test_config.dart` calls `prepareTestProcess()`:
 
 - each lane holds a slot only while it compiles or runs a test file, and
   waits for a free one before it does, for at most `--slot-wait` seconds
@@ -755,7 +755,7 @@ takes when its `flutter_test_config.dart` calls `guardTestProcess()`:
   hang the run where nobody sees it;
 - the baseline, or the asset build, holds one slot for as long as it runs;
 - a test process a lane starts is told the lane's slot is held for it
-  (`TEST_QUEUE_HELD`), so its `guardTestProcess()` doesn't wait for a second
+  (`TEST_QUEUE_HELD`), so its `prepareTestProcess()` doesn't wait for a second
   one;
 - a paused run gives its slots back, and takes them again on resume;
 - a run gives its slots back when it ends, aborts or is stopped, and a run

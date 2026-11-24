@@ -81,7 +81,7 @@ void main() {
 
   test(
     "[S5] a slot tells the test process it's held for that it holds one, so "
-    "the process's guardTestProcess() doesn't wait for another",
+    "the process's prepareTestProcess() doesn't wait for another",
     () async {
       final TestSlots slots = TestSlots(slotDir, 2);
       final TestSlot first = (await slots.acquire())!;

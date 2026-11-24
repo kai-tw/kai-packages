@@ -60,7 +60,7 @@ class MemoryLimit {
       stderr.writeln(
         'test_toolkit: this test process is using ${_gb(rss)} GB of memory, '
         'over its ${_gb(maxBytes)} GB limit; killing it. The limit is set by '
-        'guardTestProcess() in flutter_test_config.dart.',
+        'prepareTestProcess() in flutter_test_config.dart.',
       );
       await stderr.flush().timeout(
         const Duration(seconds: 1),

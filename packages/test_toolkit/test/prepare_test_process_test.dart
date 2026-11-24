@@ -9,16 +9,20 @@ void main() {
   late Directory slots;
 
   setUp(() {
-    slots = Directory.systemTemp.createTempSync('guard_');
+    slots = Directory.systemTemp.createTempSync('prepare_test_process_');
     addTearDown(() => slots.deleteSync(recursive: true));
   });
 
   test('holds a slot until the process exits', () async {
-    final FixtureProcess first = await FixtureProcess.start('guard', <String>[
-      '60000',
-      '60',
-    ], slots: slots.path);
-    await first.line('guarded');
+    final FixtureProcess first = await FixtureProcess.start(
+      'prepare_test_process',
+      <String>[
+        '60000',
+        '60',
+      ],
+      slots: slots.path,
+    );
+    await first.line('prepared');
 
     final SlotHolder? holder = SlotPool(slots, 1).survey().single.holder;
     expect(holder?.pid, first.pid);
@@ -26,22 +30,30 @@ void main() {
   });
 
   test('waits for a slot, and says who holds it', () async {
-    final FixtureProcess first = await FixtureProcess.start('guard', <String>[
-      '2000',
-      '60',
-    ], slots: slots.path);
-    await first.line('guarded');
+    final FixtureProcess first = await FixtureProcess.start(
+      'prepare_test_process',
+      <String>[
+        '2000',
+        '60',
+      ],
+      slots: slots.path,
+    );
+    await first.line('prepared');
 
-    final FixtureProcess second = await FixtureProcess.start('guard', <String>[
-      '0',
-      '60',
-    ], slots: slots.path);
+    final FixtureProcess second = await FixtureProcess.start(
+      'prepare_test_process',
+      <String>[
+        '0',
+        '60',
+      ],
+      slots: slots.path,
+    );
     await second.line('waiting for 1 of 1 slots');
-    expect(second.stdoutLines, isNot(contains('guarded')));
+    expect(second.stdoutLines, isNot(contains('prepared')));
     expect(second.stderrLines.join('\n'), contains('pid ${first.pid}'));
 
     expect(await first.process.exitCode, 0);
-    await second.line('guarded');
+    await second.line('prepared');
     expect(await second.process.exitCode, 0);
   });
 
@@ -54,14 +66,14 @@ void main() {
     await holder.line('slot 0');
 
     final FixtureProcess child = await FixtureProcess.start(
-      'guard',
+      'prepare_test_process',
       <String>['0', '60'],
       slots: slots.path,
       environment: <String, String>{'TEST_QUEUE_HELD': '0'},
     );
 
     expect(await child.process.exitCode, 0);
-    expect(child.stdoutLines, contains('guarded'));
+    expect(child.stdoutLines, contains('prepared'));
     expect(SlotPool(slots, 1).survey().single.holder?.label, 'parent');
   });
 
@@ -73,13 +85,17 @@ void main() {
     );
     await holder.line('slot 0');
 
-    final FixtureProcess waiter = await FixtureProcess.start('guard', <String>[
-      '0',
-      '1',
-    ], slots: slots.path);
+    final FixtureProcess waiter = await FixtureProcess.start(
+      'prepare_test_process',
+      <String>[
+        '0',
+        '1',
+      ],
+      slots: slots.path,
+    );
 
     expect(await waiter.process.exitCode, isNot(0));
-    expect(waiter.stdoutLines, isNot(contains('guarded')));
+    expect(waiter.stdoutLines, isNot(contains('prepared')));
     final String err = waiter.stderrLines.join('\n');
     expect(err, contains('for a test slot and none came free'));
     expect(err, contains('slot-0  parent  pid ${holder.pid}'));

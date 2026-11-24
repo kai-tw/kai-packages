@@ -3,7 +3,7 @@
 First release, replacing `test_queue`. `flutter test` is now the only way in:
 there's no command of its own.
 
-- `guardTestProcess()`, called from `flutter_test_config.dart`, kills the
+- `prepareTestProcess()`, called from `flutter_test_config.dart`, kills the
   test process once it uses more than 4 GB of memory, kills leftover test
   processes, and waits for one of the machine's shared slots before the
   tests run.
