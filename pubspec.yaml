@@ -19,7 +19,7 @@ workspace:
   - packages/keychain
   - packages/log_system
   - packages/preference_store
-  - packages/test_queue
+  - packages/test_toolkit
   - packages/ui_kit
   - packages/versioned_json
 

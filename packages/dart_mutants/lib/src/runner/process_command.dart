@@ -27,6 +27,14 @@ class ProcessCommand {
   /// Set for the child on top of this process's own environment.
   final Map<String, String> environment;
 
+  /// This command with [extra] set on top of [environment].
+  ProcessCommand withEnvironment(Map<String, String> extra) => ProcessCommand(
+    executable,
+    arguments,
+    workingDirectory: workingDirectory,
+    environment: <String, String>{...environment, ...extra},
+  );
+
   /// Every child started by [run] that has not yet exited.
   ///
   /// Exists so an interrupt can kill them. Sequential execution means this

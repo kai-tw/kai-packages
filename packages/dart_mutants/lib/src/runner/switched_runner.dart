@@ -896,5 +896,6 @@ class _Lane {
         mutantId: mutantId,
         reached: reached,
       )
+      .withEnvironment(slot?.childEnvironment ?? const <String, String>{})
       .run(timeout: timeout);
 }

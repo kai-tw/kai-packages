@@ -721,9 +721,11 @@ class MutationTestRunner {
       return _Baseline(0, recorded, reused: true);
     }
     final Stopwatch clock = Stopwatch();
-    final int? exitCode = await _holdingSlot(() {
+    final int? exitCode = await _holdingSlot((Map<String, String> heldSlot) {
       clock.start();
-      return testCommand.run(timeout: baselineTimeout);
+      return testCommand
+          .withEnvironment(heldSlot)
+          .run(timeout: baselineTimeout);
     });
     final Duration wallTime = clock.elapsed;
     if (exitCode == 0) {
@@ -820,10 +822,11 @@ class MutationTestRunner {
       return null;
     }
     final Stopwatch clock = Stopwatch();
-    final int? exitCode = await _holdingSlot(() {
+    final int? exitCode = await _holdingSlot((Map<String, String> heldSlot) {
       clock.start();
       return switched.invocation
           .withTestFiles(<String>[files.first])
+          .withEnvironment(heldSlot)
           .run(timeout: baselineTimeout);
     });
     stats.assetBuild = clock.elapsed;
@@ -1112,8 +1115,10 @@ class MutationTestRunner {
   /// [run]'s result, run while the run is not paused, holding one of [slots]
   /// when there are any. A pause that comes during the wait for a slot
   /// gives the slot straight back, so a paused run holds none.
+  /// [run] gets the slot's [TestSlot.childEnvironment], so the test
+  /// processes it starts don't wait for a slot of their own.
   Future<TResult> _holdingSlot<TResult>(
-    Future<TResult> Function() run,
+    Future<TResult> Function(Map<String, String> heldSlot) run,
   ) async {
     await _control.resumed;
     TestSlot? slot = await slots?.acquire();
@@ -1123,7 +1128,7 @@ class MutationTestRunner {
       slot = await slots?.acquire();
     }
     try {
-      return await run();
+      return await run(slot?.childEnvironment ?? const <String, String>{});
     } finally {
       slot?.release();
     }

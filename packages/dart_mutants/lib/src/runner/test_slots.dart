@@ -2,31 +2,31 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:path/path.dart' as p;
-import 'package:test_queue/test_queue.dart';
+import 'package:test_toolkit/test_toolkit.dart';
 
 import 'slot_wait_exception.dart';
 import 'test_slot.dart';
 
 /// The machine's test slots, which a run takes one of for each test process
-/// it starts. They are test_queue's, so every caller on the machine counts
-/// against one budget: another dart_mutants run, a `test_queue run`, a CI
-/// job.
+/// it starts. They are test_toolkit's, so every caller on the machine counts
+/// against one budget: another dart_mutants run, a `flutter test` process,
+/// a CI job.
 ///
 /// [SlotPool] does the locking. A slot is a file the operating system locks
 /// for the process that holds it, so a run killed outright gives its slots
 /// back. This class adds the wait: a lane that finds every slot taken waits
 /// until one comes free, or until the caller gives up on it.
 ///
-/// Inside a `test_queue run`, the run's slots are already held by that
-/// command, and `$TEST_QUEUE_HELD` names them. This hands those out instead
-/// of waiting on slots its own parent holds.
+/// When a parent process already holds slots for this run,
+/// `$TEST_QUEUE_HELD` names them. This hands those out instead of waiting
+/// on slots its own parent holds.
 class TestSlots {
-  /// [count] slots in [directory], locked the way test_queue locks them.
+  /// [count] slots in [directory], locked the way test_toolkit locks them.
   TestSlots(this.directory, this.count, {this.maxWait = defaultMaxWait})
     : _pool = SlotPool(directory, count),
       _lendable = const <int>[];
 
-  /// The slots [numbers], which a parent `test_queue run` already holds.
+  /// The slots [numbers], which a parent process already holds.
   TestSlots.inherited(
     this.directory,
     List<int> numbers, {
@@ -39,7 +39,7 @@ class TestSlots {
     }
   }
 
-  /// test_queue's slots, as its settings name them: by default a slot for
+  /// test_toolkit's slots, as its settings name them: by default a slot for
   /// every 4 GB of memory beyond the first 8, in `<cache>/test_queue/slots`.
   ///
   /// Throws a [FormatException] when a `TEST_QUEUE_*` variable is set to
@@ -227,7 +227,7 @@ class TestSlots {
     ];
   }
 
-  /// What `test_queue status` shows for a slot a lane holds.
+  /// What a slot's holder file says while a lane holds it.
   SlotHolder _holder() => SlotHolder(
     pid: pid,
     label: p.basename(Directory.current.path),

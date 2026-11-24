@@ -422,7 +422,7 @@ ArgParser _buildParser() {
           'How many test files run at once. Each worker has its own copy of '
           'the package made of links, a few megabytes, plus its own compiler '
           'and test process; the package itself is never written to. Each '
-          'worker also waits for one of test_queue\'s slots, which every test '
+          'worker also waits for one of test_toolkit\'s slots, which every test '
           'run on this machine shares, before it compiles or runs a test file '
           '(see "Test slots" in the README). `auto` opens one worker per '
           'slot free when the mutants start, and at least one.',

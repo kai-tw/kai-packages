@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:test/test.dart';
-import 'package:test_queue/test_queue.dart';
+import 'package:test_toolkit/test_toolkit.dart';
 
 const String _tester =
     '/home/u/flutter/bin/cache/artifacts/engine/darwin-x64/flutter_tester '

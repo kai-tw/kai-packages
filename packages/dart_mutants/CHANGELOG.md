@@ -1,3 +1,17 @@
+## 0.16.0
+
+**Test slots now come from test_toolkit**, which replaces test_queue. Every
+`flutter test` process whose `flutter_test_config.dart` calls
+`guardTestProcess()` takes a slot from the same set, so a mutation run and
+ordinary test runs elsewhere count against one budget.
+
+- Each test process a lane starts gets `TEST_QUEUE_HELD` set to the lane's
+  slot, and so do the baseline and the asset build. Its `guardTestProcess()`
+  then doesn't wait for a second slot. Without it, a run whose lanes held
+  every slot would wait on itself until `--slot-wait` ran out.
+- The README no longer mentions `test_queue run` or `test_queue status`,
+  which are gone.
+
 ## 0.15.0
 
 **A worker no longer waits forever for a test slot.** After `--slot-wait`

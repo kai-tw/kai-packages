@@ -2,17 +2,17 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
-import 'package:test_queue/test_queue.dart';
+import 'package:test_toolkit/test_toolkit.dart';
 
-import 'support/compiled_cli.dart';
+import 'support/fixture_process.dart';
 
 void main() {
-  late CompiledCli cli;
   late Directory directory;
 
-  setUpAll(() async => cli = await CompiledCli.compile());
-  tearDownAll(() => cli.delete());
-  setUp(() => directory = Directory(cli.slotDirectory()));
+  setUp(() {
+    directory = Directory.systemTemp.createTempSync('slot_pool_');
+    addTearDown(() => directory.deleteSync(recursive: true));
+  });
 
   SlotHolder holder(String label) => SlotHolder(
     pid: pid,
@@ -77,15 +77,16 @@ void main() {
   });
 
   test('sees a slot another process holds, and who holds it', () async {
-    final Process other = await cli.start(<String>[
-      'run',
-      '--label',
-      'other-run',
-      '--',
-      'sleep',
-      '60',
-    ], directory.path);
-    await CompiledCli.stderrLine(other, 'slot 0');
+    final FixtureProcess other = await FixtureProcess.start(
+      'hold_slot',
+      <String>[
+        directory.path,
+        '2',
+        'other-run',
+      ],
+      slots: directory.path,
+    );
+    await other.line('slot 0');
     final SlotPool pool = SlotPool(directory, 2);
 
     expect(pool.survey().first.holder?.label, 'other-run');
@@ -94,18 +95,21 @@ void main() {
   });
 
   test('gets a slot back when its holder is killed outright', () async {
-    final Process other = await cli.start(<String>[
-      'run',
-      '--',
-      'sleep',
-      '3',
-    ], directory.path);
-    await CompiledCli.stderrLine(other, 'slot 0');
+    final FixtureProcess other = await FixtureProcess.start(
+      'hold_slot',
+      <String>[
+        directory.path,
+        '1',
+        'other-run',
+      ],
+      slots: directory.path,
+    );
+    await other.line('slot 0');
     final SlotPool pool = SlotPool(directory, 1);
     expect(pool.tryAcquire(1, holder('a')), isNull);
 
-    other.kill(ProcessSignal.sigkill);
-    await other.exitCode;
+    other.process.kill(ProcessSignal.sigkill);
+    await other.process.exitCode;
 
     expect(pool.tryAcquire(1, holder('a')), isNotNull);
   });

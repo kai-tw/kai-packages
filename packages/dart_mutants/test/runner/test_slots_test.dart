@@ -7,7 +7,7 @@ import 'package:dart_mutants/src/runner/test_slot.dart';
 import 'package:dart_mutants/src/runner/test_slots.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
-import 'package:test_queue/test_queue.dart';
+import 'package:test_toolkit/test_toolkit.dart';
 
 /// A program that locks `slot-0` in the directory it is given and prints
 /// `locked` when it holds it, or `busy` when someone else does. A holder
@@ -80,6 +80,23 @@ void main() {
   );
 
   test(
+    "[S5] a slot tells the test process it's held for that it holds one, so "
+    "the process's guardTestProcess() doesn't wait for another",
+    () async {
+      final TestSlots slots = TestSlots(slotDir, 2);
+      final TestSlot first = (await slots.acquire())!;
+      final TestSlot second = (await slots.acquire())!;
+
+      expect(first.childEnvironment, <String, String>{'TEST_QUEUE_HELD': '0'});
+      expect(second.childEnvironment, <String, String>{
+        'TEST_QUEUE_HELD': '1',
+      });
+      first.release();
+      second.release();
+    },
+  );
+
+  test(
     '[S5] a wait for a slot that is given up on ends with no slot, and takes '
     'none when one frees later',
     () async {
@@ -129,7 +146,7 @@ void main() {
   );
 
   test(
-    '[S5] a lane\'s slot names its holder, for `test_queue status`',
+    '[S5] a lane\'s slot names its holder',
     () async {
       final TestSlots slots = TestSlots(slotDir, 1);
       final TestSlot slot = (await slots.acquire())!;
@@ -184,7 +201,7 @@ void main() {
     expect(unnamed.message, contains('nothing this run could see held them'));
   });
 
-  group('[S5] inside a test_queue run', () {
+  group('[S5] under a parent that holds the slots', () {
     test('hands out only the slots the parent holds', () async {
       final TestSlots slots = TestSlots.inherited(slotDir, <int>[3, 5]);
 

@@ -744,7 +744,8 @@ runs once, in the package, before the lanes start.
 Several runs at once (one per package, one per branch, or a mutation run next
 to an ordinary test run) would each open their own lanes and together run out
 of memory. So dart_mutants takes its slots from
-[`test_queue`](../test_queue), the same ones `test_queue run` takes:
+[`test_toolkit`](../test_toolkit), the same ones every `flutter test` process
+takes when its `flutter_test_config.dart` calls `guardTestProcess()`:
 
 - each lane holds a slot only while it compiles or runs a test file, and
   waits for a free one before it does, for at most `--slot-wait` seconds
@@ -753,6 +754,9 @@ of memory. So dart_mutants takes its slots from
   slots. There is no waiting forever: a slot held for good would otherwise
   hang the run where nobody sees it;
 - the baseline, or the asset build, holds one slot for as long as it runs;
+- a test process a lane starts is told the lane's slot is held for it
+  (`TEST_QUEUE_HELD`), so its `guardTestProcess()` doesn't wait for a second
+  one;
 - a paused run gives its slots back, and takes them again on resume;
 - a run gives its slots back when it ends, aborts or is stopped, and a run
   that is killed outright gives them back too: a slot is a lock the
@@ -765,12 +769,12 @@ nor against the pace `--max-minutes` is judged by.
 least one. A number keeps meaning that many lanes, each still waiting for a
 slot of its own — `--workers 4` with two slots runs two at a time.
 
-test_queue's own variables set them (`TEST_QUEUE_SLOTS` for how many,
-`TEST_QUEUE_DIR` for where); see its README. Run inside `test_queue run
---slots <n>`, a run uses the *n* slots that command already holds instead of
-waiting on them. `test_queue status` shows each lane's slot, and its holder.
+test_toolkit's variables set them (`TEST_QUEUE_SLOTS` for how many,
+`TEST_QUEUE_DIR` for where); see its README. Started with `TEST_QUEUE_HELD`
+naming slots a parent already holds, a run uses those instead of waiting on
+others.
 
-A test process started outside both tools takes no slot.
+A `dart test` process started outside dart_mutants takes no slot.
 
 ## Run statistics
 

@@ -1,7 +1,7 @@
 import 'dart:io';
 
 import 'package:test/test.dart';
-import 'package:test_queue/test_queue.dart';
+import 'package:test_toolkit/test_toolkit.dart';
 
 const String _vmStat = '''
 Mach Virtual Memory Statistics: (page size of 16384 bytes)
