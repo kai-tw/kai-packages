@@ -215,8 +215,11 @@ jobs:
       - run: flutter build ios --no-codesign --debug
         working-directory: packages/connectivity_status/example
 
-  # The same proof for keychain's native halves: its Dart tests mock the
-  # channel, so only a build compiles the Kotlin and the Swift.
+  # keychain's Dart tests mock the channel, so these two jobs run the
+  # example's integration tests against the real platform store instead: an
+  # Android emulator and an iOS simulator. `flutter test` builds the app
+  # first, so a native half that does not compile still fails here, as the
+  # connectivity_status jobs' `flutter build` would.
   keychain_android:
     runs-on: ubuntu-latest
     steps:
@@ -231,8 +234,25 @@ jobs:
       - run: flutter pub get
         working-directory: packages/keychain/example
 
-      - run: flutter build apk --debug
-        working-directory: packages/keychain/example
+      # GitHub's Linux runners have KVM, but only root can open /dev/kvm
+      # until this rule opens it up; without it the emulator falls back to
+      # software emulation, far too slow to boot.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # A google_apis image, so AndroidKeyStore is there. The emulator has
+      # no StrongBox, so this also runs the fallback to the TEE path.
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          working-directory: packages/keychain/example
+          script: flutter test integration_test -d emulator-5554
 
   keychain_ios:
     runs-on: macos-latest
@@ -250,5 +270,15 @@ jobs:
       - run: flutter pub get
         working-directory: packages/keychain/example
 
-      - run: flutter build ios --no-codesign --debug
+      # Whichever iPhone simulator the runner's Xcode ships first: the test
+      # needs a Keychain, not a particular model or iOS version.
+      - name: Boot an iPhone simulator
+        run: |
+          udid=$(xcrun simctl list devices available --json \
+            | jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.name | startswith("iPhone"))][0].udid')
+          test -n "$udid" && test "$udid" != null
+          xcrun simctl boot "$udid"
+          echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
+
+      - run: flutter test integration_test -d "$SIMULATOR_UDID"
         working-directory: packages/keychain/example
