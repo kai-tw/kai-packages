@@ -29,6 +29,13 @@ class KeychainInvalidKeyIdException extends KeychainException {
     : super('The keychain key id is not a valid <feature>.<key-id>');
 }
 
+/// The key material handed to `store` is not 32 bytes. Raised before the
+/// platform store is touched; nothing was stored.
+class KeychainInvalidKeyMaterialException extends KeychainException {
+  const KeychainInvalidKeyMaterialException()
+    : super('The keychain key material is not 32 bytes');
+}
+
 /// A create met a key already stored under the same id. The stored key is
 /// left exactly as it was, including when the other key was created by a
 /// concurrent call.

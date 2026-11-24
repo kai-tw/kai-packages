@@ -79,6 +79,35 @@ void main() {
     }
   });
 
+  test('store sends the key id and the material', () async {
+    final List<MethodCall> calls = <MethodCall>[];
+    handle((MethodCall call) async {
+      calls.add(call);
+      return null;
+    });
+    final Uint8List material = Uint8List.fromList(
+      List<int>.generate(32, (int i) => i),
+    );
+
+    await KeychainDataSourceImpl().store('demo.v1', material);
+
+    expect(calls.single.method, 'store');
+    expect(calls.single.arguments, <String, Object>{
+      'keyId': 'demo.v1',
+      'material': material,
+    });
+  });
+
+  test('store meeting a stored key is refused as already existing', () async {
+    handle(
+      (MethodCall call) async => throw PlatformException(code: 'alreadyExists'),
+    );
+    await expectLater(
+      KeychainDataSourceImpl().store('demo.v1', Uint8List(32)),
+      throwsA(isA<KeychainKeyAlreadyExistsException>()),
+    );
+  });
+
   test('web reports unsupported without calling, whatever host OS', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
     int calls = 0;
@@ -115,6 +144,10 @@ void main() {
 
         await expectLater(
           dataSource.create('demo.token'),
+          throwsA(isA<KeychainUnsupportedException>()),
+        );
+        await expectLater(
+          dataSource.store('demo.token', Uint8List(32)),
           throwsA(isA<KeychainUnsupportedException>()),
         );
         await expectLater(

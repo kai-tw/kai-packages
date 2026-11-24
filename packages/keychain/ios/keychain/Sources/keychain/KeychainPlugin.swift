@@ -11,7 +11,8 @@ import UIKit
 /// while the device is unlocked and never migrated to another device by a
 /// backup (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`). `read` answers
 /// with the secret itself: callers on every platform get a key they can use
-/// directly.
+/// directly. `store` keeps 32 bytes made elsewhere (a cloud KMS data key,
+/// say) in exactly the same kind of item.
 ///
 /// Errors are the package's closed vocabulary — `alreadyExists`, `notFound`,
 /// `invalidated`, `temporarilyUnavailable`, `unsupported` — or `failed` with
@@ -74,6 +75,7 @@ public final class KeychainPlugin: NSObject, FlutterPlugin {
     let operation: () -> Any?
     switch call.method {
     case "create": operation = { self.create(keyId) }
+    case "store": operation = { self.store(keyId, args["material"]) }
     case "read": operation = { self.read(keyId) }
     case "exists": operation = { self.exists(keyId) }
     case "delete": operation = { self.delete(keyId) }
@@ -105,8 +107,24 @@ public final class KeychainPlugin: NSObject, FlutterPlugin {
     guard randomStatus == errSecSuccess else {
       return failure(randomStatus)
     }
+    return add(keyId, Data(bytes))
+  }
+
+  /// Key material made elsewhere, kept by the same atomic `SecItemAdd` and
+  /// the same item class as a key `create` made.
+  private func store(_ keyId: String, _ material: Any?) -> Any? {
+    // Dart checks the length; checked again so a drifted caller can never
+    // store a key that `read` would then call unusable.
+    guard let material = material as? FlutterStandardTypedData,
+          material.data.count == keyByteCount else {
+      return FlutterError(code: "badArgs", message: "material is required", details: nil)
+    }
+    return add(keyId, material.data)
+  }
+
+  private func add(_ keyId: String, _ material: Data) -> Any? {
     var query = baseQuery(keyId)
-    query[kSecValueData as String] = Data(bytes)
+    query[kSecValueData as String] = material
     query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
     query[kSecAttrSynchronizable as String] = false
     let status = SecItemAdd(query as CFDictionary, nil)

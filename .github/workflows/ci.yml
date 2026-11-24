@@ -9,6 +9,32 @@ on:
 # for a public repo, so wall-clock time is the only thing worth saving, and
 # each job pays about a minute of setup for it.
 jobs:
+  # The four native jobs below take minutes each: two of them on macOS, and
+  # keychain's boot an emulator or a simulator. They prove only their own
+  # package's native code, so they run only when that package changed (its
+  # example app and that app's own lockfile included), or when this workflow
+  # did. A skipped job counts as passing for a required check.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      connectivity_status: ${{ steps.filter.outputs.connectivity_status }}
+      keychain: ${{ steps.filter.outputs.keychain }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            connectivity_status:
+              - 'packages/connectivity_status/**'
+              - '.github/workflows/ci.yml'
+            keychain:
+              - 'packages/keychain/**'
+              - '.github/workflows/ci.yml'
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -166,6 +192,8 @@ jobs:
       # published (git dependency only), so no publish dry-run step for them.
 
   connectivity_status_android:
+    needs: changes
+    if: needs.changes.outputs.connectivity_status == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -191,6 +219,8 @@ jobs:
         working-directory: packages/connectivity_status/example
 
   connectivity_status_ios:
+    needs: changes
+    if: needs.changes.outputs.connectivity_status == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -215,9 +245,13 @@ jobs:
       - run: flutter build ios --no-codesign --debug
         working-directory: packages/connectivity_status/example
 
-  # The same proof for keychain's native halves: its Dart tests mock the
-  # channel, so only a build compiles the Kotlin and the Swift.
+  # keychain's Dart tests mock the channel. keychain_android runs the
+  # example's integration tests against the real Keystore on an emulator;
+  # `flutter test` builds the app first, so Kotlin that does not compile
+  # still fails it. keychain_ios only builds (see there).
   keychain_android:
+    needs: changes
+    if: needs.changes.outputs.keychain == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -231,10 +265,32 @@ jobs:
       - run: flutter pub get
         working-directory: packages/keychain/example
 
-      - run: flutter build apk --debug
-        working-directory: packages/keychain/example
+      # GitHub's Linux runners have KVM, but only root can open /dev/kvm
+      # until this rule opens it up; without it the emulator falls back to
+      # software emulation, far too slow to boot.
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      # A google_apis image, so AndroidKeyStore is there. The emulator has
+      # no StrongBox, so this also runs the fallback to the TEE path.
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          working-directory: packages/keychain/example
+          script: flutter test integration_test -d emulator-5554
+        # A hang would otherwise hold the runner for GitHub's six-hour
+        # default. A good run takes about five minutes.
+        timeout-minutes: 25
 
   keychain_ios:
+    needs: changes
+    if: needs.changes.outputs.keychain == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -250,5 +306,11 @@ jobs:
       - run: flutter pub get
         working-directory: packages/keychain/example
 
+      # Build only, no simulator run: the integration tests launched on a
+      # CI simulator never finished (the app was built, then nothing). The
+      # Android emulator run above covers the Dart-to-native contract, and
+      # this proves the Swift compiles and links.
+      # --no-codesign because CI has no signing identity and does not need one
+      # to prove the native code builds.
       - run: flutter build ios --no-codesign --debug
         working-directory: packages/keychain/example
