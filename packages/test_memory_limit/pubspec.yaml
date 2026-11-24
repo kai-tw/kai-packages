@@ -1,0 +1,19 @@
+name: test_memory_limit
+description: >-
+  Kills a test process that uses more memory than a set limit, from an isolate
+  of its own, so a test stuck in a loop that keeps allocating fails fast
+  instead of filling the machine's memory. Wired in once per package through
+  `flutter_test_config.dart`.
+version: 0.1.0
+repository: https://github.com/kai-tw/kai-packages/tree/main/packages/test_memory_limit
+issue_tracker: https://github.com/kai-tw/kai-packages/issues
+
+environment:
+  sdk: ^3.8.0
+
+resolution: workspace
+
+dev_dependencies:
+  lints: ^6.1.0
+  path: ^1.9.0
+  test: ^1.25.0

@@ -136,6 +136,11 @@ jobs:
       - run: dart test
         working-directory: packages/test_queue
 
+      # Runs real processes that allocate past a small limit and checks
+      # they're killed with SIGKILL.
+      - run: dart test
+        working-directory: packages/test_memory_limit
+
       # `flutter test`, not `dart test`: ui_kit's tests import `flutter_test`,
       # which the bare Dart test runner cannot load.
       - run: flutter test
