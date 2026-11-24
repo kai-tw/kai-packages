@@ -90,6 +90,40 @@ class ProcessTable {
         now,
   ];
 
+  /// The resident memory of each of [pids] that is still running, in bytes.
+  /// Empty where `ps` cannot be run.
+  static Map<int, int> residentBytes(Iterable<int> pids) {
+    if (pids.isEmpty) {
+      return const <int, int>{};
+    }
+    final ProcessResult result;
+    try {
+      result = Process.runSync('ps', <String>[
+        '-o',
+        'pid=,rss=',
+        '-p',
+        pids.join(','),
+      ]);
+    } on ProcessException {
+      return const <int, int>{};
+    }
+    // `ps` exits 1 when any pid in the list has exited, and still prints
+    // the ones that haven't, so its exit code says nothing useful here.
+    return parseResident(result.stdout as String);
+  }
+
+  /// Parses `ps -o pid=,rss=` output, whose sizes are in kilobytes, into
+  /// bytes by pid. A line that does not fit that shape is skipped.
+  static Map<int, int> parseResident(String text) {
+    final RegExp line = RegExp(r'^\s*(\d+)\s+(\d+)\s*$');
+    return <int, int>{
+      for (final String raw in text.split('\n'))
+        if (line.firstMatch(raw) case final RegExpMatch match)
+          int.parse(match.group(1) ?? ''):
+              int.parse(match.group(2) ?? '') * 1024,
+    };
+  }
+
   /// `SIGKILL`s [rootPid] and every process descended from it, root first.
   ///
   /// The descendants are listed before anything is killed, because the

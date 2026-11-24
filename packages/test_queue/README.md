@@ -16,16 +16,21 @@ test_queue status
 
 One `flutter test` can take a few gigabytes at its peak: the compiler, a
 `flutter_tester` for each test file running at once, and the `flutter` tool.
-When several tools run suites on the same machine, two things fill its memory:
+Three things fill a machine's memory when tools run suites on it:
 
 - **Every caller keeps a count of its own.** Tools that each limit how many
   suites they run still add up, because none of them sees the others.
 - **Killed runs leave testers running.** Killing the `flutter` tool doesn't
   stop the `flutter_tester` processes under it. The system adopts them, and
   nothing ever stops them, so a stuck test can keep running for hours.
+- **One test can grow without end.** A test stuck in a loop that keeps
+  allocating takes its `flutter_tester` to tens of gigabytes, and the
+  machine swaps until it's unusable. Waiting for free memory before the
+  start can't catch that.
 
-`test_queue` fixes both: one set of slots in one directory for everyone, and a
-run that kills everything its command started when it ends.
+`test_queue` fixes all three: one set of slots in one directory for everyone,
+a memory limit for each process while the run goes, and a run that kills
+everything its command started when it ends.
 
 ## What `run` does
 
@@ -38,7 +43,9 @@ run that kills everything its command started when it ends.
    an Xcode build or a browser.
 3. **Waits for a slot.** Slots are files locked with the operating system's
    own locks, so a run killed outright gives its slot back.
-4. **Runs the command**, with a temporary directory of its own.
+4. **Runs the command**, with a temporary directory of its own. Every second
+   it checks each process in the tree, and if one uses more than `--max-rss`
+   (4 GB by default), it kills the whole tree and names that process.
 5. **Kills whatever the command left running** when it ends, and on `SIGINT`,
    `SIGTERM`, `SIGHUP` or `--timeout`, the whole process tree.
 
@@ -57,6 +64,7 @@ test_queue: waiting for 1 of 2 slots; holding now:
 | `--slots <n>` | Slots this run needs (default 1). A tool that runs *n* suites at once takes *n*. |
 | `--wait <seconds>` | How long to wait for a slot and free memory before giving up (default 120). There's no "forever": a run that can never start should fail where someone sees it, not hang. In CI, set it below the job's own timeout. |
 | `--timeout <seconds>` | How long the command may run before its tree is killed. |
+| `--max-rss <GB>` | How much memory any one process the command starts may use before the tree is killed (default 4). It's per process, not the total: a healthy `flutter test` spreads its memory over the compiler and several testers, and none of them comes near 4 GB. |
 | `--label <name>` | The name other runs see while they wait on this one (default: the directory name, or `$TEST_QUEUE_LABEL`). |
 
 Everything after the command is passed to it unchanged:
@@ -69,6 +77,7 @@ Everything after the command is passed to it unchanged:
 | 75 | the wait ran out; nothing ran, and trying again later is fine |
 | 124 | `--timeout` ran out |
 | 127 | the command could not be started |
+| 137 | a process went over `--max-rss` |
 | 128 + *n* | stopped by signal *n* |
 
 A `test_queue run` inside another one starts at once without a slot of its
@@ -90,6 +99,8 @@ user, not per project.
 - **A `test_queue` killed outright with `SIGKILL`** can't stop its command.
   Its slot frees at once, while the suite keeps running. The next `run` (or
   `test_queue reap`) kills that suite before it starts anything.
+- **The memory limit is checked once a second.** A process that allocates
+  gigabytes in under a second can pass it before the check sees it.
 - **macOS and Linux only.** It reads the process table with `ps`.
 
 ## As a library

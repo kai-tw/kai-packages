@@ -18,7 +18,13 @@ Runs test suites through one queue shared by every caller on this machine.
 
 Exit codes: the command's own; 64 for a usage error; 75 when the wait ran
 out (nothing ran, and trying again later is fine); 124 when --timeout ran
-out; 127 when the command could not be started.''';
+out; 127 when the command could not be started; 137 when one process went
+over --max-rss.''';
+
+/// A healthy `flutter test` keeps each of its processes well under this:
+/// the compiler, the biggest of them, takes one to two GB. A process past
+/// it is almost always a test that never stops allocating.
+const int _defaultMaxRss = 4;
 
 const int _usageError = 64;
 const int _waitRanOut = 75;
@@ -65,6 +71,11 @@ ArgParser _parser() => ArgParser()
         help: 'Seconds to wait for a slot and free memory.',
       )
       ..addOption('timeout', help: 'Seconds the command may run.')
+      ..addOption(
+        'max-rss',
+        defaultsTo: '$_defaultMaxRss',
+        help: 'GB of memory any one process may use before the run stops.',
+      )
       ..addOption('label', help: 'Name shown to runs that wait on this one.'),
   )
   ..addCommand('status')
@@ -113,6 +124,7 @@ class _RunRequest {
     required this.slots,
     required this.wait,
     required this.timeout,
+    required this.maxResidentBytes,
     required this.label,
   });
 
@@ -133,12 +145,16 @@ class _RunRequest {
       slots: slots,
       wait: _seconds('wait', args.option('wait')) ?? _defaultWait,
       timeout: _seconds('timeout', args.option('timeout')),
+      maxResidentBytes: _gigabytes('max-rss', args.option('max-rss')),
       label: args.option('label'),
     );
   }
 
   final List<String> command;
   final int slots;
+
+  /// The most memory any one process the command starts may use, in bytes.
+  final int maxResidentBytes;
 
   /// How long to wait for a slot and free memory before giving up.
   final Duration wait;
@@ -153,6 +169,17 @@ class _RunRequest {
       throw FormatException('--slots must be a whole number, 1 or more', text);
     }
     return count;
+  }
+
+  static int _gigabytes(String name, String? text) {
+    final int? gigabytes = int.tryParse(text ?? '');
+    if (gigabytes == null || gigabytes < 1) {
+      throw FormatException(
+        '--$name must be a whole number of GB, 1 or more',
+        text,
+      );
+    }
+    return gigabytes * 1024 * 1024 * 1024;
   }
 
   static Duration? _seconds(String name, String? text) {
@@ -205,6 +232,7 @@ Future<int> _start(_RunRequest request, Map<String, String> environment) async {
     return await TreeRunner().run(
       request.command,
       timeout: request.timeout,
+      maxResidentBytes: request.maxResidentBytes,
       environment: environment,
     );
   } on ProcessException catch (e) {

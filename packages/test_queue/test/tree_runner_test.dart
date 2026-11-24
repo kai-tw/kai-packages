@@ -53,6 +53,34 @@ void main() {
     expect(sleeping('73'), isFalse);
   });
 
+  test(
+    'kills the whole tree when one process goes over the memory limit',
+    () async {
+      final int code = await runner.run(<String>[
+        'sh',
+        '-c',
+        'sleep 74 & sleep 75',
+      ], maxResidentBytes: 1);
+
+      expect(code, TreeRunner.overMemoryCode);
+      expect(sleeping('74'), isFalse);
+      expect(sleeping('75'), isFalse);
+      expect(log.first, contains('over the 0.0 GB limit (--max-rss)'));
+    },
+  );
+
+  test('leaves a run under the memory limit alone', () async {
+    expect(
+      await runner.run(<String>[
+        'sh',
+        '-c',
+        'sleep 0.3; exit 5',
+      ], maxResidentBytes: 1024 * 1024 * 1024),
+      5,
+    );
+    expect(log, isEmpty);
+  });
+
   test('gives the command a temporary directory and deletes it', () async {
     final Directory scratch = Directory.systemTemp.createTempSync('tq_tree_');
     addTearDown(() => scratch.deleteSync(recursive: true));

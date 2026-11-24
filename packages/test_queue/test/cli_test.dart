@@ -143,6 +143,32 @@ void main() {
     );
   });
 
+  test('run rejects a --max-rss below 1 GB', () async {
+    final ProcessResult zero = await cli.run(<String>[
+      'run',
+      '--max-rss',
+      '0',
+      'true',
+    ], slots);
+
+    expect(zero.exitCode, 64);
+    expect(zero.stderr, contains('--max-rss must be a whole number of GB'));
+  });
+
+  test('run passes --max-rss on, and is under it by default', () async {
+    final ProcessResult result = await cli.run(<String>[
+      'run',
+      '--max-rss',
+      '1',
+      'sh',
+      '-c',
+      'sleep 1.5; exit 6',
+    ], slots);
+
+    expect(result.exitCode, 6);
+    expect(result.stderr, isNot(contains('--max-rss')));
+  });
+
   test('run returns 127 for a command that cannot be started', () async {
     final ProcessResult result = await cli.run(<String>[
       'run',

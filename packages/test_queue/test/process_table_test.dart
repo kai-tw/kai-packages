@@ -59,12 +59,36 @@ void main() {
 
     expect(now.stillRunning(<ProcessRow>[old, gone]), isEmpty);
     expect(
-      ProcessTable.parse(' 5 1 0 flutter_tester\n').stillRunning(<ProcessRow>[
-        old,
-      ]),
+      ProcessTable.parse(
+        ' 5 1 0 flutter_tester\n',
+      ).stillRunning(<ProcessRow>[old]),
       hasLength(1),
     );
   });
+
+  test('parseResident reads kilobytes as bytes and skips other lines', () {
+    expect(
+      ProcessTable.parseResident('  412  2048\nPID RSS\n\n 7 1\n'),
+      <int, int>{412: 2048 * 1024, 7: 1024},
+    );
+  });
+
+  test(
+    'residentBytes measures this process and skips one that is gone',
+    () async {
+      final Process gone = await Process.start('true', const <String>[]);
+      await gone.exitCode;
+
+      final Map<int, int> resident = ProcessTable.residentBytes(<int>[
+        pid,
+        gone.pid,
+      ]);
+
+      expect(resident.keys, <int>[pid]);
+      expect(resident[pid], greaterThan(0));
+      expect(ProcessTable.residentBytes(const <int>[]), isEmpty);
+    },
+  );
 
   test('read finds this process', () {
     expect(ProcessTable.read().find(pid), isNotNull);
