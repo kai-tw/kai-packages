@@ -9,6 +9,32 @@ on:
 # for a public repo, so wall-clock time is the only thing worth saving, and
 # each job pays about a minute of setup for it.
 jobs:
+  # The four native jobs below take minutes each: two of them on macOS, and
+  # keychain's boot an emulator or a simulator. They prove only their own
+  # package's native code, so they run only when that package changed (its
+  # example app and that app's own lockfile included), or when this workflow
+  # did. A skipped job counts as passing for a required check.
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      connectivity_status: ${{ steps.filter.outputs.connectivity_status }}
+      keychain: ${{ steps.filter.outputs.keychain }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            connectivity_status:
+              - 'packages/connectivity_status/**'
+              - '.github/workflows/ci.yml'
+            keychain:
+              - 'packages/keychain/**'
+              - '.github/workflows/ci.yml'
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -166,6 +192,8 @@ jobs:
       # published (git dependency only), so no publish dry-run step for them.
 
   connectivity_status_android:
+    needs: changes
+    if: needs.changes.outputs.connectivity_status == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -191,6 +219,8 @@ jobs:
         working-directory: packages/connectivity_status/example
 
   connectivity_status_ios:
+    needs: changes
+    if: needs.changes.outputs.connectivity_status == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -221,6 +251,8 @@ jobs:
   # first, so a native half that does not compile still fails here, as the
   # connectivity_status jobs' `flutter build` would.
   keychain_android:
+    needs: changes
+    if: needs.changes.outputs.keychain == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -255,6 +287,8 @@ jobs:
           script: flutter test integration_test -d emulator-5554
 
   keychain_ios:
+    needs: changes
+    if: needs.changes.outputs.keychain == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
