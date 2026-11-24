@@ -21,15 +21,16 @@ import 'mutant_verdict.dart';
 ///
 /// - the run's configuration — [format], test command, operators,
 ///   compile check, test selection. Not the engine version, so a run
-///   stopped on one release resumes on the next; not the timeouts or the
-///   workers: none of them can change a verdict that is reused (below).
+///   stopped on one release resumes on the next; not the timeouts, the
+///   memory limit or the workers: none of them can change a verdict that is
+///   reused (below).
 /// - a fingerprint of the package's content, see [fingerprint]. Any edit to
 ///   the code or the tests can change any verdict, so an edited package
 ///   starts over rather than guessing which results still hold.
 ///
-/// A recorded [MutantVerdict.timeout] is never reused: it is the one verdict
-/// a budget decides, and the usual next step after one is a run with a
-/// larger budget, which must ask that mutant again.
+/// A recorded [MutantVerdict.timeout] or [MutantVerdict.overMemory] is never
+/// reused: they are the verdicts a limit decides, and the usual next step
+/// after one is a run with a larger limit, which must ask that mutant again.
 ///
 /// Lines are appended and flushed one by one, so a run killed outright loses
 /// at most the line it was writing; a line that does not parse is skipped.
@@ -144,7 +145,9 @@ class RunJournal {
   /// reused.
   MutantResult? recall(Mutant mutant) {
     final _Recorded? entry = _recorded[_keyOf(mutant)];
-    if (entry == null || entry.verdict == MutantVerdict.timeout) {
+    if (entry == null ||
+        entry.verdict == MutantVerdict.timeout ||
+        entry.verdict == MutantVerdict.overMemory) {
       return null;
     }
     return MutantResult(

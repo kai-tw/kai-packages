@@ -64,6 +64,7 @@ class MutationTestRunner {
     List<MutationOperator>? operators,
     this.mutantTimeout = defaultMutantTimeout,
     this.testTimeout = defaultTestTimeout,
+    this.maxMemory = defaultMaxMemory,
     this.baselineFactor = defaultBaselineFactor,
     Duration? baselineTimeout,
     this.selectByCoverage = false,
@@ -252,6 +253,16 @@ class MutationTestRunner {
 
   /// See [testTimeout].
   static const Duration defaultTestTimeout = Duration(seconds: 5);
+
+  /// The most memory one process running a test file may use, in bytes,
+  /// before its whole tree is killed and the mutant is scored
+  /// [MutantVerdict.overMemory]; `null` for no limit. The project's own
+  /// limit, if its tests set one, does not replace this: a package whose
+  /// tests set none still has to be kept from taking the machine.
+  final int? maxMemory;
+
+  /// See [maxMemory]: 4 GB, the limit test_toolkit sets by default.
+  static const int defaultMaxMemory = 4 * 1024 * 1024 * 1024;
 
   /// A mutant's budget on a test file is the larger of [mutantTimeout] and
   /// this many times that file's own unmutated run in this run. `0` turns
@@ -892,6 +903,10 @@ class MutationTestRunner {
       final Duration limit => MutantTiming.seconds(limit),
       null => null,
     },
+    'maxMemoryGb': switch (maxMemory) {
+      final int bytes => bytes / (1024 * 1024 * 1024),
+      null => null,
+    },
     'baselineFactor': baselineFactor,
     'baselineTimeoutSeconds': MutantTiming.seconds(baselineTimeout),
     'selectByCoverage': selectByCoverage,
@@ -1073,6 +1088,7 @@ class MutationTestRunner {
       onSlotWait: _onSlotWait,
       arguments: switched.arguments,
       testTimeout: testTimeout,
+      maxResidentBytes: maxMemory,
       testFileTimeout: baselineTimeout,
       budgetFrom: _budgetFrom,
       stats: stats,
@@ -1234,6 +1250,7 @@ class MutationTestRunner {
     final List<MutantResult> invalidResults = <MutantResult>[];
     final List<MutantResult> timedOutResults = <MutantResult>[];
     final List<MutantResult> diagnosticResults = <MutantResult>[];
+    final List<MutantResult> overMemoryResults = <MutantResult>[];
 
     for (final MutantResult result in results) {
       switch (result.verdict) {
@@ -1253,6 +1270,8 @@ class MutationTestRunner {
           // was therefore never scored at all — permanently invisible behind a
           // count nobody reads per-mutant.
           timedOutResults.add(result);
+        case MutantVerdict.overMemory:
+          overMemoryResults.add(result);
         case MutantVerdict.diagnostic:
           diagnosticResults.add(result);
         case MutantVerdict.detected:
@@ -1273,6 +1292,7 @@ class MutationTestRunner {
       invalidMutants: invalidResults,
       timedOutMutants: timedOutResults,
       diagnosticMutants: diagnosticResults,
+      overMemoryMutants: overMemoryResults,
     );
   }
 

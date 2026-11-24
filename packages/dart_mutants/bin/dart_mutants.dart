@@ -260,6 +260,20 @@ RunRecord? _announce() {
   }
 }
 
+/// `--max-memory` in bytes, or `null` for `0`, no limit. Already validated.
+int? _maxMemory(ArgResults args) =>
+    switch (int.parse(args['max-memory'] as String)) {
+      0 => null,
+      final int gigabytes => gigabytes * 1024 * 1024 * 1024,
+    };
+
+/// `--test-timeout`, or `null` for `0`, no limit. Already validated.
+Duration? _testTimeout(ArgResults args) =>
+    switch (int.parse(args['test-timeout'] as String)) {
+      0 => null,
+      final int seconds => Duration(seconds: seconds),
+    };
+
 MutationTestRunner _runner(
   ArgResults args,
   DiffScope? scope,
@@ -281,10 +295,8 @@ MutationTestRunner _runner(
   ),
   // Already validated by _parseAndValidate — safe to parse again here
   // rather than thread the number through as a second return value.
-  testTimeout: switch (int.parse(args['test-timeout'] as String)) {
-    0 => null,
-    final int seconds => Duration(seconds: seconds),
-  },
+  maxMemory: _maxMemory(args),
+  testTimeout: _testTimeout(args),
   baselineFactor: double.parse(args['baseline-factor'] as String),
   baselineTimeout: _optionalSeconds(args['baseline-timeout'] as String?),
   selectByCoverage: args['select-by-coverage'] as bool,
@@ -367,6 +379,17 @@ ArgParser _buildParser() {
           'whatever timeout it declares itself. A test slower than this '
           'unmutated stops the run; a mutant that makes a test this slow is '
           'detected. 0 leaves each test to its own timeout.',
+    )
+    ..addOption(
+      'max-memory',
+      defaultsTo: '4',
+      valueHelp: 'GB',
+      help:
+          'The most memory, in GB, one process running a test file may use. '
+          'Over it, the process tree is killed and the mutant is reported as '
+          'over memory, NOT scored, like a timeout: a mutant that deletes a '
+          '`close()` can otherwise take the machine before its time is up. '
+          '0 sets no limit.',
     )
     ..addOption(
       'baseline-factor',
@@ -639,7 +662,17 @@ Map<String, Set<int>>? _lines(ArgResults args) {
 int? _perLine(ArgResults args) =>
     int.tryParse(args['per-line'] as String? ?? '');
 
-/// What is wrong with the three timeout options, or `null` if nothing is.
+/// What is wrong with `--max-memory`, or `null` if nothing is.
+String? _maxMemoryOptionError(ArgResults args) {
+  final int? gigabytes = int.tryParse(args['max-memory'] as String);
+  if (gigabytes == null || gigabytes < 0) {
+    return '--max-memory must be a whole number of GB, 0 or more';
+  }
+  return null;
+}
+
+/// What is wrong with the three timeout options or `--max-memory`, or
+/// `null` if nothing is.
 String? _timeoutOptionError(ArgResults args) {
   final int? testTimeout = int.tryParse(args['test-timeout'] as String);
   if (testTimeout == null || testTimeout < 0) {
@@ -655,7 +688,7 @@ String? _timeoutOptionError(ArgResults args) {
   if (factor == null || !factor.isFinite || factor < 0) {
     return '--baseline-factor must be a number, 0 or more';
   }
-  return null;
+  return _maxMemoryOptionError(args);
 }
 
 /// What is wrong with --max-minutes, or `null`. Its own check rather than a
@@ -854,7 +887,7 @@ void _printText(MutationRunReport report) {
     stdout.writeln(
       '${f.filePath}: $rate (${f.detected}/${f.total} detected, '
       '${f.invalid} invalid, ${f.timedOut} timed out, '
-      '${f.diagnostic} diagnostic)',
+      '${f.diagnostic} diagnostic, ${f.overMemory} over memory)',
     );
     _printMutants(
       f,
@@ -880,6 +913,15 @@ void _printText(MutationRunReport report) {
     // owner, not of a test, and a count alone gives nobody a line to check
     // that word against.
     _printMutants(f, f.diagnosticMutants, (_) => 'diagnostic (NOT scored)');
+    // Named, because one that deleted a release such as `controller.close()`
+    // is a gap no test caught, and only a person can tell it from a loop that
+    // allocated forever.
+    _printMutants(
+      f,
+      f.overMemoryMutants,
+      (_) =>
+          'over the memory limit, killed (NOT scored; did a test check it releases what it holds?)',
+    );
   }
 }
 

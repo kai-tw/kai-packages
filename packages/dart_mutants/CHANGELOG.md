@@ -16,6 +16,20 @@ ordinary test runs elsewhere count against one budget.
 - The README no longer mentions `test_queue run` or `test_queue status`,
   which are gone.
 
+**`--max-memory <GB>`, 4 by default: a mutant can no longer take the
+machine.** Each run of a test file has its process tree read twice a second,
+and is killed once one process is over the limit. A mutant that deletes a
+`controller.close()` leaks for its whole budget, and one that allocates in a
+loop it can't leave grows by gigabytes a second; before, only the time budget
+stopped either.
+
+- A mutant killed this way is the new verdict `overMemory`. Like `timeout`,
+  it is left out of the score, never reused from a journal, and listed per
+  file in `overMemoryMutants`, with its count in `overMemory`. Adding a
+  verdict and fields isn't a breaking change to the JSON contract.
+- The run's `stats.environment` records `maxMemoryGb`.
+- `0` turns the limit off.
+
 ## 0.15.0
 
 **A worker no longer waits forever for a test slot.** After `--slot-wait`

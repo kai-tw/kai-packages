@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math';
 
 import 'temp_space.dart';
 
@@ -57,8 +58,17 @@ class ProcessCommand {
   /// a test can point it somewhere it can inspect.
   static TempSpace temps = TempSpace();
 
+  /// What [run] returns for a child it killed because one of its processes
+  /// went over `maxResidentBytes`. No real exit code is this value: they run
+  /// from 0 to 255, or are a signal's number, negated.
+  static const int overMemoryLimit = -0x10000;
+
+  /// How often [run] reads the memory of a child it is watching.
+  static const Duration memoryCheckInterval = Duration(milliseconds: 500);
+
   /// Runs the command to completion and returns its exit code, or `null` if
-  /// it did not finish within [timeout].
+  /// it did not finish within [timeout], or [overMemoryLimit] if a process in
+  /// its tree went over [maxResidentBytes] first.
   ///
   /// A mutant can turn a normal loop into an infinite one — the whole reason
   /// this exists. `package:test`'s own per-test timeout cannot be trusted to
@@ -70,6 +80,13 @@ class ProcessCommand {
   /// blocked or ignored by whatever the child process is doing — so a
   /// mutant that hangs ends that one mutant's run, not the whole session.
   ///
+  /// A mutant can also stop releasing what it allocates: one that deletes a
+  /// `controller.close()` or a `timer.cancel()`, say. Within its [timeout] it
+  /// can still take a machine's memory. So with [maxResidentBytes], every
+  /// process in the child's tree is read every [memoryCheckInterval], and the
+  /// tree is killed as soon as one of them is over. This is the package's
+  /// own limit, so it holds whether or not the project's tests set one.
+  ///
   /// The kill goes to the whole process **tree**, not the child — see
   /// [killTree] for the leak that taught this.
   ///
@@ -80,16 +97,20 @@ class ProcessCommand {
   /// on one host, 111 left behind at about 270 MB each, which filled the disk
   /// before the run could write its report. Whatever the child leaves, this
   /// directory takes with it.
-  Future<int?> run({Duration? timeout}) async {
+  Future<int?> run({Duration? timeout, int? maxResidentBytes}) async {
     final Directory tmp = temps.create('child');
     try {
-      return await _runIn(tmp, timeout);
+      return await _runIn(tmp, timeout, maxResidentBytes);
     } finally {
       temps.delete(tmp);
     }
   }
 
-  Future<int?> _runIn(Directory tmp, Duration? timeout) async {
+  Future<int?> _runIn(
+    Directory tmp,
+    Duration? timeout,
+    int? maxResidentBytes,
+  ) async {
     final Process process = await Process.start(
       executable,
       arguments,
@@ -107,19 +128,65 @@ class ProcessCommand {
     unawaited(process.stdout.drain<void>());
     unawaited(process.stderr.drain<void>());
 
+    bool overMemory = false;
+    final Timer? memoryCheck = maxResidentBytes == null
+        ? null
+        : Timer.periodic(memoryCheckInterval, (Timer check) {
+            if (largestInTree(process.pid) > maxResidentBytes) {
+              check.cancel();
+              overMemory = true;
+              killTree(process.pid);
+            }
+          });
     try {
+      final int? exitCode;
       if (timeout == null) {
-        return await process.exitCode;
+        exitCode = await process.exitCode;
+      } else {
+        try {
+          exitCode = await process.exitCode.timeout(timeout);
+        } on TimeoutException {
+          killTree(process.pid);
+          await process.exitCode; // Reap it — otherwise it is left a zombie.
+          return null;
+        }
       }
-      try {
-        return await process.exitCode.timeout(timeout);
-      } on TimeoutException {
-        killTree(process.pid);
-        await process.exitCode; // Reap it — otherwise it is left a zombie.
-        return null;
-      }
+      return overMemory ? overMemoryLimit : exitCode;
     } finally {
+      memoryCheck?.cancel();
       _running.remove(process.pid);
+    }
+  }
+
+  /// The resident memory of the largest process in the tree under
+  /// [rootPid], itself included, in bytes; 0 when none can be read.
+  static int largestInTree(int rootPid) => largestInTreeOf(
+    rootPid,
+    _psOutput(<String>['-Ao', 'pid=,ppid=,rss=']),
+  );
+
+  /// [largestInTree], read from `ps -Ao pid=,ppid=,rss=` output, so a test
+  /// can hand it a table. `ps` gives `rss` in kilobytes.
+  static int largestInTreeOf(int rootPid, String psOutput) {
+    final _ResidentTable table = _ResidentTable.parse(psOutput);
+    int largest = table.rssOf[rootPid] ?? 0;
+    final List<int> queue = <int>[rootPid];
+    while (queue.isNotEmpty) {
+      for (final int child in table.childrenOf[queue.removeAt(0)] ?? <int>[]) {
+        largest = max(largest, table.rssOf[child] ?? 0);
+        queue.add(child);
+      }
+    }
+    return largest;
+  }
+
+  /// What `ps` printed for [arguments], or empty where there is no `ps`.
+  static String _psOutput(List<String> arguments) {
+    try {
+      final ProcessResult result = Process.runSync('ps', arguments);
+      return result.exitCode == 0 ? result.stdout as String : '';
+    } on ProcessException {
+      return '';
     }
   }
 
@@ -290,4 +357,30 @@ class ProcessCommand {
 
   @override
   String toString() => '$executable ${arguments.join(' ')}';
+}
+
+/// Each process's parent and resident memory, from
+/// `ps -Ao pid=,ppid=,rss=` output.
+class _ResidentTable {
+  _ResidentTable.parse(String psOutput) {
+    for (final String line in psOutput.split('\n')) {
+      final List<int?> fields = line
+          .trim()
+          .split(RegExp(r'\s+'))
+          .map(int.tryParse)
+          .toList();
+      if (fields.length < 3 || fields.take(3).contains(null)) {
+        continue;
+      }
+      childrenOf.putIfAbsent(fields[1]!, () => <int>[]).add(fields[0]!);
+      // `ps` gives `rss` in kilobytes.
+      rssOf[fields[0]!] = fields[2]! * 1024;
+    }
+  }
+
+  /// Each parent's children, by pid.
+  final Map<int, List<int>> childrenOf = <int, List<int>>{};
+
+  /// Each process's resident memory, in bytes.
+  final Map<int, int> rssOf = <int, int>{};
 }

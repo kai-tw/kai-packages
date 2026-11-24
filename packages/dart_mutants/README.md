@@ -475,6 +475,31 @@ thirty times as long to grow. A larger `--baseline-factor` or
 below) with peak memory — worth knowing before raising either on a machine
 that is also running other suites.
 
+### And `--max-memory` caps it
+
+A budget bounds time, not memory, so a mutant can still take the machine
+inside its window. One that deletes a `controller.close()` or a
+`timer.cancel()` leaks for as long as its test runs, and one that turns a
+loop infinite while it allocates can grow by gigabytes a second. So each
+run of a test file, mutated or not, is watched: twice a second,
+each process in its tree is read with `ps`, and the whole tree is killed as
+soon as one of them is over `--max-memory`, 4 GB by default. `0` turns it
+off. The baseline, which runs your own test command on unmutated code,
+isn't watched.
+
+This is dart_mutants' own limit. It holds whether or not the project's
+tests set one (test_toolkit's `prepareTestProcess()` does, in each test
+process), so a package without that config is covered too.
+
+A mutant killed this way is `overMemory`: left out of the score like a
+timeout, and listed in `overMemoryMutants`. From outside, a leak a test never
+checked and a loop that never reached an assertion look the same, so it can't
+be scored either way. When it's a leak, the fix is a test that checks the
+release: for a Flutter object, `leak_tracker` turns a missing `dispose()`
+into a failing test, and the mutant is then `detected` long before memory
+grows. If the unmutated run of a test file goes over the limit, the run stops
+and says so.
+
 ## `--fail-fast` is accepted, and does nothing
 
 Earlier releases recommended putting `--fail-fast` in the test command, so
@@ -859,7 +884,8 @@ real CLI binary, not just the internal report types:
   or `timeout` has a hollow-looking 100% the same way a file with only one
   real mutant does — comparing either against `total` is how a policy layer
   catches that, so both are reported, not just counted internally. So does
-  `diagnostic`, with its mutants in `diagnosticMutants`.
+  `diagnostic`, with its mutants in `diagnosticMutants`, and `overMemory`,
+  with its mutants in `overMemoryMutants` (see `--max-memory` above).
 - **A timed-out or invalid mutant is reported with its identity**, in
   `timedOutMutants` and `invalidMutants`, alongside their counts. Comparing
   either count against `total` tells a caller THAT something was excluded

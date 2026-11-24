@@ -41,6 +41,7 @@ class FileMutationReport {
     required this.invalidMutants,
     required this.timedOutMutants,
     required this.diagnosticMutants,
+    this.overMemoryMutants = const <MutantResult>[],
   });
 
   final String filePath;
@@ -90,6 +91,17 @@ class FileMutationReport {
   /// word, so a caller has to be able to see which lines that was.
   final List<MutantResult> diagnosticMutants;
 
+  /// The mutants whose test process went over `--max-memory` and was killed.
+  /// The score leaves them out, for the reason it leaves out a timeout, but
+  /// they are listed: one that deleted a release such as
+  /// `controller.close()` is a gap no test caught, which a person has to see
+  /// to fix.
+  final List<MutantResult> overMemoryMutants;
+
+  /// How many [overMemoryMutants] there are. Not in [total], for the reason
+  /// [timedOut] is not.
+  int get overMemory => overMemoryMutants.length;
+
   /// How many [diagnosticMutants] there are. Not in [total], for the reason
   /// [invalid] is not.
   int get diagnostic => diagnosticMutants.length;
@@ -114,6 +126,7 @@ class FileMutationReport {
     'invalid': invalid,
     'timedOut': timedOut,
     'diagnostic': diagnostic,
+    'overMemory': overMemory,
     'undetectedMutants': undetectedMutants
         .map((MutantResult r) => r.toJson())
         .toList(),
@@ -124,6 +137,9 @@ class FileMutationReport {
         .map((MutantResult r) => r.toJson())
         .toList(),
     'diagnosticMutants': diagnosticMutants
+        .map((MutantResult r) => r.toJson())
+        .toList(),
+    'overMemoryMutants': overMemoryMutants
         .map((MutantResult r) => r.toJson())
         .toList(),
   };
