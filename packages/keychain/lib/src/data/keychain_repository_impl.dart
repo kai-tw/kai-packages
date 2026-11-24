@@ -30,6 +30,17 @@ class KeychainRepositoryImpl implements KeychainRepository {
     await _dataSource.create(_validated(keyId));
   }
 
+  /// Same single path as [create]: no `exists` pre-check, the native store
+  /// alone decides.
+  @override
+  Future<void> store(String keyId, Uint8List material) async {
+    final String validId = _validated(keyId);
+    if (material.length != KeychainKeyEntity.materialByteCount) {
+      throw const KeychainInvalidKeyMaterialException();
+    }
+    await _dataSource.store(validId, material);
+  }
+
   @override
   Future<KeychainKeyEntity> read(String keyId) async {
     final String validId = _validated(keyId);

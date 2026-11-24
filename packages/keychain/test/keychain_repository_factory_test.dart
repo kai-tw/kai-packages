@@ -20,6 +20,7 @@ void main() {
   group('KeychainException', () {
     const List<KeychainException> family = <KeychainException>[
       KeychainInvalidKeyIdException(),
+      KeychainInvalidKeyMaterialException(),
       KeychainKeyAlreadyExistsException(),
       KeychainKeyNotFoundException(),
       KeychainKeyInvalidatedException(),

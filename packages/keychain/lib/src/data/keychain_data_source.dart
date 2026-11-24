@@ -10,6 +10,11 @@ abstract class KeychainDataSource {
   /// can never overwrite the key.
   Future<void> create(String keyId);
 
+  /// Stores [material] under [keyId] only if no key is stored there, by the
+  /// same atomic add-if-absent as [create]. [material] arrives already
+  /// validated as 32 bytes.
+  Future<void> store(String keyId, Uint8List material);
+
   /// The usable key material stored under [keyId].
   Future<Uint8List> read(String keyId);
 

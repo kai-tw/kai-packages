@@ -3,6 +3,8 @@
 // shows up here as KeychainPlatformFailureException, which the package's own
 // unit tests (a mocked channel) cannot catch.
 
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:keychain/keychain.dart';
@@ -45,5 +47,27 @@ void main() {
       keychain.read('not-an-id'),
       throwsA(isA<KeychainInvalidKeyIdException>()),
     );
+  });
+  testWidgets('a key made elsewhere is stored and read back unchanged', (
+    WidgetTester tester,
+  ) async {
+    const String storedId = 'demo.stored_v1';
+    final KeychainRepository keychain = KeychainRepository();
+    await keychain.delete(storedId);
+    final Uint8List material = Uint8List.fromList(
+      List<int>.generate(32, (int i) => 255 - i),
+    );
+
+    await keychain.store(storedId, material);
+    expect((await keychain.read(storedId)).material, material);
+
+    await expectLater(
+      keychain.store(storedId, Uint8List(32)),
+      throwsA(isA<KeychainKeyAlreadyExistsException>()),
+    );
+    expect((await keychain.read(storedId)).material, material);
+
+    await keychain.delete(storedId);
+    expect(await keychain.exists(storedId), isFalse);
   });
 }

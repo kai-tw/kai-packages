@@ -1,8 +1,9 @@
 name: keychain
 description: >-
-  A local key store for Flutter apps: creates, locates and deletes 256-bit keys
-  protected by the platform (iOS Keychain, Android Keystore), offline.
-version: 0.2.0
+  A local key store for Flutter apps: creates, stores, locates and deletes
+  256-bit keys protected by the platform (iOS Keychain, Android Keystore),
+  offline.
+version: 0.3.0
 repository: https://github.com/kai-tw/kai-packages/tree/main/packages/keychain
 publish_to: none
 

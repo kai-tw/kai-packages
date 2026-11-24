@@ -12,6 +12,10 @@ import 'package:equatable/equatable.dart';
 class KeychainKeyEntity extends Equatable {
   const KeychainKeyEntity({required this.keyId, required this.material});
 
+  /// Every key is 256 bits, whether the platform generated it or it was
+  /// stored from outside.
+  static const int materialByteCount = 32;
+
   /// The full `<feature>.<key-id>` the key was created under.
   final String keyId;
 

@@ -50,6 +50,15 @@ class KeychainDataSourceImpl implements KeychainDataSource {
   }
 
   @override
+  Future<void> store(String keyId, Uint8List material) async {
+    await _invoke<void>(
+      'store',
+      keyId: keyId,
+      extra: <String, Object>{'material': material},
+    );
+  }
+
+  @override
   Future<Uint8List> read(String keyId) async {
     final Uint8List? material = await _invoke<Uint8List>('read', keyId: keyId);
     // The native handler answers `read` with the key or an error, never with
@@ -130,7 +139,11 @@ class KeychainDataSourceImpl implements KeychainDataSource {
     return event;
   }
 
-  Future<T?> _invoke<T>(String method, {String? keyId}) async {
+  Future<T?> _invoke<T>(
+    String method, {
+    String? keyId,
+    Map<String, Object> extra = const <String, Object>{},
+  }) async {
     if (!_isSupportedPlatform) {
       throw const KeychainUnsupportedException();
     }
@@ -139,7 +152,7 @@ class KeychainDataSourceImpl implements KeychainDataSource {
       return await _channel
           .invokeMethod<T>(
             method,
-            keyId == null ? null : <String, String>{'keyId': keyId},
+            keyId == null ? null : <String, Object>{'keyId': keyId, ...extra},
           )
           .timeout(_timeout);
     } on PlatformException catch (e, s) {

@@ -43,7 +43,8 @@ import javax.crypto.spec.GCMParameterSpec
  *  copies, and the Keystore key never leaves the device either. `read`
  *  unseals and answers with the secret, the same shape iOS answers with.
  *  StrongBox is asked for where the device has it and dropped where it does
- *  not.
+ *  not. `store` seals 32 bytes made elsewhere (a cloud KMS data key, say)
+ *  the same way, in place of the random secret.
  *
  *  A key exists when its sealed file exists. A file whose Keystore key is
  *  gone or cannot open it is `invalidated`, and left in place.
@@ -83,6 +84,18 @@ class KeychainPlugin : FlutterPlugin {
             }
             val operation: () -> Any? = when (call.method) {
                 "create" -> { -> create(keyId) }
+                "store" -> {
+                    // Dart checks the length; checked again so a drifted
+                    // caller can never seal a key that `read` would call
+                    // unusable.
+                    val material = call.argument<ByteArray>("material")
+                    if (material == null || material.size != KEY_BYTE_COUNT) {
+                        result.error("badArgs", "material is required", null)
+                        return@setMethodCallHandler
+                    }
+                    val storeMaterial: () -> Any? = { store(keyId, material) }
+                    storeMaterial
+                }
                 "read" -> { -> read(keyId) }
                 "exists" -> { -> exists(keyId) }
                 "delete" -> { -> delete(keyId) }
@@ -129,23 +142,39 @@ class KeychainPlugin : FlutterPlugin {
      *  alias without a sealed file (an interrupted create) protects nothing,
      *  and generating over it replaces it. */
     private fun create(keyId: String): Any? {
+        val secret = ByteArray(KEY_BYTE_COUNT)
+        try {
+            SecureRandom().nextBytes(secret)
+            seal(keyId, secret)
+        } finally {
+            secret.fill(0)
+        }
+        return null
+    }
+
+    /** Key material made elsewhere (a cloud KMS data key, say), sealed and
+     *  kept exactly like a secret [create] drew, under the same check. */
+    private fun store(keyId: String, material: ByteArray): Any? {
+        try {
+            seal(keyId, material)
+        } finally {
+            material.fill(0)
+        }
+        return null
+    }
+
+    /** The add-if-absent behind [create] and [store]; runs on [executor]. */
+    private fun seal(keyId: String, secret: ByteArray) {
         val file = sealedFile(keyId)
         if (file.exists()) {
             throw KeychainFailure("alreadyExists")
         }
         val wrappingKey = generateWrappingKey(ALIAS_PREFIX + keyId)
-        val secret = ByteArray(KEY_BYTE_COUNT)
-        try {
-            SecureRandom().nextBytes(secret)
-            val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, wrappingKey)
-            cipher.updateAAD(keyId.toByteArray(Charsets.UTF_8))
-            val sealed = cipher.doFinal(secret)
-            writeAtomically(file, encode(cipher.iv, sealed))
-        } finally {
-            secret.fill(0)
-        }
-        return null
+        val cipher = Cipher.getInstance(CIPHER_TRANSFORMATION)
+        cipher.init(Cipher.ENCRYPT_MODE, wrappingKey)
+        cipher.updateAAD(keyId.toByteArray(Charsets.UTF_8))
+        val sealed = cipher.doFinal(secret)
+        writeAtomically(file, encode(cipher.iv, sealed))
     }
 
     private fun generateWrappingKey(alias: String): SecretKey {

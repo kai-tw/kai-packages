@@ -13,6 +13,7 @@ import 'package:keychain/src/domain/keychain_key_entity.dart';
 /// test can line several up at once.
 class _FakeKeychainDataSource implements KeychainDataSource {
   final Map<String, int> keys = <String, int>{};
+  final Map<String, Uint8List> stored = <String, Uint8List>{};
   final Set<String> invalidated = <String>{};
   final List<String> calls = <String>[];
   final StreamController<bool> availability =
@@ -42,6 +43,18 @@ class _FakeKeychainDataSource implements KeychainDataSource {
   }
 
   @override
+  Future<void> store(String keyId, Uint8List material) async {
+    _record('store', keyId);
+    await gate?.future;
+    if (keys.containsKey(keyId)) {
+      throw const KeychainKeyAlreadyExistsException();
+    }
+    _generation += 1;
+    keys[keyId] = _generation;
+    stored[keyId] = Uint8List.fromList(material);
+  }
+
+  @override
   Future<Uint8List> read(String keyId) async {
     _record('read', keyId);
     final int? generation = keys[keyId];
@@ -51,7 +64,7 @@ class _FakeKeychainDataSource implements KeychainDataSource {
     if (invalidated.contains(keyId)) {
       throw const KeychainKeyInvalidatedException();
     }
-    return Uint8List(32)..[0] = generation;
+    return stored[keyId] ?? (Uint8List(32)..[0] = generation);
   }
 
   @override
@@ -76,6 +89,7 @@ class _FakeKeychainDataSource implements KeychainDataSource {
   Future<void> delete(String keyId) async {
     _record('delete', keyId);
     keys.remove(keyId);
+    stored.remove(keyId);
   }
 }
 
@@ -177,6 +191,70 @@ void main() {
       await repository.delete('demo.token');
       await repository.create('demo.token');
       expect(dataSource.keys['demo.token'], 2);
+    });
+  });
+
+  group('store', () {
+    /// 32 bytes made elsewhere, distinct from anything the fake generates.
+    final Uint8List external = Uint8List.fromList(
+      List<int>.generate(32, (int i) => 255 - i),
+    );
+
+    test('read gives the stored bytes back', () async {
+      await repository.store('demo.v1', external);
+      expect(
+        await repository.read('demo.v1'),
+        KeychainKeyEntity(keyId: 'demo.v1', material: external),
+      );
+    });
+
+    test(
+      'shares one name space with create, and keeps the first key',
+      () async {
+        await repository.create('demo.token');
+        await expectLater(
+          repository.store('demo.token', external),
+          throwsA(isA<KeychainKeyAlreadyExistsException>()),
+        );
+        expect((await repository.read('demo.token')).material[0], 1);
+
+        await repository.store('demo.other', external);
+        await expectLater(
+          repository.create('demo.other'),
+          throwsA(isA<KeychainKeyAlreadyExistsException>()),
+        );
+        expect((await repository.read('demo.other')).material, external);
+      },
+    );
+
+    test('checks no existence first: the store alone decides', () async {
+      await repository.store('demo.token', external);
+      expect(dataSource.calls, <String>['store:demo.token']);
+    });
+
+    test('replacing a key is delete, then store', () async {
+      await repository.create('demo.token');
+      await repository.delete('demo.token');
+      await repository.store('demo.token', external);
+      expect((await repository.read('demo.token')).material, external);
+    });
+
+    for (final int length in <int>[0, 16, 31, 33, 64]) {
+      test('$length bytes are refused before the store is touched', () async {
+        await expectLater(
+          repository.store('demo.token', Uint8List(length)),
+          throwsA(isA<KeychainInvalidKeyMaterialException>()),
+        );
+        expect(dataSource.calls, isEmpty);
+      });
+    }
+
+    test('an invalid id wins over invalid material', () async {
+      await expectLater(
+        repository.store('token', Uint8List(3)),
+        throwsA(isA<KeychainInvalidKeyIdException>()),
+      );
+      expect(dataSource.calls, isEmpty);
     });
   });
 
@@ -283,6 +361,8 @@ void main() {
     methods = <String, Future<Object?> Function(KeychainRepositoryImpl)>{
       'create': (KeychainRepositoryImpl r) => r.create('demo.token'),
       'generate': (KeychainRepositoryImpl r) => r.generate('demo.token'),
+      'store': (KeychainRepositoryImpl r) =>
+          r.store('demo.other', Uint8List(32)),
       'read': (KeychainRepositoryImpl r) => r.read('demo.token'),
       'exists': (KeychainRepositoryImpl r) => r.exists('demo.token'),
       'delete': (KeychainRepositoryImpl r) => r.delete('demo.token'),
@@ -311,6 +391,7 @@ void main() {
         <String, Future<Object?> Function(String)>{
           'create': (String id) => repository.create(id),
           'generate': (String id) => repository.generate(id),
+          'store': (String id) => repository.store(id, Uint8List(32)),
           'read': (String id) => repository.read(id),
           'exists': (String id) => repository.exists(id),
           'delete': (String id) => repository.delete(id),

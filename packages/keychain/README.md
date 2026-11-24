@@ -1,7 +1,7 @@
 # keychain
 
-A local key store for Flutter apps. It creates, locates and deletes 256-bit
-keys protected by the platform — iOS Keychain, Android Keystore — works
+A local key store for Flutter apps. It creates, stores, locates and deletes
+256-bit keys protected by the platform — iOS Keychain, Android Keystore — works
 offline, and reports whether keys can be reached right now.
 
 It manages keys only. Encrypting and decrypting data with them is the caller's
@@ -22,6 +22,14 @@ use(key.material); // 32 bytes; never log or persist them
 await keychain.delete('demo.token');
 ```
 
+A key made elsewhere — say a data key a cloud KMS generated — is kept the
+same way, and `read` returns exactly those bytes:
+
+```dart
+final Uint8List dataKey = await fetchDataKey(); // 32 bytes, from your backend
+await keychain.store('demo.data_key_v3', dataKey);
+```
+
 `KeychainRepository()` builds a new repository on every call; every instance
 reaches the same platform store, so whether it is a singleton is the consuming
 app's DI decision:
@@ -36,6 +44,7 @@ sl.registerLazySingleton<KeychainRepository>(KeychainRepository.new); // get_it
 |---|---|
 | `create(name)` | Creates a key under a fixed name such as `demo.token`. |
 | `generate(id)` | Creates a key under a dynamic id such as `demo.<uuid>`. Persist the id first: after an interrupted call it is how you find out, through `exists` or `read`, whether the key was made. |
+| `store(id, material)` | Keeps 32 bytes made elsewhere (a cloud KMS data key, for example) under an id. Same rules as `create`; to replace a key, `delete` it first. |
 | `read(id)` | The key stored under the id, as a `KeychainKeyEntity` (`keyId` + 32 bytes of `material`). Creates and changes nothing. |
 | `exists(id)` | `true` / `false` only when the platform answered conclusively; otherwise it throws. Says nothing about usability — `read` answers that. |
 | `delete(id)` | Removes the key. A key that is already absent counts as removed. |
@@ -47,7 +56,7 @@ a fixed name, record id or UUID; at most 128 characters. An id that does not
 match is refused with `KeychainInvalidKeyIdException` before the platform is
 touched — never normalised, so two spellings can never name one key.
 
-`create` and `generate` share one name space and one rule: a key already
+`create`, `generate` and `store` share one name space and one rule: a key already
 stored under the id is kept and `KeychainKeyAlreadyExistsException` is thrown,
 including when a concurrent call created it. The platform makes the check and
 the create one atomic step.
@@ -56,7 +65,7 @@ the create one atomic step.
 
 | | iOS | Android |
 |---|---|---|
-| Key material | 32 random bytes from `SecRandomCopyBytes`, stored as a generic-password Keychain item | 32 random bytes from `SecureRandom`, sealed with AES-256-GCM by a Keystore key (StrongBox where the device has it, the TEE otherwise) |
+| Key material | 32 random bytes from `SecRandomCopyBytes` — or the bytes given to `store` — stored as a generic-password Keychain item | 32 random bytes from `SecureRandom` — or the bytes given to `store` — sealed with AES-256-GCM by a Keystore key (StrongBox where the device has it, the TEE otherwise) |
 | Where | The Keychain, item class `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`, `kSecAttrSynchronizable` false | One file per key in `noBackupFilesDir/keychain/`; the Keystore key under the alias `net.kaiwu.keychain.<id>` |
 | Same-id atomicity | `SecItemAdd` | One process-wide thread runs every keychain call |
 
@@ -71,6 +80,10 @@ synchronised to iCloud Keychain; Android's `noBackupFilesDir` is excluded from
 backup and device transfer whatever the app's manifest says, and a Keystore key
 cannot be exported. After a restore or on a new device the keys are gone: a
 caller has to be able to fetch or derive again whatever it protected with them.
+
+A key put in with `store` came from somewhere else, so a copy of it exists
+outside this device; the package protects the copy it holds and nothing more.
+After a restore, `store` the key again from its source.
 
 ## Unavailable is not absent
 
@@ -96,6 +109,7 @@ that never include the key id (an id can be a stable record id), so a
 | Exception | Meaning |
 |---|---|
 | `KeychainInvalidKeyIdException` | The id is not `<feature>.<key-id>`. Nothing was asked of the platform. |
+| `KeychainInvalidKeyMaterialException` | `store` was given material that is not 32 bytes. Nothing was asked of the platform. |
 | `KeychainKeyAlreadyExistsException` | A create met a stored key; that key is untouched. |
 | `KeychainKeyNotFoundException` | The platform conclusively holds no key under the id. |
 | `KeychainKeyInvalidatedException` | A key is stored but can no longer be used. It is left in place; only `delete` removes it. |
