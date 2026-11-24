@@ -9,26 +9,27 @@ import 'package:path/path.dart' as p;
 import '../../lint_rule_base.dart';
 
 /// Requires every Flutter test file under `test/` to be covered by a
-/// `flutter_test_config.dart` that calls `limitMemory()` from
-/// `package:test_memory_limit`.
+/// `flutter_test_config.dart` that calls `guardTestProcess()` from
+/// `package:test_toolkit`.
 ///
-/// A test stuck in a loop that keeps allocating can take its
-/// `flutter_tester` to tens of gigabytes. `limitMemory()` kills the process
-/// once it goes over a limit, but only for the test files it's wired into,
-/// and `flutter test` wires in only the `flutter_test_config.dart` nearest to
-/// each test file: one in the file's own directory, or the closest one above
-/// it up to the package root. A nearer config that doesn't call
-/// `limitMemory()` hides one further up that does.
+/// `guardTestProcess()` kills a test process that goes over its memory
+/// limit, and makes it wait for one of the machine's shared test slots, so
+/// test runs together never need more memory than the machine has. It only
+/// does that for the test files it's wired into, and `flutter test` wires
+/// in only the `flutter_test_config.dart` nearest to each test file: one in
+/// the file's own directory, or the closest one above it up to the package
+/// root. A nearer config that doesn't call `guardTestProcess()` hides one
+/// further up that does.
 ///
 /// **Good:**
 /// ```dart
 /// // test/flutter_test_config.dart
 /// import 'dart:async';
 ///
-/// import 'package:test_memory_limit/test_memory_limit.dart';
+/// import 'package:test_toolkit/test_toolkit.dart';
 ///
 /// Future<void> testExecutable(FutureOr<void> Function() testMain) async {
-///   await limitMemory();
+///   await guardTestProcess();
 ///   await testMain();
 /// }
 /// ```
@@ -40,20 +41,20 @@ import '../../lint_rule_base.dart';
 ///
 /// It reads the config files from disk, so a test file is checked against
 /// the config as it is now, even on a run over that one file.
-class RequireTestMemoryLimit extends ResolvedLintRule {
+class RequireTestProcessGuard extends ResolvedLintRule {
   @override
-  String get name => 'require_test_memory_limit';
+  String get name => 'require_test_process_guard';
 
   @override
   String get description =>
       'Every Flutter test file under test/ is covered by a '
-      'flutter_test_config.dart that calls limitMemory().';
+      'flutter_test_config.dart that calls guardTestProcess().';
 
   /// The nearest config for each directory looked at, or `null` for none.
   final Map<String, String?> _configFor = <String, String?>{};
 
-  /// Whether each config read calls `limitMemory()`.
-  final Map<String, bool> _limits = <String, bool>{};
+  /// Whether each config read calls `guardTestProcess()`.
+  final Map<String, bool> _guarded = <String, bool>{};
 
   @override
   ResolvedLintVisitor createResolvedVisitor(
@@ -76,9 +77,9 @@ class RequireTestMemoryLimit extends ResolvedLintRule {
         return nearestConfig(p.dirname(directory), packageRoot);
       });
 
-  /// Whether the config at [path] imports `package:test_memory_limit` and
-  /// calls `limitMemory()` in its `testExecutable`.
-  bool limitsMemory(String path) => _limits.putIfAbsent(path, () {
+  /// Whether the config at [path] imports `package:test_toolkit` and
+  /// calls `guardTestProcess()` in its `testExecutable`.
+  bool isGuarded(String path) => _guarded.putIfAbsent(path, () {
     final ParseStringResult parsed = parseString(
       content: File(path).readAsStringSync(),
       path: path,
@@ -87,7 +88,7 @@ class RequireTestMemoryLimit extends ResolvedLintRule {
     final CompilationUnit unit = parsed.unit;
     final bool imported = unit.directives.whereType<ImportDirective>().any(
       (ImportDirective d) =>
-          d.uri.stringValue?.startsWith('package:test_memory_limit/') ?? false,
+          d.uri.stringValue?.startsWith('package:test_toolkit/') ?? false,
     );
     if (!imported) {
       return false;
@@ -97,7 +98,7 @@ class RequireTestMemoryLimit extends ResolvedLintRule {
       if (function.name.lexeme != 'testExecutable') {
         continue;
       }
-      final _LimitMemoryCall finder = _LimitMemoryCall();
+      final _GuardCall finder = _GuardCall();
       function.accept(finder);
       return finder.found;
     }
@@ -110,7 +111,7 @@ class RequireTestMemoryLimit extends ResolvedLintRule {
 class _Visitor extends ResolvedLintVisitor {
   _Visitor(super.filePath, super.resolvedUnit, this.rule);
 
-  final RequireTestMemoryLimit rule;
+  final RequireTestProcessGuard rule;
 
   @override
   void visitCompilationUnit(CompilationUnit node) {
@@ -138,21 +139,21 @@ class _Visitor extends ResolvedLintVisitor {
         ruleName: rule.name,
         message:
             'No flutter_test_config.dart covers this test file, so nothing '
-            'stops it if it keeps allocating memory. Add '
+            'limits its memory or makes it wait its turn. Add '
             'test/flutter_test_config.dart with a testExecutable that calls '
-            "limitMemory() from 'package:test_memory_limit' before "
+            "guardTestProcess() from 'package:test_toolkit' before "
             'testMain().',
         offset: flutterTest.offset,
       );
-    } else if (!rule.limitsMemory(config)) {
+    } else if (!rule.isGuarded(config)) {
       report(
         ruleName: rule.name,
         message:
             '${p.relative(config, from: packageRoot)} is the config '
             "flutter test uses for this file, and it doesn't call "
-            "limitMemory() from 'package:test_memory_limit' in its "
-            'testExecutable, so nothing stops this test if it keeps '
-            'allocating memory.',
+            "guardTestProcess() from 'package:test_toolkit' in its "
+            "testExecutable, so nothing limits this test's memory or makes "
+            'it wait its turn.',
         offset: flutterTest.offset,
       );
     }
@@ -172,13 +173,13 @@ class _Visitor extends ResolvedLintVisitor {
   }
 }
 
-/// Finds a `limitMemory(...)` call, with or without an import prefix.
-class _LimitMemoryCall extends RecursiveAstVisitor<void> {
+/// Finds a `guardTestProcess(...)` call, with or without an import prefix.
+class _GuardCall extends RecursiveAstVisitor<void> {
   bool found = false;
 
   @override
   void visitMethodInvocation(MethodInvocation node) {
-    if (node.methodName.name == 'limitMemory') {
+    if (node.methodName.name == 'guardTestProcess') {
       found = true;
     }
     super.visitMethodInvocation(node);

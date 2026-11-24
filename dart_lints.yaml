@@ -78,8 +78,8 @@ areas:
       - avoid_record_types
       - avoid_empty_catch
       - avoid_catching_base_exception
-      # Off until test_memory_limit is released; see the test area below.
-      - require_test_memory_limit
+      # Off until test_toolkit is released; see the test area below.
+      - require_test_process_guard
   production:
     paths:
       - "packages/*/lib/**"
@@ -100,10 +100,10 @@ areas:
       # real assertion; the empty arm is deliberate.
       - avoid_empty_catch
       - avoid_catching_base_exception
-      # Off until test_memory_limit is released: the packages here can't
+      # Off until test_toolkit is released: the packages here can't
       # depend on it before then. Turning it back on means one
       # test/flutter_test_config.dart per Flutter package.
-      - require_test_memory_limit
+      - require_test_process_guard
 
 options:
   avoid_high_cyclomatic_complexity:

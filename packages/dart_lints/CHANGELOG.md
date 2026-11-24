@@ -1,12 +1,13 @@
 ## 0.9.0
 
-New rule: `require_test_memory_limit` (flutter bundle, on by default).
+New rule: `require_test_process_guard` (flutter bundle, on by default).
 
 Every `*_test.dart` under a package's `test/` directory that imports
 `package:flutter_test` has to be covered by a `flutter_test_config.dart` whose
-`testExecutable` calls `limitMemory()` from `package:test_memory_limit`. That
-kills a `flutter_tester` that keeps allocating instead of letting it fill the
-machine's memory.
+`testExecutable` calls `guardTestProcess()` from `package:test_toolkit`. That
+kills a `flutter_tester` that goes over its memory limit, and makes each test
+process wait for one of the machine's shared slots, so test runs together
+can't fill the machine's memory.
 
 The config that counts is the one `flutter test` itself would use: the
 nearest one at or above the test file, up to the package root. A nearer config
@@ -19,16 +20,16 @@ in `_test.dart`.
 A project on the `flutter` bundle gets the rule when it moves to 0.9.0, and
 every Flutter test file reports until the package has a config. To adopt it:
 
-1. Add `test_memory_limit` as a dev dependency.
+1. Add `test_toolkit` as a dev dependency.
 2. Add `test/flutter_test_config.dart`:
 
    ```dart
    import 'dart:async';
 
-   import 'package:test_memory_limit/test_memory_limit.dart';
+   import 'package:test_toolkit/test_toolkit.dart';
 
    Future<void> testExecutable(FutureOr<void> Function() testMain) async {
-     await limitMemory();
+     await guardTestProcess();
      await testMain();
    }
    ```
