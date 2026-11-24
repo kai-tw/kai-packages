@@ -37,6 +37,7 @@ import 'rules/core/avoid_while_true.dart';
 import 'rules/core/bool_getter_naming.dart';
 import 'rules/core/failure_type_naming.dart';
 import 'rules/core/interface_implementation_naming.dart';
+import 'rules/core/listener_naming.dart';
 import 'rules/core/prefer_positive_condition.dart';
 import 'rules/core/public_class_names_its_file.dart';
 import 'rules/core/sealed_family_naming.dart';
@@ -241,6 +242,13 @@ class RuleRegistry {
       options: <String, OptionKind>{'prefixes': OptionKind.stringList},
       create: (Map<String, Object?> o) =>
           BoolGetterNaming(prefixes: o['prefixes'] as List<String>?),
+    ),
+    RuleDescriptor(
+      name: 'listener_naming',
+      bundle: 'core',
+      options: <String, OptionKind>{'prefix': OptionKind.string},
+      create: (Map<String, Object?> o) =>
+          ListenerNaming(prefix: o['prefix'] as String?),
     ),
     RuleDescriptor(
       name: 'failure_type_naming',

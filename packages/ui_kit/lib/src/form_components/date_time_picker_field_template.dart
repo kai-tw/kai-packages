@@ -124,7 +124,7 @@ abstract class _DateTimeState extends State<DateTimePickerFieldTemplate> {
     _selectedDateTime = widget.controller?.dateTime ?? widget.initialValue;
 
     // Listen for external changes from the controller
-    widget.controller?.addListener(_handleControllerChange);
+    widget.controller?.addListener(_onControllerChange);
   }
 
   @override
@@ -138,8 +138,8 @@ abstract class _DateTimeState extends State<DateTimePickerFieldTemplate> {
       });
     }
     if (oldWidget.controller != widget.controller) {
-      oldWidget.controller?.removeListener(_handleControllerChange);
-      widget.controller?.addListener(_handleControllerChange);
+      oldWidget.controller?.removeListener(_onControllerChange);
+      widget.controller?.addListener(_onControllerChange);
     }
   }
 
@@ -219,7 +219,7 @@ abstract class _DateTimeState extends State<DateTimePickerFieldTemplate> {
 
   Future<DateTime?> selectDateTime();
 
-  void _handleControllerChange() {
+  void _onControllerChange() {
     if (widget.controller?.value != _selectedDateTime) {
       setState(() {
         _selectedDateTime = widget.controller?.value;
@@ -229,7 +229,7 @@ abstract class _DateTimeState extends State<DateTimePickerFieldTemplate> {
 
   @override
   void dispose() {
-    widget.controller?.removeListener(_handleControllerChange);
+    widget.controller?.removeListener(_onControllerChange);
     super.dispose();
   }
 }

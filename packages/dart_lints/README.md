@@ -57,7 +57,7 @@ pure-Dart library without either inheriting the other's assumptions.
 
 | Bundle | Rules | Looks up |
 |---|---|---|
-| `core` | 26 (one opt-in) | nothing but Dart |
+| `core` | 27 (one opt-in) | nothing but Dart |
 | `flutter` | 8 | Flutter / Material types |
 | `clean_arch` | 7 | a layered directory layout |
 | `bloc` | 6 | `Cubit` / `Bloc` |
@@ -90,6 +90,7 @@ changes, with an acronym kept as one word (`HTTPClientError` is `HTTP`,
 | `failure_type_naming` | `core` | an `Error` subtype ends in `Error` and a class ending in `Error` is one; an `Exception` implementation ends in `failureWord` (`Exception`, the default, or `Failure`) and a class ending in it, or in `Exception`, is one. `exemptSubtypesOf` lists types whose subtypes are named by another scheme |
 | `avoid_vague_type_words` | `core` | a type name must not *end* in `Manager`, `Helper`, `Util`, `Utils` — the last word has to name a kind, so `TaskManagerPage` is fine (`forbiddenWords` replaces the list); `scopedWords` forbids a word except on subtypes of listed types, e.g. `{word: Service, unlessExtends: [BackgroundService]}` |
 | `bool_getter_naming` | `core` | a getter returning `bool` or `Future<bool>` (nullable or not) starts with `is`, `can`, `has` or `was`, and a getter named that way returns one; a method named that way with no parameters should be a getter: `bool isReady()` → `bool get isReady`. Methods with parameters, fields and `@override` members are left alone. `prefixes` replaces the list |
+| `listener_naming` | `core` | a method or function this package declares, passed by name to `Stream.listen` (its `onData`, `onError:` or `onDone:`) or to any `add…Listener` / `remove…Listener`, is named `on` and a capital: `_onScroll`, not `_handleScroll`. Closures, parameters, fields and someone else's methods (`controller.add`) are left alone. `prefix` replaces `on` |
 | `interface_implementation_naming` | `core`, **opt-in** | an implementation of one of the package's own interfaces is named in the project's `style`, which is required: `impl` (`<Interface>Impl`), `tech_prefix` (`<Technology><Interface>`) or `impl_or_prefix` (either). A direct subtype of a `sealed` base is left to `sealed_family_naming`, which names it `<Category><Case><Kind>` |
 | `avoid_reserved_widget_suffix` | `flutter` | a public widget does not end in `State`, `Cubit`, `Bloc`, `Notifier`, `Provider` or bare `Sheet`. A bare `Widget` is allowed; a project that forbids it lists it |
 | `require_test_process_setup` | `flutter` | every `*_test.dart` under `test/` that imports `flutter_test` is covered by a `flutter_test_config.dart` whose `testExecutable` calls `prepareTestProcess()` from `package:test_toolkit`. Only the nearest config counts, as in `flutter test` itself |

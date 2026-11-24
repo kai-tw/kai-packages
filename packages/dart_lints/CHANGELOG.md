@@ -1,3 +1,26 @@
+## 0.10.0
+
+New rule: `listener_naming` (core bundle, on by default).
+
+A method or function passed by name as a listener is named for the event
+it answers: `on` and a capital, `_onScroll` rather than `_handleScroll` or
+`_scrolled`. A listener runs from somewhere other than where it's declared,
+so its name is what a reader has to go on there.
+
+- Checked: `Stream.listen`'s `onData`, `onError:` and `onDone:`, and any
+  `add…Listener` or `remove…Listener` method, whatever its type.
+- Only names this package declares, reached as `name` or `this.name`.
+  `out.add` passed to `listen` to forward events, a framework method, a
+  closure, a parameter and a field are left alone: there's no listener name
+  of ours to fix.
+- The message suggests a name, replacing a leading `handle`: `_handleScroll`
+  becomes `_onScroll`.
+- `prefix` replaces `on`.
+
+This follows the Flutter widget convention (`onPressed`, `onChanged`) rather
+than the framework's internal `_handleX` one. Upgrading reports every
+`_handleX` listener; rename it, or disable the rule in an area until then.
+
 ## 0.9.0
 
 New rule: `require_test_process_setup` (flutter bundle, on by default).
