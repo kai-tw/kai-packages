@@ -48,7 +48,7 @@ import 'rules/flutter/avoid_listenable_mock.dart';
 import 'rules/flutter/avoid_media_query_of.dart';
 import 'rules/flutter/avoid_redundant_pop_callback.dart';
 import 'rules/flutter/avoid_reserved_widget_suffix.dart';
-import 'rules/flutter/require_test_process_guard.dart';
+import 'rules/flutter/require_test_process_setup.dart';
 import 'rules/getit/avoid_get_it_dependency_cycle.dart';
 import 'rules/getit/restrict_sl_scope.dart';
 import 'rules/log_system/avoid_unsafe_log_interpolation.dart';
@@ -347,9 +347,9 @@ class RuleRegistry {
       ),
     ),
     RuleDescriptor(
-      name: 'require_test_process_guard',
+      name: 'require_test_process_setup',
       bundle: 'flutter',
-      create: (Map<String, Object?> o) => RequireTestProcessGuard(),
+      create: (Map<String, Object?> o) => RequireTestProcessSetup(),
     ),
     RuleDescriptor(
       name: 'avoid_freezed_in_domain',

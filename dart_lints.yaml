@@ -79,7 +79,7 @@ areas:
       - avoid_empty_catch
       - avoid_catching_base_exception
       # Off until test_toolkit is released; see the test area below.
-      - require_test_process_guard
+      - require_test_process_setup
   production:
     paths:
       - "packages/*/lib/**"
@@ -103,7 +103,7 @@ areas:
       # Off until test_toolkit is released: the packages here can't
       # depend on it before then. Turning it back on means one
       # test/flutter_test_config.dart per Flutter package.
-      - require_test_process_guard
+      - require_test_process_setup
 
 options:
   avoid_high_cyclomatic_complexity:

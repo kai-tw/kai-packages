@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:analyzer/dart/analysis/analysis_context_collection.dart';
 import 'package:analyzer/dart/analysis/results.dart';
 import 'package:dart_lints/src/lint_rule_base.dart';
-import 'package:dart_lints/src/rules/flutter/require_test_process_guard.dart';
+import 'package:dart_lints/src/rules/flutter/require_test_process_setup.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
@@ -13,13 +13,13 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {}
 ''';
 
-const String _guardingConfig = '''
+const String _preparingConfig = '''
 import 'dart:async';
 
 import 'package:test_toolkit/test_toolkit.dart';
 
 Future<void> testExecutable(FutureOr<void> Function() testMain) async {
-  await guardTestProcess();
+  await prepareTestProcess();
   await testMain();
 }
 ''';
@@ -28,7 +28,7 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
 /// its contents. A `pubspec.yaml` is added.
 Directory _package(Map<String, String> files) {
   final Directory root = Directory.systemTemp.createTempSync(
-    'require_test_process_guard_',
+    'require_test_process_setup_',
   );
   addTearDown(() => root.deleteSync(recursive: true));
   File(p.join(root.path, 'pubspec.yaml')).writeAsStringSync('name: subject\n');
@@ -46,7 +46,7 @@ Future<List<LintViolation>> _lint(Directory root, List<String> paths) async {
   final AnalysisContextCollection collection = AnalysisContextCollection(
     includedPaths: <String>[root.path],
   );
-  final RequireTestProcessGuard rule = RequireTestProcessGuard();
+  final RequireTestProcessSetup rule = RequireTestProcessSetup();
   final List<LintViolation> violations = <LintViolation>[];
   for (final String path in paths) {
     final String subject = p.join(root.path, path);
@@ -78,14 +78,14 @@ void main() {
     ]);
 
     expect(violations, hasLength(1));
-    expect(violations.single.ruleName, 'require_test_process_guard');
+    expect(violations.single.ruleName, 'require_test_process_setup');
     expect(violations.single.line, 1);
     expect(violations.single.message, contains('No flutter_test_config.dart'));
   });
 
   test('passes a test file covered by a config further up', () async {
     final Directory root = _package(<String, String>{
-      'test/flutter_test_config.dart': _guardingConfig,
+      'test/flutter_test_config.dart': _preparingConfig,
       'test/a/b/widget_test.dart': _flutterTest,
     });
 
@@ -95,13 +95,13 @@ void main() {
     );
   });
 
-  test('accepts guardTestProcess through an import prefix', () async {
+  test('accepts prepareTestProcess through an import prefix', () async {
     final Directory root = _package(<String, String>{
-      'test/flutter_test_config.dart': _guardingConfig
+      'test/flutter_test_config.dart': _preparingConfig
           .replaceFirst("toolkit.dart';", "toolkit.dart' as toolkit;")
           .replaceFirst(
-            'await guardTestProcess()',
-            'await toolkit.guardTestProcess()',
+            'await prepareTestProcess()',
+            'await toolkit.prepareTestProcess()',
           ),
       'test/widget_test.dart': _flutterTest,
     });
@@ -110,12 +110,12 @@ void main() {
   });
 
   test(
-    'reports when the nearest config does not call guardTestProcess',
+    'reports when the nearest config does not call prepareTestProcess',
     () async {
       // flutter test uses only the nearest config, so the one in test/ that
       // does call it never runs for test/a/.
       final Directory root = _package(<String, String>{
-        'test/flutter_test_config.dart': _guardingConfig,
+        'test/flutter_test_config.dart': _preparingConfig,
         'test/a/flutter_test_config.dart': '''
 import 'dart:async';
 
@@ -139,17 +139,17 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
         violations.single.message,
         contains(
           'test/a/flutter_test_config.dart is the config flutter test '
-          "uses for this file, and it doesn't call guardTestProcess()",
+          "uses for this file, and it doesn't call prepareTestProcess()",
         ),
       );
     },
   );
 
   test(
-    'reports a config that calls guardTestProcess without importing it',
+    'reports a config that calls prepareTestProcess without importing it',
     () async {
       final Directory root = _package(<String, String>{
-        'test/flutter_test_config.dart': _guardingConfig.replaceFirst(
+        'test/flutter_test_config.dart': _preparingConfig.replaceFirst(
           "import 'package:test_toolkit/test_toolkit.dart';",
           "import 'helpers.dart';",
         ),
@@ -164,7 +164,7 @@ Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   );
 
   test(
-    'reports a config that calls guardTestProcess outside testExecutable',
+    'reports a config that calls prepareTestProcess outside testExecutable',
     () async {
       final Directory root = _package(<String, String>{
         'test/flutter_test_config.dart': '''
@@ -172,7 +172,7 @@ import 'dart:async';
 
 import 'package:test_toolkit/test_toolkit.dart';
 
-Future<void> unused() => guardTestProcess();
+Future<void> unused() => prepareTestProcess();
 
 Future<void> testExecutable(FutureOr<void> Function() testMain) async {
   await testMain();

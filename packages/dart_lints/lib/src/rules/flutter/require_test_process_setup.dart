@@ -9,16 +9,16 @@ import 'package:path/path.dart' as p;
 import '../../lint_rule_base.dart';
 
 /// Requires every Flutter test file under `test/` to be covered by a
-/// `flutter_test_config.dart` that calls `guardTestProcess()` from
+/// `flutter_test_config.dart` that calls `prepareTestProcess()` from
 /// `package:test_toolkit`.
 ///
-/// `guardTestProcess()` kills a test process that goes over its memory
+/// `prepareTestProcess()` kills a test process that goes over its memory
 /// limit, and makes it wait for one of the machine's shared test slots, so
 /// test runs together never need more memory than the machine has. It only
 /// does that for the test files it's wired into, and `flutter test` wires
 /// in only the `flutter_test_config.dart` nearest to each test file: one in
 /// the file's own directory, or the closest one above it up to the package
-/// root. A nearer config that doesn't call `guardTestProcess()` hides one
+/// root. A nearer config that doesn't call `prepareTestProcess()` hides one
 /// further up that does.
 ///
 /// **Good:**
@@ -29,7 +29,7 @@ import '../../lint_rule_base.dart';
 /// import 'package:test_toolkit/test_toolkit.dart';
 ///
 /// Future<void> testExecutable(FutureOr<void> Function() testMain) async {
-///   await guardTestProcess();
+///   await prepareTestProcess();
 ///   await testMain();
 /// }
 /// ```
@@ -41,20 +41,20 @@ import '../../lint_rule_base.dart';
 ///
 /// It reads the config files from disk, so a test file is checked against
 /// the config as it is now, even on a run over that one file.
-class RequireTestProcessGuard extends ResolvedLintRule {
+class RequireTestProcessSetup extends ResolvedLintRule {
   @override
-  String get name => 'require_test_process_guard';
+  String get name => 'require_test_process_setup';
 
   @override
   String get description =>
       'Every Flutter test file under test/ is covered by a '
-      'flutter_test_config.dart that calls guardTestProcess().';
+      'flutter_test_config.dart that calls prepareTestProcess().';
 
   /// The nearest config for each directory looked at, or `null` for none.
   final Map<String, String?> _configFor = <String, String?>{};
 
-  /// Whether each config read calls `guardTestProcess()`.
-  final Map<String, bool> _guarded = <String, bool>{};
+  /// Whether each config read calls `prepareTestProcess()`.
+  final Map<String, bool> _prepared = <String, bool>{};
 
   @override
   ResolvedLintVisitor createResolvedVisitor(
@@ -78,8 +78,8 @@ class RequireTestProcessGuard extends ResolvedLintRule {
       });
 
   /// Whether the config at [path] imports `package:test_toolkit` and
-  /// calls `guardTestProcess()` in its `testExecutable`.
-  bool isGuarded(String path) => _guarded.putIfAbsent(path, () {
+  /// calls `prepareTestProcess()` in its `testExecutable`.
+  bool isPrepared(String path) => _prepared.putIfAbsent(path, () {
     final ParseStringResult parsed = parseString(
       content: File(path).readAsStringSync(),
       path: path,
@@ -98,7 +98,7 @@ class RequireTestProcessGuard extends ResolvedLintRule {
       if (function.name.lexeme != 'testExecutable') {
         continue;
       }
-      final _GuardCall finder = _GuardCall();
+      final _PrepareCall finder = _PrepareCall();
       function.accept(finder);
       return finder.found;
     }
@@ -111,7 +111,7 @@ class RequireTestProcessGuard extends ResolvedLintRule {
 class _Visitor extends ResolvedLintVisitor {
   _Visitor(super.filePath, super.resolvedUnit, this.rule);
 
-  final RequireTestProcessGuard rule;
+  final RequireTestProcessSetup rule;
 
   @override
   void visitCompilationUnit(CompilationUnit node) {
@@ -141,17 +141,17 @@ class _Visitor extends ResolvedLintVisitor {
             'No flutter_test_config.dart covers this test file, so nothing '
             'limits its memory or makes it wait its turn. Add '
             'test/flutter_test_config.dart with a testExecutable that calls '
-            "guardTestProcess() from 'package:test_toolkit' before "
+            "prepareTestProcess() from 'package:test_toolkit' before "
             'testMain().',
         offset: flutterTest.offset,
       );
-    } else if (!rule.isGuarded(config)) {
+    } else if (!rule.isPrepared(config)) {
       report(
         ruleName: rule.name,
         message:
             '${p.relative(config, from: packageRoot)} is the config '
             "flutter test uses for this file, and it doesn't call "
-            "guardTestProcess() from 'package:test_toolkit' in its "
+            "prepareTestProcess() from 'package:test_toolkit' in its "
             "testExecutable, so nothing limits this test's memory or makes "
             'it wait its turn.',
         offset: flutterTest.offset,
@@ -173,13 +173,13 @@ class _Visitor extends ResolvedLintVisitor {
   }
 }
 
-/// Finds a `guardTestProcess(...)` call, with or without an import prefix.
-class _GuardCall extends RecursiveAstVisitor<void> {
+/// Finds a `prepareTestProcess(...)` call, with or without an import prefix.
+class _PrepareCall extends RecursiveAstVisitor<void> {
   bool found = false;
 
   @override
   void visitMethodInvocation(MethodInvocation node) {
-    if (node.methodName.name == 'guardTestProcess') {
+    if (node.methodName.name == 'prepareTestProcess') {
       found = true;
     }
     super.visitMethodInvocation(node);

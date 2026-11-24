@@ -1,10 +1,10 @@
 ## 0.9.0
 
-New rule: `require_test_process_guard` (flutter bundle, on by default).
+New rule: `require_test_process_setup` (flutter bundle, on by default).
 
 Every `*_test.dart` under a package's `test/` directory that imports
 `package:flutter_test` has to be covered by a `flutter_test_config.dart` whose
-`testExecutable` calls `guardTestProcess()` from `package:test_toolkit`. That
+`testExecutable` calls `prepareTestProcess()` from `package:test_toolkit`. That
 kills a `flutter_tester` that goes over its memory limit, and makes each test
 process wait for one of the machine's shared slots, so test runs together
 can't fill the machine's memory.
@@ -29,7 +29,7 @@ every Flutter test file reports until the package has a config. To adopt it:
    import 'package:test_toolkit/test_toolkit.dart';
 
    Future<void> testExecutable(FutureOr<void> Function() testMain) async {
-     await guardTestProcess();
+     await prepareTestProcess();
      await testMain();
    }
    ```
