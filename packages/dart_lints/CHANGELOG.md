@@ -36,6 +36,11 @@ every Flutter test file reports until the package has a config. To adopt it:
 
 Or list the rule under an area's `disable:` until then.
 
+`bool_getter_naming` also accepts `was` (`wasSent`, `wasCancelled`), for a
+question about something that already happened. A project that set its own
+`prefixes` keeps its list. A getter named `wasX` that doesn't return a
+boolean is now reported, as `isX` already was.
+
 ## 0.8.0
 
 New rule: `bool_getter_naming` (core bundle, on by default).

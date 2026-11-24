@@ -6,9 +6,9 @@ import '../../lint_rule_base.dart';
 
 /// Ties a yes-or-no question to its name, in both directions.
 ///
-/// A name that asks a question (`isEmpty`, `canPop`, `hasError`) belongs to a
-/// getter that answers it with a boolean; a getter that answers with a
-/// boolean asks its question with one of those words. Three shapes are
+/// A name that asks a question (`isEmpty`, `canPop`, `hasError`, `wasSent`)
+/// belongs to a getter that answers it with a boolean; a getter that answers
+/// with a boolean asks its question with one of those words. Three shapes are
 /// reported:
 ///
 /// - a boolean getter whose name doesn't start with a question word —
@@ -34,7 +34,12 @@ class BoolGetterNaming extends LintRule {
   BoolGetterNaming({List<String>? prefixes})
     : prefixes = prefixes ?? defaultPrefixes;
 
-  static const List<String> defaultPrefixes = <String>['is', 'can', 'has'];
+  static const List<String> defaultPrefixes = <String>[
+    'is',
+    'can',
+    'has',
+    'was',
+  ];
 
   /// The words a boolean getter's name may start with.
   final List<String> prefixes;

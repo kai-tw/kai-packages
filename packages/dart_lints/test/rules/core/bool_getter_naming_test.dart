@@ -29,6 +29,7 @@ void main() {
           '  bool get isEmpty => true;\n'
           '  bool get canPop => true;\n'
           '  bool get hasError => true;\n'
+          '  bool get wasSent => true;\n'
           '}',
         ),
         isEmpty,
@@ -87,9 +88,10 @@ void main() {
             '  bool get issued => true;\n'
             '  bool get cancelled => true;\n'
             '  bool get hash => true;\n'
+            '  bool get washed => true;\n'
             '}',
           ),
-          <String>{'issued', 'cancelled', 'hash'},
+          <String>{'issued', 'cancelled', 'hash', 'washed'},
         );
       },
     );
