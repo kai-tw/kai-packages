@@ -285,6 +285,8 @@ jobs:
           disable-animations: true
           working-directory: packages/keychain/example
           script: flutter test integration_test -d emulator-5554
+        # Same guard as keychain_ios. A good run takes about five minutes.
+        timeout-minutes: 25
 
   keychain_ios:
     needs: changes
@@ -312,7 +314,15 @@ jobs:
             | jq -r '[.devices | to_entries[] | select(.key | contains("iOS")) | .value[] | select(.name | startswith("iPhone"))][0].udid')
           test -n "$udid" && test "$udid" != null
           xcrun simctl boot "$udid"
+          # `boot` returns as soon as booting starts. Without waiting for it
+          # to finish, `flutter test` built the app and then hung for good
+          # trying to install it on a simulator that was not ready.
+          xcrun simctl bootstatus "$udid" -b
           echo "SIMULATOR_UDID=$udid" >> "$GITHUB_ENV"
 
+      # A hang here would otherwise hold a macOS runner for GitHub's
+      # six-hour default. A good run takes about ten minutes, most of it
+      # the first Xcode build.
       - run: flutter test integration_test -d "$SIMULATOR_UDID"
         working-directory: packages/keychain/example
+        timeout-minutes: 25
