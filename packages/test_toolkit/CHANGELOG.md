@@ -1,3 +1,11 @@
+## 0.2.0
+
+- `prepareTestProcess()` also kills the test process once the disk it runs on
+  has lost more than 5 GB of free space since it started (`maxWrittenGigabytes`),
+  as when a test stuck in a loop keeps writing to a log file. Free space is
+  read with `df` once a second, from an isolate of its own.
+- `DiskLimit` does the same for a process that sets it up itself.
+
 ## 0.1.0
 
 First release, replacing `test_queue`. `flutter test` is now the only way in:

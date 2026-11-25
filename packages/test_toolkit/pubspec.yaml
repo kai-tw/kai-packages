@@ -1,9 +1,10 @@
 name: test_toolkit
 description: >-
-  Keeps `flutter test` from using more memory than the machine has: called
-  from flutter_test_config.dart, it caps each test process's memory and makes
-  every test process on the machine take a turn from one shared set of slots.
-version: 0.1.0
+  Keeps `flutter test` from using more memory than the machine has, or
+  filling its disk: called from flutter_test_config.dart, it caps each test
+  process's memory and disk writes and makes every test process on the
+  machine take a turn from one shared set of slots.
+version: 0.2.0
 publish_to: none
 repository: https://github.com/kai-tw/kai-packages/tree/main/packages/test_toolkit
 issue_tracker: https://github.com/kai-tw/kai-packages/issues

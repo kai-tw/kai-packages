@@ -4,6 +4,8 @@ Keeps `flutter test` from using more memory than the machine has. One call in
 `flutter_test_config.dart`, and every test process:
 
 - is killed once it uses more than 4 GB of memory;
+- is killed once the disk it runs on has lost more than 5 GB of free space
+  since it started;
 - waits for one of a set of slots that every test process on the machine
   shares, so the tests running at once never need more memory than there is.
 
@@ -27,7 +29,7 @@ dev_dependencies:
     git:
       url: https://github.com/kai-tw/kai-packages
       path: packages/test_toolkit
-      ref: test_toolkit-v0.1.0
+      ref: test_toolkit-v0.2.0
 ```
 
 `flutter test` uses only the `flutter_test_config.dart` nearest to each test
@@ -41,7 +43,8 @@ One `flutter test` starts a `flutter_tester` for each test file it runs at
 once. Two things fill the machine's memory:
 
 - **A runaway test.** A test stuck in a loop that keeps allocating can take
-  its `flutter_tester` to tens of gigabytes.
+  its `flutter_tester` to tens of gigabytes. One stuck in a loop that keeps
+  logging does the same to the disk: one wrote a 38 GB log file.
 - **Too many tests at once.** Several `flutter test` runs, from editor
   sessions, agents or a mutation tester, each start as many testers as they
   like. None of them sees the others.
@@ -53,6 +56,14 @@ once. Two things fill the machine's memory:
    Over the limit, it prints why and kills the process with `SIGKILL`.
    `flutter test` reports that test file as failed and carries on with the
    others.
+
+   A **disk limit**, 5 GB by default (`maxWrittenGigabytes`), works the same
+   way. Every second it reads the free space on the disk the test runs on,
+   with `df`, and kills the process once that's 5 GB less than when it
+   started. It watches free space rather than one file, so it catches a log
+   wherever the test writes it. Another program writing a lot at the same
+   time counts too. A fast disk can write a few more gigabytes in the second
+   between two reads.
 2. **Kills leftover test processes**: `flutter_tester`s, `flutter test`
    tools, their compilers and development services that this user owns and
    whose parent is gone. Killing `flutter test` outright leaves its testers
