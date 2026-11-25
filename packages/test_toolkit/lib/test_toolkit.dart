@@ -1,4 +1,5 @@
-/// Keeps `flutter test` from using more memory than the machine has.
+/// Keeps `flutter test` from using more memory than the machine has, or
+/// filling its disk.
 ///
 /// [prepareTestProcess], called from `flutter_test_config.dart`, is the usual
 /// way in. The rest is for a tool that starts test processes itself and has
@@ -7,6 +8,7 @@ library;
 
 import 'src/prepare_test_process.dart';
 
+export 'src/disk_limit.dart';
 export 'src/held_slots.dart';
 export 'src/memory_limit.dart';
 export 'src/memory_probe.dart';

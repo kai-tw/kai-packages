@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:path/path.dart' as p;
 
+import 'disk_limit.dart';
 import 'held_slots.dart';
 import 'memory_limit.dart';
 import 'memory_probe.dart';
@@ -19,9 +20,12 @@ final List<HeldSlots> _held = <HeldSlots>[];
 const int _gigabyte = 1024 * 1024 * 1024;
 
 /// Keeps this test process, and every test process on the machine together,
-/// within the memory there is.
+/// within the memory there is, and keeps a runaway test from filling the disk.
 ///
 /// - Kills this process once it uses more than [maxGigabytes] of memory.
+/// - Kills this process once the disk it runs on has lost more than
+///   [maxWrittenGigabytes] of free space since it started, as when a test
+///   keeps writing to a log file.
 /// - Kills leftover test processes whose parent is gone.
 /// - Waits for free memory and for one of the machine's test slots, which
 ///   every test process shares, so the processes running at once fit.
@@ -49,13 +53,15 @@ const int _gigabyte = 1024 * 1024 * 1024;
 /// another: `$TEST_QUEUE_HELD` says so. A mutation tester that takes a slot
 /// for each test process it starts sets it.
 ///
-/// Throws an [ArgumentError] when [maxGigabytes] is below 1, a
+/// Throws an [ArgumentError] when [maxGigabytes] or [maxWrittenGigabytes] is
+/// below 1, a
 /// [FormatException] when a `TEST_QUEUE_*` variable can't be used, and a
 /// [SlotTimeoutException] when no slot comes free within [slotWait].
 /// `flutter test` then reports the test file as failed to load, with the
 /// exception's message.
 Future<void> prepareTestProcess({
   int maxGigabytes = 4,
+  int maxWrittenGigabytes = 5,
   Duration slotWait = const Duration(minutes: 30),
 }) async {
   if (maxGigabytes < 1) {
@@ -65,7 +71,15 @@ Future<void> prepareTestProcess({
       'must be 1 or more',
     );
   }
+  if (maxWrittenGigabytes < 1) {
+    throw ArgumentError.value(
+      maxWrittenGigabytes,
+      'maxWrittenGigabytes',
+      'must be 1 or more',
+    );
+  }
   await MemoryLimit(maxBytes: maxGigabytes * _gigabyte).start();
+  await DiskLimit(maxWrittenBytes: maxWrittenGigabytes * _gigabyte).start();
 
   final Map<String, String> env = Platform.environment;
   if ((env[QueueSettings.heldVariable] ?? '').trim().isNotEmpty) {
